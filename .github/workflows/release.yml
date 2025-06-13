@@ -18,7 +18,7 @@ jobs:
         ref: ${{ github.ref }}  # Use the tag ref to get the updated commit
 
     - name: Install uv
-      uses: astral-sh/setup-uv@v4
+      uses: astral-sh/setup-uv@v6
 
     - name: Set up Python
       run: uv python install 3.11
