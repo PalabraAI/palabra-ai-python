@@ -5,14 +5,13 @@ import time
 from dataclasses import KW_ONLY, dataclass, field
 from typing import Any
 
-from loguru import logger
-
 from palabra_ai.base.enum import Channel, Direction
 from palabra_ai.base.task import Task
-from palabra_ai.config import SLEEP_INTERVAL_LONG, Config
+from palabra_ai.config import Config
+from palabra_ai.constant import SHUTDOWN_TIMEOUT, SLEEP_INTERVAL_LONG
 from palabra_ai.internal.realtime import PalabraRTClient
 from palabra_ai.util.fanout_queue import FanoutQueue
-from palabra_ai.util.logger import debug, warning
+from palabra_ai.util.logger import debug
 
 
 @dataclass
@@ -48,39 +47,45 @@ class Realtime(Task):
                 for to_q in to_qs:
                     to_q.publish(RtMsg(ch, dir, msg))
                 from_q.task_done()
+                if msg is None:
+                    debug(f"Received None in {ch} {dir}, stopping reroute...")
+                    break
             except TimeoutError:
                 continue
 
     def _reroute_ws_in(self):
-        ws_in_q = self.c.wsc.ws_raw_in_foq.subscribe("rtc_task", maxsize=0)
-        self._tg.create_task(
+        ws_in_q = self.c.wsc.ws_raw_in_foq.subscribe(self, maxsize=0)
+        self.sub_tg.create_task(
             self._reroute(
                 Channel.WS, Direction.IN, ws_in_q, [self.in_foq, self.ws_in_foq]
-            )
+            ),
+            name="Rt:reroute_ws_in",
         )
 
     def _reroute_ws_out(self):
-        ws_out_q = self.c.wsc.ws_out_foq.subscribe("rtc_task", maxsize=0)
-        self._tg.create_task(
+        ws_out_q = self.c.wsc.ws_out_foq.subscribe(self, maxsize=0)
+        self.sub_tg.create_task(
             self._reroute(
                 Channel.WS, Direction.OUT, ws_out_q, [self.out_foq, self.ws_out_foq]
-            )
+            ),
+            name="Rt:reroute_ws_out",
         )
 
     def _reroute_webrtc_out(self):
-        webrtc_out_q = self.c.room.out_foq.subscribe("rtc_task", maxsize=0)
-        self._tg.create_task(
+        webrtc_out_q = self.c.room.out_foq.subscribe(self, maxsize=0)
+        self.sub_tg.create_task(
             self._reroute(
                 Channel.WEBRTC,
                 Direction.OUT,
                 webrtc_out_q,
                 [self.out_foq, self.webrtc_out_foq],
-            )
+            ),
+            name="Rt:reroute_webrtc_out",
         )
 
-    async def run(self):
-        debug("Creating PalabraRTCClient client...")
+    async def boot(self):
         self.c = PalabraRTClient(
+            self.sub_tg,
             self.credentials.publisher[0],
             self.credentials.control_url,
             self.credentials.stream_url,
@@ -88,19 +93,16 @@ class Realtime(Task):
         self._reroute_ws_in()
         self._reroute_ws_out()
         self._reroute_webrtc_out()
+        await self.c.connect()
 
-        try:
-            await self.c.connect()
-        except asyncio.CancelledError:
-            warning("PalabraRTClient new_instance cancelled")
-            await self.c.close()
-            raise
+    async def do(self):
+        while not self.stopper:
+            await asyncio.sleep(SLEEP_INTERVAL_LONG)
 
-        logger.debug("WebRTC client connected")
-        +self.ready  # noqa
-
-        try:
-            while not self.stopper:
-                await asyncio.sleep(SLEEP_INTERVAL_LONG)
-        finally:
-            await self.c.close()
+    async def exit(self):
+        self.in_foq.publish(None)
+        self.out_foq.publish(None)
+        self.ws_in_foq.publish(None)
+        self.ws_out_foq.publish(None)
+        self.webrtc_out_foq.publish(None)
+        await asyncio.wait_for(self.c.close(), timeout=SHUTDOWN_TIMEOUT)

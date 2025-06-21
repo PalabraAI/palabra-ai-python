@@ -1,17 +1,9 @@
 import asyncio
-import logging
 from typing import Any, NamedTuple
-
-logger = logging.getLogger(__name__)
-
-
-class QueueFullError(Exception):
-    pass
 
 
 class Subscription(NamedTuple):
     queue: asyncio.Queue
-    fail_on_full: bool
 
 
 class FanoutQueue:
@@ -19,20 +11,21 @@ class FanoutQueue:
         self.subscribers: dict[str, Subscription] = {}
         self._lock = asyncio.Lock()
 
-    def subscribe(
-        self, subscriber: Any, maxsize: int = 0, fail_on_full: bool = True
-    ) -> asyncio.Queue:
+    def _get_id(self, subscriber: Any) -> str:
         if not isinstance(subscriber, str):
-            subscriber_id = id(subscriber)
-        else:
-            subscriber_id = subscriber
+            return str(id(subscriber))
+        return subscriber
+
+    def subscribe(self, subscriber: Any, maxsize: int = 0) -> asyncio.Queue:
+        subscriber_id = self._get_id(subscriber)
         if subscriber_id not in self.subscribers:
             queue = asyncio.Queue(maxsize)
-            self.subscribers[subscriber_id] = Subscription(queue, fail_on_full)
+            self.subscribers[subscriber_id] = Subscription(queue)
             return queue
         return self.subscribers[subscriber_id].queue
 
-    def unsubscribe(self, subscriber_id: str) -> None:
+    def unsubscribe(self, subscriber: Any) -> None:
+        subscriber_id = self._get_id(subscriber)
         self.subscribers.pop(subscriber_id, None)
 
     def publish(self, message: Any) -> None:

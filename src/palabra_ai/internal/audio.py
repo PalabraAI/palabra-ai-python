@@ -1,6 +1,5 @@
 import asyncio
 import errno
-import logging
 import time
 from fractions import Fraction
 from io import BytesIO
@@ -11,13 +10,15 @@ import librosa
 import numpy as np
 from aiofile import async_open
 
+from palabra_ai.util.logger import debug, error
+
 
 async def write_to_disk(file_path: str | Path, body: bytes) -> int:
     try:
         async with async_open(file_path, "wb") as f:
             return await f.write(body)
     except asyncio.CancelledError:
-        logging.warning(f"write_to_disk cancelled for {file_path}")
+        debug(f"write_to_disk cancelled for {file_path}")
         raise
 
 
@@ -26,7 +27,7 @@ async def read_from_disk(file_path: str | Path) -> bytes:
         async with async_open(file_path, "rb") as afp:
             return await afp.read()
     except asyncio.CancelledError:
-        logging.warning(f"read_from_disk cancelled for {file_path}")
+        debug(f"read_from_disk cancelled for {file_path}")
         raise
 
 
@@ -151,12 +152,10 @@ def convert_any_to_pcm16(
         output_buffer.seek(0)
         return output_buffer.read()
     except av.AVError as e:
-        logging.error("Failed to convert audio using libav with: %s", str(e))
+        error("Failed to convert audio using libav with: %s", str(e))
         raise
     finally:
-        logging.debug(
-            f"Conversion took {time.perf_counter() - before_conversion:.3f} seconds"
-        )
+        debug(f"Conversion took {time.perf_counter() - before_conversion:.3f} seconds")
 
 
 def pull_until_blocked(graph):

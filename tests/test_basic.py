@@ -12,8 +12,3 @@ def test_version():
     from palabra_ai import __version__
     assert __version__ is not None
     assert isinstance(__version__, str)
-
-
-def test_true():
-    """Basic sanity test."""
-    assert True

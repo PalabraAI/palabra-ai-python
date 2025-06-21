@@ -1,8 +1,9 @@
 import asyncio
 
 import aiohttp
-from loguru import logger
 from pydantic import BaseModel, Field
+
+from palabra_ai.util.logger import error, warning
 
 
 class SessionCredentials(BaseModel):
@@ -59,10 +60,10 @@ class PalabraRESTClient:
             return SessionCredentials.model_validate(body["data"])
 
         except asyncio.CancelledError:
-            logger.warning("PalabraRESTClient create_session cancelled")
+            warning("PalabraRESTClient create_session cancelled")
             raise
         except Exception as e:
-            logger.error(f"Error creating session: {e}")
+            error(f"Error creating session: {e}")
             raise
         finally:
             if session:

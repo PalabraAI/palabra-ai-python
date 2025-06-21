@@ -7,5 +7,5 @@ check:
 lint: format check
 
 test:
-	uv run pytest -vs --cov=src --cov-report=term-missing
+	uv run pytest
 

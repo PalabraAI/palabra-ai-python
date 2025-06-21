@@ -1,5 +1,4 @@
 import asyncio
-import logging
 import uuid
 
 import numpy as np
@@ -7,6 +6,7 @@ from livekit import rtc
 
 from palabra_ai.base.message import Message
 from palabra_ai.util.fanout_queue import FanoutQueue
+from palabra_ai.util.logger import debug, error
 
 _PALABRA_TRANSLATOR_PARTICIPANT_IDENTITY_PREFIX = "palabra_translator_"
 _PALABRA_TRANSLATOR_TRACK_NAME_PREFIX = "translation_"
@@ -65,9 +65,9 @@ class AudioPublication:
             self.publication = await self.room_client.local_participant.publish_track(
                 self.track_settings.audio_track, self.track_settings.track_options
             )
-            logging.debug("Published track %s", self.publication.sid)
+            debug("Published track %s", self.publication.sid)
         except asyncio.CancelledError:
-            logging.warning("AudioPublication create cancelled")
+            debug("AudioPublication create cancelled")
             raise
         return self
 
@@ -77,9 +77,9 @@ class AudioPublication:
                 await self.room_client.local_participant.unpublish_track(
                     self.publication.track.sid
                 )
-                logging.debug("Unpublished track %s", self.publication.sid)
+                debug("Unpublished track %s", self.publication.sid)
             except asyncio.CancelledError:
-                logging.warning("AudioPublication close cancelled")
+                debug("AudioPublication close cancelled")
                 try:
                     await asyncio.wait_for(
                         self.room_client.local_participant.unpublish_track(
@@ -88,9 +88,9 @@ class AudioPublication:
                         timeout=1.0,
                     )
                 except (TimeoutError, asyncio.CancelledError):
-                    logging.error("AudioPublication force unpublish failed")
+                    error("AudioPublication force unpublish failed")
             except Exception as e:
-                logging.error(f"Error unpublishing track: {e}")
+                error(f"Error unpublishing track: {e}")
         self.publication = None
 
     async def push(self, audio_bytes: bytes) -> None:
@@ -117,7 +117,7 @@ class AudioPublication:
                 await self.track_settings.audio_source.capture_frame(audio_frame)
                 await asyncio.sleep(0.01)
         except asyncio.CancelledError:
-            logging.warning("AudioPublication push cancelled")
+            debug("AudioPublication push cancelled")
             raise
 
 
@@ -158,12 +158,12 @@ class RoomClient(rtc.Room):
     ):
         options = options if options is not None else rtc.RoomOptions()
 
-        logging.debug("connecting to %s", url)
+        debug("connecting to %s", url)
         try:
             await super().connect(url, token, options=options)
-            logging.debug("connected to room %s", self.name)
+            debug("connected to room %s", self.name)
         except asyncio.CancelledError:
-            logging.warning("RoomClient connect cancelled")
+            debug("RoomClient connect cancelled")
             raise
 
     async def close(self) -> None:
@@ -171,21 +171,21 @@ class RoomClient(rtc.Room):
             try:
                 await publication.close()
             except asyncio.CancelledError:
-                logging.warning("RoomClient publication close cancelled")
+                debug("RoomClient publication close cancelled")
                 continue
             except Exception as e:
-                logging.error(f"Error closing publication: {e}")
+                error(f"Error closing publication: {e}")
 
         try:
             await self.disconnect()
         except asyncio.CancelledError:
-            logging.warning("RoomClient disconnect cancelled")
+            debug("RoomClient disconnect cancelled")
             try:
                 await asyncio.wait_for(self.disconnect(), timeout=1.0)
             except (TimeoutError, asyncio.CancelledError):
-                logging.error("RoomClient force disconnect failed")
+                error("RoomClient force disconnect failed")
         except Exception as e:
-            logging.error(f"Error disconnecting: {e}")
+            error(f"Error disconnecting: {e}")
 
     async def new_publication(
         self, track_settings: AudioTrackSettings
@@ -195,7 +195,7 @@ class RoomClient(rtc.Room):
             translator_participant = await self.wait_for_participant_join(
                 _PALABRA_TRANSLATOR_PARTICIPANT_IDENTITY_PREFIX, timeout=5
             )
-            logging.debug(
+            debug(
                 "Palabra translator participant joined: %s",
                 translator_participant.identity,
             )
@@ -204,7 +204,7 @@ class RoomClient(rtc.Room):
                 "Timeout. Palabra translator did not appear in the room"
             ) from None
         except asyncio.CancelledError:
-            logging.warning("RoomClient new_publication cancelled")
+            debug("RoomClient new_publication cancelled")
             await publication.close()
             raise
         self._publications.append(publication)
@@ -225,7 +225,7 @@ class RoomClient(rtc.Room):
                 try:
                     await asyncio.sleep(0.01)
                 except asyncio.CancelledError:
-                    logging.warning("wait_for_participant_join sleep cancelled")
+                    debug("wait_for_participant_join sleep cancelled")
                     raise
 
         if timeout is None:
@@ -233,7 +233,7 @@ class RoomClient(rtc.Room):
         try:
             return await asyncio.wait_for(f(), timeout=timeout)
         except asyncio.CancelledError:
-            logging.warning("wait_for_participant_join cancelled")
+            debug("wait_for_participant_join cancelled")
             raise
 
     async def wait_for_track_publish(
@@ -253,7 +253,7 @@ class RoomClient(rtc.Room):
                 try:
                     await asyncio.sleep(0.01)
                 except asyncio.CancelledError:
-                    logging.warning("wait_for_track_publish sleep cancelled")
+                    debug("wait_for_track_publish sleep cancelled")
                     raise
 
         if timeout is None:
@@ -261,13 +261,13 @@ class RoomClient(rtc.Room):
         try:
             return await asyncio.wait_for(f(), timeout=timeout)
         except asyncio.CancelledError:
-            logging.warning("wait_for_track_publish cancelled")
+            debug("wait_for_track_publish cancelled")
             raise
 
     def on_data_received(self, data: rtc.DataPacket):
-        logging.debug("received data from %s: %s", data.participant.identity, data.data)
+        debug("received data from %s: %s", data.participant.identity, data.data)
         # Publish to fanout queue
-        logging.debug(f"Received packet: {data}"[:100])
+        debug(f"Received packet: {data}"[:100])
         msg = Message.decode(data.data)
         self.out_foq.publish(msg)
 
@@ -276,7 +276,7 @@ class RoomClient(rtc.Room):
         publication: rtc.RemoteTrackPublication,
         participant: rtc.RemoteParticipant,
     ):
-        logging.debug(
+        debug(
             "track published: %s from participant %s (%s)",
             publication.sid,
             participant.sid,
@@ -288,30 +288,26 @@ class RoomClient(rtc.Room):
         publication: rtc.RemoteTrackPublication,
         participant: rtc.RemoteParticipant,
     ):
-        logging.debug("track unpublished: %s", publication.sid)
+        debug("track unpublished: %s", publication.sid)
 
     def on_participant_connected(self, participant: rtc.RemoteParticipant) -> None:
-        logging.debug(
-            "participant connected: %s %s", participant.sid, participant.identity
-        )
+        debug("participant connected: %s %s", participant.sid, participant.identity)
 
     def on_participant_disconnected(self, participant: rtc.RemoteParticipant):
-        logging.debug(
-            "participant disconnected: %s %s", participant.sid, participant.identity
-        )
+        debug("participant disconnected: %s %s", participant.sid, participant.identity)
 
     def on_local_track_published(
         self,
         publication: rtc.LocalTrackPublication,
         track: rtc.LocalAudioTrack | rtc.LocalVideoTrack,
     ):
-        logging.debug("local track published: %s", publication.sid)
+        debug("local track published: %s", publication.sid)
 
     def on_active_speakers_changed(self, speakers: list[rtc.Participant]):
-        logging.debug("active speakers changed: %s", speakers)
+        debug("active speakers changed: %s", speakers)
 
     def on_local_track_unpublished(self, publication: rtc.LocalTrackPublication):
-        logging.debug("local track unpublished: %s", publication.sid)
+        debug("local track unpublished: %s", publication.sid)
 
     def on_track_subscribed(
         self,
@@ -319,11 +315,11 @@ class RoomClient(rtc.Room):
         publication: rtc.RemoteTrackPublication,
         participant: rtc.RemoteParticipant,
     ):
-        logging.debug("track subscribed: %s", publication.sid)
+        debug("track subscribed: %s", publication.sid)
         if track.kind == rtc.TrackKind.KIND_VIDEO:
             _video_stream = rtc.VideoStream(track)
         elif track.kind == rtc.TrackKind.KIND_AUDIO:
-            logging.debug("Subscribed to an Audio Track")
+            debug("Subscribed to an Audio Track")
             _audio_stream = rtc.AudioStream(track)
 
     def on_track_unsubscribed(
@@ -332,43 +328,43 @@ class RoomClient(rtc.Room):
         publication: rtc.RemoteTrackPublication,
         participant: rtc.RemoteParticipant,
     ):
-        logging.debug("track unsubscribed: %s", publication.sid)
+        debug("track unsubscribed: %s", publication.sid)
 
     def on_track_muted(
         self,
         publication: rtc.RemoteTrackPublication,
         participant: rtc.RemoteParticipant,
     ):
-        logging.debug("track muted: %s", publication.sid)
+        debug("track muted: %s", publication.sid)
 
     def on_track_unmuted(
         self,
         publication: rtc.RemoteTrackPublication,
         participant: rtc.RemoteParticipant,
     ):
-        logging.debug("track unmuted: %s", publication.sid)
+        debug("track unmuted: %s", publication.sid)
 
     def on_connection_quality_changed(
         self, participant: rtc.Participant, quality: rtc.ConnectionQuality
     ):
-        logging.debug("connection quality changed for %s", participant.identity)
+        debug("connection quality changed for %s", participant.identity)
 
     def on_track_subscription_failed(
         self, participant: rtc.RemoteParticipant, track_sid: str, error: str
     ):
-        logging.debug("track subscription failed: %s %s", participant.identity, error)
+        debug("track subscription failed: %s %s", participant.identity, error)
 
     def on_connection_state_changed(self, state: rtc.ConnectionState):
-        logging.debug("connection state changed: %s", state)
+        debug("connection state changed: %s", state)
 
     def on_connected(self) -> None:
-        logging.debug("connected")
+        debug("connected")
 
     def on_disconnected(self) -> None:
-        logging.debug("disconnected")
+        debug("disconnected")
 
     def on_reconnecting(self) -> None:
-        logging.debug("reconnecting")
+        debug("reconnecting")
 
     def on_reconnected(self) -> None:
-        logging.debug("reconnected")
+        debug("reconnected")

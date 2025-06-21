@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
-from typing import Annotated, Any
+from typing import TYPE_CHECKING, Annotated, Any, Optional
 
 from environs import Env
 from pydantic import (
@@ -16,87 +15,49 @@ from pydantic import (
 )
 
 from palabra_ai.base.message import Message
+from palabra_ai.constant import (
+    CONTEXT_SIZE_DEFAULT,
+    DESIRED_QUEUE_LEVEL_MS_DEFAULT,
+    ENERGY_VARIANCE_FACTOR_DEFAULT,
+    F0_VARIANCE_FACTOR_DEFAULT,
+    FORCE_END_OF_SEGMENT_DEFAULT,
+    MAX_ALIGNMENT_CER_DEFAULT,
+    MAX_QUEUE_LEVEL_MS_DEFAULT,
+    MAX_STEPS_WITHOUT_EOS_DEFAULT,
+    MIN_ALIGNMENT_SCORE_DEFAULT,
+    MIN_SENTENCE_CHARACTERS_DEFAULT,
+    MIN_SENTENCE_SECONDS_DEFAULT,
+    MIN_SPLIT_INTERVAL_DEFAULT,
+    MIN_TRANSCRIPTION_LEN_DEFAULT,
+    MIN_TRANSCRIPTION_TIME_DEFAULT,
+    PHRASE_CHANCE_DEFAULT,
+    SEGMENT_CONFIRMATION_SILENCE_THRESHOLD_DEFAULT,
+    SEGMENTS_AFTER_RESTART_DEFAULT,
+    SPEECH_TEMPO_ADJUSTMENT_FACTOR_DEFAULT,
+    STEP_SIZE_DEFAULT,
+    VAD_LEFT_PADDING_DEFAULT,
+    VAD_RIGHT_PADDING_DEFAULT,
+    VAD_THRESHOLD_DEFAULT,
+)
 from palabra_ai.exc import ConfigurationError
 from palabra_ai.lang import Language
-from palabra_ai.types import T_IN_PCM, T_ON_TRANSCRIPTION, T_OUT_PCM
+from palabra_ai.types import T_ON_TRANSCRIPTION
 from palabra_ai.util.logger import set_logging
+from palabra_ai.util.orjson import from_json, to_json
+
+if TYPE_CHECKING:
+    from palabra_ai.base.adapter import Reader, Writer
 
 env = Env(prefix="PALABRA_")
 env.read_env()
+CLIENT_ID = env.str("CLIENT_ID", default=None)
+CLIENT_SECRET = env.str("CLIENT_SECRET", default=None)
+SILENT = env.bool("SILENT", default=False)
 DEBUG = env.bool("DEBUG", default=False)
+DEEP_DEBUG = env.bool("DEEP_DEBUG", default=False)
+DEEPEST_DEBUG = env.bool("DEEPEST_DEBUG", default=False)
+TIMEOUT = env.int("TIMEOUT", default=0)
 LOG_FILE = env.path("LOG_FILE", default=None)
-
-
-# Audio Processing Constants
-CHUNK_SIZE = 16384
-SAMPLE_RATE_DEFAULT = 48000
-SAMPLE_RATE_HALF = 24000
-CHANNELS_MONO = 1
-OUTPUT_DEVICE_BLOCK_SIZE = 1024
-AUDIO_CHUNK_SECONDS = 0.5
-
-# Timing Constants
-SAFE_PUBLICATION_END_DELAY = 10.0
-MONITOR_TIMEOUT = 0.1
-DEFAULT_PROCESS_TIMEOUT = 300.0
-TRACK_WAIT_TIMEOUT = 30.0
-FINALIZE_WAIT_TIME = 5.0
-SLEEP_INTERVAL_DEFAULT = 0.1
-SLEEP_INTERVAL_LONG = 1.0
-SLEEP_INTERVAL_BUFFER_CHECK = 5.0
-QUEUE_READ_TIMEOUT = 1.0
-QUEUE_WAIT_TIMEOUT = 0.5
-
-# Retry and Counter Constants
-TRACK_RETRY_MAX_ATTEMPTS = 30
-TRACK_RETRY_DELAY = 1.0
-GET_TASK_WAIT_TIMEOUT = 5.0
-
-# Buffer and Queue Constants
-THREADPOOL_MAX_WORKERS = 32
-DEVICE_ID_HASH_LENGTH = 8
-MONITOR_MESSAGE_PREVIEW_LENGTH = 100
-AUDIO_PROGRESS_LOG_INTERVAL = 100000
-
-# EOF and Completion Constants
-EMPTY_MESSAGE_THRESHOLD = 10
-EOF_DRAIN_TIMEOUT = 5.0
-COMPLETION_WAIT_TIMEOUT = 2.0
-STATS_LOG_INTERVAL = 1.0
-
-# Preprocessing Constants
-MIN_SENTENCE_CHARACTERS_DEFAULT = 80
-MIN_SENTENCE_SECONDS_DEFAULT = 4
-MIN_SPLIT_INTERVAL_DEFAULT = 0.6
-CONTEXT_SIZE_DEFAULT = 30
-SEGMENTS_AFTER_RESTART_DEFAULT = 15
-STEP_SIZE_DEFAULT = 5
-MAX_STEPS_WITHOUT_EOS_DEFAULT = 3
-FORCE_END_OF_SEGMENT_DEFAULT = 0.5
-
-# Filler Phrases Constants
-MIN_TRANSCRIPTION_LEN_DEFAULT = 40
-MIN_TRANSCRIPTION_TIME_DEFAULT = 3
-PHRASE_CHANCE_DEFAULT = 0.5
-
-# TTS Constants
-F0_VARIANCE_FACTOR_DEFAULT = 1.2
-ENERGY_VARIANCE_FACTOR_DEFAULT = 1.5
-SPEECH_TEMPO_ADJUSTMENT_FACTOR_DEFAULT = 0.75
-
-# Queue Config Constants
-DESIRED_QUEUE_LEVEL_MS_DEFAULT = 8000
-MAX_QUEUE_LEVEL_MS_DEFAULT = 24000
-
-# TranscriptionMessage Constants
-MIN_ALIGNMENT_SCORE_DEFAULT = 0.2
-MAX_ALIGNMENT_CER_DEFAULT = 0.8
-SEGMENT_CONFIRMATION_SILENCE_THRESHOLD_DEFAULT = 0.7
-
-# VAD Constants
-VAD_THRESHOLD_DEFAULT = 0.5
-VAD_LEFT_PADDING_DEFAULT = 1
-VAD_RIGHT_PADDING_DEFAULT = 1
 
 
 def validate_language(v):
@@ -220,6 +181,10 @@ class SpeechGen(BaseModel):
     advanced: TTSAdvanced = Field(default_factory=TTSAdvanced)
 
 
+class TranslationAdvanced(BaseModel):
+    pass  # Empty for now, can be extended later
+
+
 class Translation(BaseModel):
     allowed_source_languages: list[str] = []
     translation_model: str = "auto"
@@ -227,11 +192,13 @@ class Translation(BaseModel):
     style: str | None = None
     translate_partial_transcriptions: bool = False
     speech_generation: SpeechGen = Field(default_factory=SpeechGen)
+    advanced: TranslationAdvanced = Field(default_factory=TranslationAdvanced)
 
 
 class QueueConfig(BaseModel):
     desired_queue_level_ms: int = DESIRED_QUEUE_LEVEL_MS_DEFAULT
     max_queue_level_ms: int = MAX_QUEUE_LEVEL_MS_DEFAULT
+    auto_tempo: bool = False
 
 
 class QueueConfigs(BaseModel):
@@ -241,68 +208,74 @@ class QueueConfigs(BaseModel):
 
 class SourceLang(BaseModel):
     lang: LanguageField
-    transcription: Transcription = Field(default_factory=Transcription)
 
-    _in_pcm: T_IN_PCM = PrivateAttr(default=None)
+    _reader: Reader | None = PrivateAttr(default=None)
     _on_transcription: T_ON_TRANSCRIPTION | None = PrivateAttr(default=None)
+
+    transcription: Transcription = Field(default_factory=Transcription)
 
     def __init__(
         self,
         lang: LanguageField,
-        in_pcm: T_IN_PCM,
-        /,
+        reader: Reader | None = None,
         on_transcription: T_ON_TRANSCRIPTION | None = None,
         **kwargs,
     ):
         super().__init__(lang=lang, **kwargs)
-        self._in_pcm = in_pcm
-        self._on_transcription = on_transcription
-
-    def merge_transcription(self, other: Transcription | None):
-        if other:
-            self.transcription = self.transcription.model_copy(
-                update=other.model_dump(exclude_unset=True)
+        if on_transcription and not callable(on_transcription):
+            raise ConfigurationError(
+                f"on_transcription should be a callable function, got {type(on_transcription)}"
             )
+        self._on_transcription = on_transcription
+        self._reader = reader
+
+    @property
+    def reader(self) -> Reader:
+        return self._reader
+
+    @property
+    def on_transcription(self) -> T_ON_TRANSCRIPTION | None:
+        return self._on_transcription
 
 
 class TargetLang(BaseModel):
     lang: LanguageField
-    translation: Translation = Field(default_factory=Translation)
 
-    # TODO: get sync and async callback and run in loop/thread automatically
-    _out_pcm: T_OUT_PCM | None = PrivateAttr(default=None)
-    _on_transcription: T_ON_TRANSCRIPTION | None = PrivateAttr(
-        default=None
-    )  # TODO: DO IT!
+    _writer: Writer | None = PrivateAttr(default=None)
+    _on_transcription: T_ON_TRANSCRIPTION | None = PrivateAttr(default=None)
+
+    translation: Translation = Field(default_factory=Translation)
 
     def __init__(
         self,
         lang: LanguageField,
-        /,
-        out_pcm: T_OUT_PCM = None,
-        on_transcription: T_ON_TRANSCRIPTION = None,
+        writer: Optional[Writer] = None,
+        on_transcription: Optional[T_ON_TRANSCRIPTION] = None,
         **kwargs,
     ):
         super().__init__(lang=lang, **kwargs)
-        if not any([out_pcm, on_transcription]):
+        if on_transcription and not callable(on_transcription):
             raise ConfigurationError(
-                f"Use translated audio or transcription for lang: {self.lang}"
+                f"on_transcription should be a callable function, got {type(on_transcription)}"
             )
-        self._out_pcm = out_pcm
+        self._writer = writer
         self._on_transcription = on_transcription
 
-    def merge_translation(self, other: Translation | None):
-        if other:
-            self.translation = self.translation.model_copy(
-                update=other.model_dump(exclude_unset=True)
-            )
+    @property
+    def writer(self) -> Optional[Writer]:
+        return self._writer
+
+    @property
+    def on_transcription(self) -> T_ON_TRANSCRIPTION | None:
+        return self._on_transcription
 
 
 class Config(BaseModel):
-    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+    model_config = ConfigDict(populate_by_name=True)
 
-    source: SourceLang
-    targets: list[TargetLang]  # TODO: SIMULTANEOUS TRANSLATION!!!
+    source: SourceLang | None = Field(default=None)
+    # TODO: SIMULTANEOUS TRANSLATION!!!
+    targets: list[TargetLang] | None = Field(default=None)
 
     input_stream: InputStream = Field(default_factory=InputStream)
     output_stream: OutputStream = Field(default_factory=OutputStream)
@@ -310,52 +283,71 @@ class Config(BaseModel):
     translation_queue_configs: QueueConfigs = Field(default_factory=QueueConfigs)
     allowed_message_types: list[str] = [mt.value for mt in Message.ALLOWED_TYPES]
 
+    silent: bool = Field(default=SILENT, exclude=True)
     log_file: Path | str | None = Field(default=LOG_FILE, exclude=True)
     debug: bool = Field(default=DEBUG, exclude=True)
+    deep_debug: bool = Field(default=DEEP_DEBUG, exclude=True)
+    timeout: int = Field(default=TIMEOUT, exclude=True)  # TODO!
+
+    trace_file: Path | str | None = Field(default=None, exclude=True)
 
     def __init__(
-        self, source: SourceLang, targets: list[TargetLang] | TargetLang, **kwargs
+        self,
+        source: SourceLang | None = None,
+        targets: list[TargetLang] | TargetLang | None = None,
+        **kwargs,
     ):
-        if isinstance(targets, TargetLang):
-            targets = [targets]
-        super().__init__(source=source, targets=targets, **kwargs)
+        super().__init__(__from_init=True, **kwargs)
+        if not self.source:
+            self.source = source
+        if not self.targets:
+            self.targets = targets
 
     def model_post_init(self, context: Any, /) -> None:
-        if isinstance(self.targets, TargetLang):
+        if self.targets is None:
+            self.targets = []
+        elif isinstance(self.targets, TargetLang):
             self.targets = [self.targets]
         if self.log_file:
             self.log_file = Path(self.log_file).absolute()
             self.log_file.parent.mkdir(exist_ok=True, parents=True)
-        set_logging(self.debug, self.log_file)
+            self.trace_file = self.log_file.with_suffix(".trace.json")
+        set_logging(self.silent, self.debug, self.log_file)
         super().model_post_init(context)
 
     @model_validator(mode="before")
     @classmethod
-    def reconstruct_from_legacy(cls, data: Any) -> Any:
+    def reconstruct_from_serialized(cls, data: Any) -> Any:
         if not isinstance(data, dict):
             return data
+
+        __from_init = data.pop("__from_init", False)
 
         # Extract pipeline if exists
         if "pipeline" in data:
             pipeline = data.pop("pipeline")
             data.update(pipeline)
 
-        # Reconstruct src if not present
-        if "src" not in data and "transcription" in data:
-            trans_data = data.pop("transcription")
-            source_lang = trans_data.pop("source_language", None)
-            if source_lang:
-                data["src"] = {"lang": source_lang, "transcription": trans_data}
+        raw_source = data.pop("transcription", {})
+        source_lang = raw_source.pop("source_language", None)
+        if not __from_init and not source_lang:
+            raise ConfigurationError(
+                f"Source language must be specified in the transcription section. {raw_source}"
+            )
+        if source_lang:
+            data["source"] = {"lang": source_lang, "transcription": raw_source}
 
         # Reconstruct targets if not present
-        if "targets" not in data and "translations" in data:
-            translations = data.pop("translations")
-            targets = []
-            for trans in translations:
-                target_lang = trans.pop("target_language", None)
-                if target_lang:
-                    targets.append({"lang": target_lang, "translation": trans})
-            data["targets"] = targets
+        raw_targets = data.pop("translations", {})
+        targets = []
+        for raw_target in raw_targets:
+            target_lang = raw_target.pop("target_language", None)
+            if not __from_init and not target_lang:
+                raise ConfigurationError(
+                    f"Target language must be specified in the translation section. {raw_target}"
+                )
+            targets.append({"lang": target_lang, "translation": raw_target})
+        data["targets"] = targets
 
         return data
 
@@ -404,15 +396,15 @@ class Config(BaseModel):
     def to_dict(self) -> dict[str, Any]:
         return self.model_dump()
 
-    def to_json(self, indent=2) -> str:
-        return self.model_dump_json(indent=indent)
-
-    @classmethod
-    def from_json(cls, data: str | dict) -> Config:
-        if isinstance(data, str):
-            data = json.loads(data)
-        return cls.model_validate(data)
+    def to_json(self) -> str:
+        return to_json(self.model_dump()).decode("utf-8")
 
     @classmethod
     def from_dict(cls, data: dict) -> Config:
         return cls.from_json(data)
+
+    @classmethod
+    def from_json(cls, data: str | dict) -> Config:
+        if isinstance(data, str):
+            data = from_json(data)
+        return cls.model_validate(data)

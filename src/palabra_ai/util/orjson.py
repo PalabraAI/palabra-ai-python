@@ -4,7 +4,7 @@ from typing import Any
 
 import orjson
 
-from palabra_ai.util.logger import warning
+from palabra_ai.util.logger import debug
 
 
 def _default(obj: Any) -> Any:
@@ -15,7 +15,7 @@ def _default(obj: Any) -> Any:
             return obj.dict()
         return str(obj)
     except Exception as e:
-        warning("Failed to serialize object", exc_info=e)
+        debug("Failed to serialize object", exc_info=e)
         return str(obj)
 
 

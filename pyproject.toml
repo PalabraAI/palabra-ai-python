@@ -57,11 +57,12 @@ dev = [
     "ruff>=0.7.0",
     "pre-commit>=3.5.0",
     "rich>=14.0.0",
+    "dictdiffer>=0.9.0",
 ]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
-testpaths = ["tests"]
+testpaths = ["tests", "src"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 addopts = [
@@ -70,7 +71,9 @@ addopts = [
     "--cov-report=html",
     "--cov-branch",
     "--cov-fail-under=50",
+    "--doctest-modules"
 ]
+doctest_optionflags = ["NORMALIZE_WHITESPACE", "IGNORE_EXCEPTION_DETAIL"]
 
 [tool.coverage.run]
 source = ["palabra_ai"]
@@ -78,9 +81,10 @@ omit = [
     "*/tests/*",
     "*/test_*.py",
     "*/experimental/*",
+    "*/debug/*",
     "*/examples/*",
     "*/scripts/*"
-    ]
+]
 
 [tool.coverage.report]
 exclude_lines = [
@@ -99,6 +103,20 @@ exclude_lines = [
 [tool.ruff]
 line-length = 88
 target-version = "py311"
+exclude = [
+    "*/tests/*",
+    "*/test_*.py",
+    "*/experimental/*",
+    "*/debug/*",
+    "*/examples/*",
+    "*/scripts/*",
+    ".git",
+    "__pycache__",
+    "build",
+    "dist",
+    ".venv",
+    "venv",
+]
 
 [tool.ruff.lint]
 select = [

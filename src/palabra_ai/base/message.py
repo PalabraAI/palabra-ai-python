@@ -1,5 +1,4 @@
 import json
-import logging
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, ClassVar, Union
@@ -7,9 +6,7 @@ from typing import Any, ClassVar, Union
 from pydantic import BaseModel, Field, PrivateAttr, model_validator
 
 from palabra_ai.lang import Language
-from palabra_ai.util.logger import warning
-
-logger = logging.getLogger(__name__)
+from palabra_ai.util.logger import debug
 
 
 class KnownRawType(StrEnum):
@@ -94,7 +91,7 @@ class Message(BaseModel):
                 try:
                     data["data"] = json.loads(data["data"])
                 except json.JSONDecodeError:
-                    warning("Failed to decode nested JSON in 'data' field")
+                    debug("Failed to decode nested JSON in 'data' field")
 
             match data:
                 # Empty message first - exactly empty dict
@@ -121,18 +118,18 @@ class Message(BaseModel):
                         } if len(val) == 2:
                             return QueueStatusMessage.create(known_raw)
                         case _:
-                            warning(
+                            debug(
                                 f"Invalid queue status format. Expected {{current_queue_level_ms: int, max_queue_level_ms: int}}. Got: {val}"
                             )
                             return UnknownMessage.create(known_raw)
 
                 # Unknown format
                 case _:
-                    warning(f"Unknown message format: {known_raw}")
+                    debug(f"Unknown message format: {known_raw}")
                     return UnknownMessage.create(known_raw)
 
         except Exception as e:
-            warning(f"Failed to parse message: {e}. Data: {known_raw}")
+            debug(f"Failed to parse message: {e}. Data: {known_raw}")
             return UnknownMessage.create(known_raw)
 
     @classmethod

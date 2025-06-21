@@ -1,64 +1,43 @@
 import asyncio
-from asyncio import QueueFull
-
 import pytest
-
-from palabra_ai.util.fanout_queue import FanoutQueue, QueueFullError
+from palabra_ai.util.fanout_queue import FanoutQueue
 
 
 class TestFanoutQueue:
-    @pytest.mark.asyncio
-    async def test_subscribe_and_publish(self):
-        fanout = FanoutQueue()
+    def test_subscribe_operations(self):
+        foq = FanoutQueue()
+        subscriber = "test_subscriber"
 
-        # Create subscribers
-        sub1 = fanout.subscribe("sub1", maxsize=10)
-        sub2 = fanout.subscribe("sub2", maxsize=10)
+        # First subscription
+        q1 = foq.subscribe(subscriber)
+        assert len(foq.subscribers) == 1
 
-        # Publish message
-        fanout.publish("test_message")
+        # Second subscription - same queue
+        q2 = foq.subscribe(subscriber)
+        assert q1 is q2
+        assert len(foq.subscribers) == 1
 
-        # Both should receive
-        msg1 = await sub1.get()
-        msg2 = await sub2.get()
+    def test_unsubscribe_operations(self):
+        foq = FanoutQueue()
+        subscriber = "test_subscriber"
 
-        assert msg1 == "test_message"
-        assert msg2 == "test_message"
+        # Subscribe first
+        foq.subscribe(subscriber)
+        assert len(foq.subscribers) == 1
 
-    @pytest.mark.asyncio
-    async def test_unsubscribe(self):
-        fanout = FanoutQueue()
+        # Unsubscribe existing
+        foq.unsubscribe(subscriber)
+        assert len(foq.subscribers) == 0
 
-        sub = fanout.subscribe("test", maxsize=10)
-        assert "test" in fanout.subscribers
+        # Unsubscribe non-existing - should not error
+        foq.unsubscribe("non_existing")
+        assert len(foq.subscribers) == 0
 
-        fanout.unsubscribe("test")
-        assert "test" not in fanout.subscribers
+    def test_publish_with_none(self):
+        foq = FanoutQueue()
+        subscriber = "test"
+        q = foq.subscribe(subscriber)
 
-    @pytest.mark.asyncio
-    async def test_publish_to_full_queue_with_fail(self):
-        fanout = FanoutQueue()
-
-        # Create subscriber with fail_on_full=True
-        sub = fanout.subscribe("test", maxsize=1, fail_on_full=True)
-
-        # Fill the queue
-        fanout.publish("msg1")
-
-        # This should raise QueueFull
-        with pytest.raises(QueueFull):
-            fanout.publish("msg2")
-
-    def test_subscribers_property(self):
-        fanout = FanoutQueue()
-
-        # Initially empty
-        assert len(fanout.subscribers) == 0
-
-        # Add subscribers
-        fanout.subscribe("sub1", maxsize=10)
-        fanout.subscribe("sub2", maxsize=10)
-
-        assert len(fanout.subscribers) == 2
-        assert "sub1" in fanout.subscribers
-        assert "sub2" in fanout.subscribers
+        # Publish None should put None in queue
+        foq.publish(None)
+        assert q.get_nowait() is None

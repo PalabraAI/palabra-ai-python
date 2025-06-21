@@ -3,16 +3,21 @@ from __future__ import annotations
 import asyncio
 import time
 from dataclasses import KW_ONLY, dataclass, field
-from datetime import UTC, datetime
-from pathlib import Path
-from typing import Any
 
 import palabra_ai
 from palabra_ai.base.task import Task
-from palabra_ai.config import Config
+from palabra_ai.config import (
+    Config,
+)
+from palabra_ai.constant import (
+    QUEUE_READ_TIMEOUT,
+    SHUTDOWN_TIMEOUT,
+    SLEEP_INTERVAL_DEFAULT,
+)
 from palabra_ai.task.realtime import Realtime, RtMsg
-from palabra_ai.util.logger import ALL_LOGS, debug, error
+from palabra_ai.util.logger import debug
 from palabra_ai.util.orjson import to_json
+from palabra_ai.util.sysinfo import get_system_info
 
 
 @dataclass
@@ -21,90 +26,94 @@ class Logger(Task):
 
     cfg: Config
     rt: Realtime
-    config_dict: dict[str, Any]
     _: KW_ONLY
-    _txt_file: Any = field(default=None, init=False)
     _messages: list[RtMsg] = field(default_factory=list, init=False)
     _start_ts: float = field(default_factory=time.time, init=False)
     _rt_in_q: asyncio.Queue | None = field(default=None, init=False)
     _rt_out_q: asyncio.Queue | None = field(default=None, init=False)
-    _log_file: Path | str = field(default="", init=False)
+    _in_task: asyncio.Task | None = field(default=None, init=False)
+    _out_task: asyncio.Task | None = field(default=None, init=False)
 
     def __post_init__(self):
-        self._log_file = Path(self.cfg.log_file)
-        self._rt_in_q = self.rt.in_foq.subscribe("logger", maxsize=0)
-        self._rt_out_q = self.rt.out_foq.subscribe("logger", maxsize=0)
+        self._rt_in_q = self.rt.in_foq.subscribe(self, maxsize=0)
+        self._rt_out_q = self.rt.out_foq.subscribe(self, maxsize=0)
+
+    async def boot(self):
+        self._in_task = self.sub_tg.create_task(
+            self._consume(self._rt_in_q), name="Logger:rt_in"
+        )
+        self._out_task = self.sub_tg.create_task(
+            self._consume(self._rt_out_q), name="Logger:rt_out"
+        )
+        debug(f"Logger started, writing to {self.cfg.log_file}")
+
+    async def do(self):
+        # Wait for stopper
+        while not self.stopper:
+            await asyncio.sleep(SLEEP_INTERVAL_DEFAULT)
+        debug(f"{self.name} task stopped, exiting...")
+
+    async def exit(self):
+        debug("Finalizing Logger...")
+        if self._in_task:
+            self._in_task.cancel()
+        if self._out_task:
+            self._out_task.cancel()
+
+        logs = []
         try:
-            self._txt_file = open(self._log_file.with_suffix(".txt"), "a")
-        except Exception as e:
-            error(f"Failed to open log file: {e}")
-            raise
-
-    async def run(self):
-        await self.rt.ready
-        debug(f"Logger started, writing to {self._log_file}")
+            with open(self.cfg.log_file) as f:
+                logs = f.readlines()
+        except BaseException as e:
+            logs = ["Can't collect logs", str(e)]
 
         try:
-            async with asyncio.TaskGroup() as tg:
-                in_task = tg.create_task(self._consume(self._rt_in_q))
-                out_task = tg.create_task(self._consume(self._rt_out_q))
+            sysinfo = get_system_info()
+        except BaseException as e:
+            sysinfo = {"error": str(e)}
 
-                +self.ready  # noqa
+        json_data = {
+            "version": getattr(palabra_ai, "__version__", "n/a"),
+            "sysinfo": sysinfo,
+            "messages": self._messages,
+            "start_ts": self._start_ts,
+            "cfg": self.cfg,
+            "log_file": str(self.cfg.log_file),
+            "trace_file": str(self.cfg.trace_file),
+            "debug": self.cfg.debug,
+            "logs": logs,
+        }
 
-                # Wait for stopper
-                while not self.stopper:
-                    await asyncio.sleep(0.1)
+        with open(self.cfg.trace_file, "wb") as f:
+            f.write(to_json(json_data))
 
-                in_task.cancel()
-                out_task.cancel()
+        debug(f"Saved {len(self._messages)} messages to {self.cfg.trace_file}")
 
-        finally:
-            await self._finalize()
+        self.rt.in_foq.unsubscribe(self)
+        self.rt.out_foq.unsubscribe(self)
+
+        debug(f"{self.name} tasks cancelled, waiting for completion...")
+        await asyncio.gather(
+            asyncio.wait_for(self._in_task, timeout=SHUTDOWN_TIMEOUT),
+            asyncio.wait_for(self._out_task, timeout=SHUTDOWN_TIMEOUT),
+        )
+        debug(f"{self.name} tasks completed")
+
+    async def _exit(self):
+        return await self.exit()
 
     async def _consume(self, q: asyncio.Queue):
         """Process WebSocket messages."""
-        try:
-            while True:
-                rt_msg = await q.get()
-                await self._write_message(rt_msg)
+        while not self.stopper:
+            try:
+                rt_msg = await asyncio.wait_for(q.get(), timeout=QUEUE_READ_TIMEOUT)
+                if rt_msg is None:
+                    debug(f"Received None from {q}, stopping consumer")
+                    break
+                self._messages.append(rt_msg)
                 q.task_done()
-        except asyncio.CancelledError:
-            debug(f"Consumer for {q} cancelled")
-            raise
-
-    async def _write_message(self, rt_msg: RtMsg):
-        """Write message to txt file and store for json."""
-        self._messages.append(rt_msg)
-
-        # Write known_raw data to txt file
-        if self._txt_file:
-            dt = datetime.fromtimestamp(rt_msg.ts, tz=UTC).strftime(
-                "%Y-%m-%d %H:%M:%S.%f"
-            )[:-3]
-            raw_str = (
-                f"{dt} | {rt_msg.ch.value:<7} | {rt_msg.dir.value:<4} | {rt_msg.msg}"
-            )
-            self._txt_file.write(raw_str + "\n")
-            self._txt_file.flush()
-
-    async def _finalize(self):
-        """Write JSON file and close resources."""
-        debug("Finalizing Logger...")
-
-        if self._txt_file:
-            self._txt_file.close()
-
-        if self._log_file:
-            json_data = {
-                "version": palabra_ai.__version__,
-                "messages": self._messages,
-                "start_ts": self._start_ts,
-                "cfg": self.config_dict,
-                "logs": ALL_LOGS,
-            }
-
-            json_path = self._log_file.with_suffix(".json")
-            with open(json_path, "wb") as f:
-                f.write(to_json(json_data))
-
-            debug(f"Saved {len(self._messages)} messages to {json_path}")
+            except TimeoutError:
+                continue
+            except asyncio.CancelledError:
+                debug(f"Consumer for {q} cancelled")
+                break

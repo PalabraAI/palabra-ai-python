@@ -4,9 +4,10 @@ import os
 import queue
 import threading
 import time
+
+import httpx
 import numpy as np
 import sounddevice as sd
-import httpx
 import websockets
 from livekit import rtc
 
@@ -93,9 +94,9 @@ def play_track(track: rtc.Track, lang: str):
             output_stream = sd.OutputStream(
                 samplerate=48000,
                 channels=1,
-                dtype='int16',
+                dtype="int16",
                 callback=audio_callback,
-                blocksize=480
+                blocksize=480,
             )
             output_stream.start()
             print(f"🔊 Playing: {lang}")
@@ -126,11 +127,11 @@ async def capture_microphone(audio_source: rtc.AudioSource):
 
     def recording_thread():
         with sd.RawInputStream(
-                samplerate=sample_rate,
-                channels=1,
-                dtype='int16',
-                callback=input_callback,
-                blocksize=480
+            samplerate=sample_rate,
+            channels=1,
+            dtype="int16",
+            callback=input_callback,
+            blocksize=480,
         ):
             while not stop_event.is_set():
                 time.sleep(0.01)
@@ -164,17 +165,26 @@ def on_data_received(packet):
     try:
         data = json.loads(packet.data.decode())
         msg_type = data.get("message_type")
-        if msg_type in ["partial_transcription", "validated_transcription", "translated_transcription"]:
-            text = data['data']['transcription']['text']
-            lang = data['data']['transcription']['language']
+        if msg_type in [
+            "partial_transcription",
+            "validated_transcription",
+            "translated_transcription",
+        ]:
+            text = data["data"]["transcription"]["text"]
+            lang = data["data"]["transcription"]["language"]
             part = msg_type == "partial_transcription"
-            print(f"\r\033[K{'💬' if part else '✅'} [{lang}] {text}", end="" if part else "\n", flush=True)
+            print(
+                f"\r\033[K{'💬' if part else '✅'} [{lang}] {text}",
+                end="" if part else "\n",
+                flush=True,
+            )
     except:
         pass
 
 
 async def main():
     import signal
+
     signal.signal(signal.SIGINT, lambda s, f: os._exit(0))
 
     print("🚀 Palabra Client - Minimal")
@@ -183,9 +193,9 @@ async def main():
     session = await create_session(
         os.getenv("PALABRA_CLIENT_ID"), os.getenv("PALABRA_CLIENT_SECRET")
     )
-    webrtc_url = session['data']['webrtc_url']
-    ws_url = session['data']['ws_url']
-    publisher = session['data']['publisher']
+    webrtc_url = session["data"]["webrtc_url"]
+    ws_url = session["data"]["ws_url"]
+    publisher = session["data"]["publisher"]
 
     # Connect WebSocket and keep it alive
     ws = SimpleWebSocket(ws_url, publisher)

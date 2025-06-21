@@ -2,23 +2,20 @@
 import asyncio
 import pytest
 
-from palabra_ai.base.task import TaskEvent
+from palabra_ai.base.task_event import TaskEvent
 
 
 @pytest.mark.asyncio
-async def test_pos_sets_event():
+async def test_pos_neg_operators():
     e = TaskEvent()
+
+    # Test __pos__
     assert not e
     result = +e
     assert e
     assert result is e
 
-
-@pytest.mark.asyncio
-async def test_neg_clears_event():
-    e = TaskEvent()
-    e.set()
-    assert e
+    # Test __neg__
     result = -e
     assert not e
     assert result is e
@@ -35,10 +32,11 @@ async def test_bool_returns_is_set():
 
 
 @pytest.mark.asyncio
-async def test_await_waits_when_not_set():
+async def test_await_functionality():
     e = TaskEvent()
     results = []
 
+    # Test waiting
     async def waiter():
         results.append("waiting")
         await e
@@ -52,21 +50,15 @@ async def test_await_waits_when_not_set():
     await task
     assert results == ["waiting", "done"]
 
-
-@pytest.mark.asyncio
-async def test_await_returns_immediately_when_set():
-    e = TaskEvent()
-    +e
-
+    # Test immediate return when set
+    e.set()
     start = asyncio.get_event_loop().time()
     await e
     elapsed = asyncio.get_event_loop().time() - start
-
     assert elapsed < 0.001
 
 
-@pytest.mark.asyncio
-async def test_if_statement():
+def test_if_statement():
     e = TaskEvent()
 
     if e:
@@ -89,8 +81,7 @@ async def test_if_statement():
         assert True, "Should enter else block"
 
 
-@pytest.mark.asyncio
-async def test_repr():
+def test_repr():
     e = TaskEvent()
     assert repr(e) == "TaskEvent(False)"
     +e

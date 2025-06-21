@@ -5,14 +5,21 @@ import typing as tp
 import websockets
 
 from palabra_ai.base.message import Message
+from palabra_ai.constant import WS_TIMEOUT
 from palabra_ai.util.fanout_queue import FanoutQueue
-from palabra_ai.util.logger import debug, error, warning
+from palabra_ai.util.logger import debug, error
 
 
 class WebSocketClient:
     def __init__(
-        self, uri: str, token: str, in_q_size: int = 1024, out_q_size: int = 1024
+        self,
+        tg: asyncio.TaskGroup,
+        uri: str,
+        token: str,
+        in_q_size: int = 1024,
+        out_q_size: int = 1024,
     ):
+        self.tg = tg
         self._uri = f"{uri}?token={token}"
         self._websocket = None
         self._keep_running = True
@@ -25,7 +32,7 @@ class WebSocketClient:
         self._task = None
 
     def connect(self):
-        self._task = asyncio.create_task(self.join())
+        self._task = self.tg.create_task(self.join(), name="Ws:join")
 
     async def join(self):
         while self._keep_running:
@@ -33,8 +40,12 @@ class WebSocketClient:
                 async with websockets.connect(self._uri) as websocket:
                     self._websocket = websocket
 
-                    receive_task = asyncio.create_task(self._receive_message())
-                    send_task = asyncio.create_task(self._send_message())
+                    receive_task = self.tg.create_task(
+                        self._receive_message(), name="Ws:receive"
+                    )
+                    send_task = self.tg.create_task(
+                        self._send_message(), name="Ws:send"
+                    )
 
                     done, pending = await asyncio.wait(
                         [receive_task, send_task],
@@ -47,6 +58,7 @@ class WebSocketClient:
                             await task
                         except asyncio.CancelledError:
                             debug("Task cancelled")
+                            self._keep_running = False
             except asyncio.CancelledError:
                 debug("WebSocketClient join cancelled")
                 self._keep_running = False
@@ -60,11 +72,11 @@ class WebSocketClient:
                 error(f"Connection error: {e}")
             finally:
                 if self._keep_running:
-                    warning(f"Reconnecting to {self._uri}")
+                    debug(f"Reconnecting to {self._uri}")
                     try:
                         await asyncio.sleep(1)
                     except asyncio.CancelledError:
-                        warning("WebSocketClient reconnect sleep cancelled")
+                        debug("WebSocketClient reconnect sleep cancelled")
                         self._keep_running = False
                         raise
                 else:
@@ -74,12 +86,17 @@ class WebSocketClient:
     async def _send_message(self):
         while self._keep_running and self._websocket and self._websocket.open:
             try:
-                message = await self._raw_in_q.get()
+                try:
+                    message = await asyncio.wait_for(
+                        self._raw_in_q.get(), timeout=WS_TIMEOUT
+                    )
+                except TimeoutError:
+                    continue
                 await self._websocket.send(json.dumps(message))
                 debug(f"Sent message: {message}")
                 self._raw_in_q.task_done()
             except asyncio.CancelledError:
-                warning("WebSocketClient _send_message cancelled")
+                debug("WebSocketClient _send_message cancelled")
                 raise
             except websockets.exceptions.WebSocketException as e:
                 if self._keep_running:
@@ -100,7 +117,7 @@ class WebSocketClient:
                 data["data"] = json.loads(data["data"])
             return data
         except json.JSONDecodeError as e:
-            warning(f"Failed to decode raw message: {e}")
+            debug(f"Failed to decode raw message: {e}")
 
     async def _receive_message(self):
         while self._keep_running and self._websocket and self._websocket.open:
@@ -111,7 +128,7 @@ class WebSocketClient:
                 self.ws_out_foq.publish(msg)
                 self.ws_raw_out_foq.publish(self._decode_raw_msg(raw_msg))
             except asyncio.CancelledError:
-                warning("WebSocketClient _receive_message cancelled")
+                debug("WebSocketClient _receive_message cancelled")
                 raise
             except websockets.exceptions.WebSocketException as e:
                 if self._keep_running:
@@ -122,10 +139,13 @@ class WebSocketClient:
                 break
 
     async def send(self, message: dict[str, tp.Any]) -> None:
+        if not self._keep_running:
+            debug("WebSocketClient send called after shutdown")
+            return
         try:
             self.ws_raw_in_foq.publish(message)
         except asyncio.CancelledError:
-            warning("WebSocketClient send cancelled")
+            debug("WebSocketClient send cancelled")
             raise
 
     async def receive(
@@ -135,14 +155,14 @@ class WebSocketClient:
             try:
                 return await self._raw_out_q.get()
             except asyncio.CancelledError:
-                warning("WebSocketClient receive cancelled")
+                debug("WebSocketClient receive cancelled")
                 raise
         try:
             return await asyncio.wait_for(self._raw_out_q.get(), timeout=timeout)
         except TimeoutError:
             return None
         except asyncio.CancelledError:
-            warning("WebSocketClient receive with timeout cancelled")
+            debug("WebSocketClient receive with timeout cancelled")
             raise
 
     def mark_received(self):
@@ -158,7 +178,7 @@ class WebSocketClient:
             await self.send({"message_type": "end_task", "data": {"force": True}})
             await asyncio.sleep(wait_sec)
         except asyncio.CancelledError:
-            warning("WebSocketClient close cancelled during send/wait")
+            debug("WebSocketClient close cancelled during send/wait")
 
         if self._task:
             self._task.cancel()
@@ -171,10 +191,7 @@ class WebSocketClient:
             try:
                 await self._websocket.close()
             except asyncio.CancelledError:
-                warning("WebSocketClient websocket close cancelled")
-                try:
-                    await asyncio.wait_for(self._websocket.close(), timeout=1.0)
-                except (TimeoutError, asyncio.CancelledError):
-                    error("WebSocketClient websocket force close failed")
+                debug("WebSocketClient websocket close cancelled")
+                # Don't retry on cancel
             except Exception as e:
                 error(f"Error closing websocket: {e}")

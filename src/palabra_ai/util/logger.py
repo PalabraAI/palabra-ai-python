@@ -1,21 +1,24 @@
 import sys
-from logging import DEBUG, INFO
+from logging import DEBUG, INFO, WARNING
 from pathlib import Path
-from typing import Any
 
 from loguru import logger
 
 
-def set_logging(debug: bool, log_file: Path):
+def set_logging(silent: bool, debug: bool, log_file: Path):
     logger.remove()
+
+    screen = WARNING if silent else INFO
+    screen = DEBUG if debug else screen
+
     logger.add(
         sys.stderr,
-        level=DEBUG if debug else INFO,
+        level=screen,
         colorize=True,  # Keep default colors
     )
     if log_file:
         logger.add(
-            str((log_file.with_suffix(".log")).absolute()),
+            str(log_file.absolute()),
             level=DEBUG,
             enqueue=True,
             buffering=1,  # Line buffering for immediate write
@@ -35,15 +38,6 @@ exception = logger.exception
 log = logger.log
 trace = logger.trace
 
-ALL_LOGS = []
-
-
-def catcher(message: Any) -> None:
-    ALL_LOGS.append(message)
-
-
-logger.add(catcher)
-
 
 __all__ = [
     "debug",
@@ -54,4 +48,5 @@ __all__ = [
     "exception",
     "log",
     "trace",
+    "set_logging",
 ]

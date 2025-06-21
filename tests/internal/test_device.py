@@ -1,7 +1,7 @@
 import asyncio
 import threading
 import time
-from unittest.mock import patch, MagicMock, AsyncMock, PropertyMock
+from unittest.mock import patch, MagicMock, AsyncMock
 
 import pytest
 
@@ -17,7 +17,7 @@ def test_batch():
 
 class TestInputSoundDevice:
     def test_get_read_delay_ms(self):
-        device = InputSoundDevice("test", MagicMock())
+        device = InputSoundDevice(MagicMock(), "test", MagicMock())
         device.stream_latency = 0.01
         device.audio_chunk_seconds = 0.5
 
@@ -25,78 +25,68 @@ class TestInputSoundDevice:
         assert delay == 520  # (0.01 + 0.5 + 0.01) * 1000
 
     @pytest.mark.asyncio
-    async def test_start_reading_basic(self, mock_sounddevice):
-        """Test start_reading without hanging"""
+    async def test_start_reading(self, mock_sounddevice):
+        mock_tg = MagicMock()
+        mock_task = MagicMock()
+        mock_tg.create_task.return_value = mock_task
+
         manager = MagicMock()
         manager.get_device_info.return_value = {
             "input_devices": {"test": {"index": 0}}
         }
 
-        device = InputSoundDevice("test", manager)
+        device = InputSoundDevice(mock_tg, "test", manager)
 
-        # Mock thread to not actually start
-        mock_thread = MagicMock()
+        with patch("palabra_ai.internal.device.threading.Thread") as mock_thread:
+            mock_thread_instance = MagicMock()
+            mock_thread.return_value = mock_thread_instance
 
-        with patch("palabra_ai.internal.device.threading.Thread", return_value=mock_thread):
-            # Create task and set up immediate latency
             callback = AsyncMock()
 
-            # Start reading but immediately set latency
+            # Start and immediately set latency
             start_task = asyncio.create_task(device.start_reading(callback))
-            await asyncio.sleep(0.01)  # Let it start
-            device.stream_latency = 0.1  # Set latency to exit wait loop
+            await asyncio.sleep(0.01)
+            device.stream_latency = 0.1
 
             await start_task
 
             assert device.sample_rate == 48000
             assert device.channels == 2
             assert device.async_callback_fn == callback
-            mock_thread.start.assert_called_once()
+            mock_thread_instance.start.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_start_reading_cancelled(self, mock_sounddevice):
+        mock_tg = MagicMock()
+        mock_task = MagicMock()
+        mock_tg.create_task.return_value = mock_task
+
         manager = MagicMock()
         manager.get_device_info.return_value = {
             "input_devices": {"test": {"index": 0}}
         }
 
-        device = InputSoundDevice("test", manager)
+        device = InputSoundDevice(mock_tg, "test", manager)
 
-        # Mock the thread to set latency immediately
-        def mock_thread_target(*args, **kwargs):
-            device.stream_latency = 0.1
+        with patch("palabra_ai.internal.device.threading.Thread"):
+            task = asyncio.create_task(device.start_reading(AsyncMock()))
+            await asyncio.sleep(0.01)
+            task.cancel()
 
-        with patch("palabra_ai.internal.device.threading.Thread") as mock_thread:
-            mock_thread_instance = MagicMock()
-            mock_thread_instance.start = MagicMock(side_effect=mock_thread_target)
-            mock_thread.return_value = mock_thread_instance
+            with pytest.raises(asyncio.CancelledError):
+                await task
 
-            # Cancel during the task creation
-            with patch("asyncio.create_task", side_effect=asyncio.CancelledError):
-                with pytest.raises(asyncio.CancelledError):
-                    await device.start_reading(AsyncMock())
-
-    def test_push_to_buffer(self):
-        device = InputSoundDevice("test", MagicMock())
-        device.reading_device = True
-
-        device._push_to_buffer(b"audio")
-        assert device.buffer.get_nowait() == b"audio"
-
-    def test_read_from_device_to_buffer(self, mock_sounddevice):
+    def test_read_from_device(self, mock_sounddevice):
         manager = MagicMock()
         manager.get_device_info.return_value = {
             "input_devices": {"test": {"index": 0}}
         }
 
-        device = InputSoundDevice("test", manager)
-
-        # Set required parameters
+        device = InputSoundDevice(MagicMock(), "test", manager)
         device.channels = 2
         device.sample_rate = 48000
         device.audio_chunk_seconds = 0.5
 
-        # Mock stream
         mock_stream = MagicMock()
         mock_stream.latency = 0.1
         mock_stream.active = True
@@ -106,7 +96,7 @@ class TestInputSoundDevice:
         def stop_reading():
             time.sleep(0.1)
             device.reading_device = False
-            mock_stream.active = False  # Stop the stream
+            mock_stream.active = False
 
         stop_thread = threading.Thread(target=stop_reading)
         stop_thread.start()
@@ -116,27 +106,21 @@ class TestInputSoundDevice:
 
         assert device.stream_latency == 0.1
 
-    def test_read_from_device_exception(self, mock_sounddevice):
+    def test_read_from_device_errors(self, mock_sounddevice):
         manager = MagicMock()
         manager.get_device_info.return_value = {
             "input_devices": {"test": {"index": 0}}
         }
 
-        device = InputSoundDevice("test", manager)
-        mock_sounddevice.RawInputStream.side_effect = Exception("Test error")
+        device = InputSoundDevice(MagicMock(), "test", manager)
 
+        # Exception case
+        mock_sounddevice.RawInputStream.side_effect = Exception("Test error")
         device._read_from_device_to_buffer()
         assert not device.reading_device
 
-    def test_read_from_device_inactive_stream(self, mock_sounddevice):
-        manager = MagicMock()
-        manager.get_device_info.return_value = {
-            "input_devices": {"test": {"index": 0}}
-        }
-
-        device = InputSoundDevice("test", manager)
-
-        # Mock inactive stream
+        # Inactive stream
+        mock_sounddevice.RawInputStream.side_effect = None
         mock_stream = MagicMock()
         mock_stream.latency = 0.1
         mock_stream.active = False
@@ -144,6 +128,13 @@ class TestInputSoundDevice:
 
         device._read_from_device_to_buffer()
         assert not device.reading_device
+
+    def test_push_to_buffer(self):
+        device = InputSoundDevice(MagicMock(), "test", MagicMock())
+        device.reading_device = True
+
+        device._push_to_buffer(b"audio")
+        assert device.buffer.get_nowait() == b"audio"
 
 
 class TestOutputSoundDevice:
@@ -173,30 +164,25 @@ class TestOutputSoundDevice:
         device.writing_device = True
         device.channels = 1
 
-        # Mock stream
         mock_stream = MagicMock()
         mock_stream.samplesize = 2
         device.stream = mock_stream
 
-        # Add data - should be batched
         device.add_audio_data(b"\x00" * 4096)
 
         # 4096 bytes / (1024 * 1 * 2) = 2 calls
         assert mock_stream.write.call_count == 2
 
     def test_write_device(self, mock_sounddevice):
-        manager = MagicMock()
-        device = OutputSoundDevice("test", manager)
+        device = OutputSoundDevice("test", MagicMock())
         device.device_ix = 0
         device.channels = 1
         device.sample_rate = 24000
 
-        # Mock stream
         mock_stream = MagicMock()
         mock_stream.latency = 0.1
         mock_sounddevice.RawOutputStream.return_value.__enter__.return_value = mock_stream
 
-        # Run briefly
         def stop_writing():
             time.sleep(0.02)
             device.writing_device = False
@@ -230,8 +216,7 @@ class TestSoundDeviceManager:
         assert "output_devices" in info
         assert len(info["input_devices"]) > 0
 
-    def test_get_device_info_reload(self, mock_sounddevice):
-        sdm = SoundDeviceManager()
+        # With reload
         mock_sounddevice._terminate = MagicMock()
         mock_sounddevice._initialize = MagicMock()
 
@@ -242,56 +227,62 @@ class TestSoundDeviceManager:
 
     @pytest.mark.asyncio
     async def test_start_input_device(self, mock_sounddevice):
-        sdm = SoundDeviceManager()
+        async with asyncio.TaskGroup() as tg:
+            sdm = SoundDeviceManager()
+            sdm.tg = tg
 
-        with patch("palabra_ai.internal.device.InputSoundDevice") as mock_input_device_class:
-            mock_device = MagicMock()
-            mock_device.name = "test (test)"
-            mock_device.start_reading = AsyncMock()
-            mock_input_device_class.return_value = mock_device
+            with patch("palabra_ai.internal.device.InputSoundDevice") as mock_class:
+                mock_device = MagicMock()
+                mock_device.name = "test (test)"
+                mock_device.start_reading = AsyncMock()
+                mock_device.stop_reading = MagicMock()
+                mock_class.return_value = mock_device
 
-            callback = AsyncMock()
-            device = await sdm.start_input_device("test (test)", callback)
+                callback = AsyncMock()
+                device = await sdm.start_input_device("test (test)", callback)
 
-            assert device is not None
-            assert device.name == "test (test)"
-            mock_device.start_reading.assert_called_once()
+                assert device is not None
+                assert device.name == "test (test)"
+                mock_device.start_reading.assert_called_once()
 
-            mock_device.stop_reading = MagicMock()
-            sdm.stop_input_device("test (test)")
+                sdm.stop_input_device("test (test)")
 
     @pytest.mark.asyncio
     async def test_start_existing_input_device(self, mock_sounddevice):
-        sdm = SoundDeviceManager()
+        async with asyncio.TaskGroup() as tg:
+            sdm = SoundDeviceManager()
+            sdm.tg = tg
 
-        # Add existing device
-        existing = MagicMock()
-        existing.start_reading = AsyncMock()
-        sdm.input_device_map["test"] = existing
+            existing = MagicMock()
+            existing.start_reading = AsyncMock()
+            sdm.input_device_map["test"] = existing
 
-        device = await sdm.start_input_device("test", AsyncMock())
-        assert device is existing
+            device = await sdm.start_input_device("test", AsyncMock())
+            assert device is existing
 
     @pytest.mark.asyncio
     async def test_start_input_device_cancelled(self, mock_sounddevice):
-        sdm = SoundDeviceManager()
+        async with asyncio.TaskGroup() as tg:
+            sdm = SoundDeviceManager()
+            sdm.tg = tg
 
-        with patch("palabra_ai.internal.device.InputSoundDevice") as mock_class:
-            mock_device = MagicMock()
-            mock_device.start_reading = AsyncMock(side_effect=asyncio.CancelledError)
-            mock_class.return_value = mock_device
+            with patch("palabra_ai.internal.device.InputSoundDevice") as mock_class:
+                mock_device = MagicMock()
+                mock_device.start_reading = AsyncMock(side_effect=asyncio.CancelledError)
+                mock_class.return_value = mock_device
 
-            with pytest.raises(asyncio.CancelledError):
-                await sdm.start_input_device("test", AsyncMock())
+                with pytest.raises(asyncio.CancelledError):
+                    await sdm.start_input_device("test", AsyncMock())
 
     def test_start_output_device(self, mock_sounddevice):
         sdm = SoundDeviceManager()
 
-        with patch("palabra_ai.internal.device.OutputSoundDevice") as mock_output_device_class:
+        with patch("palabra_ai.internal.device.OutputSoundDevice") as mock_class:
             mock_device = MagicMock()
             mock_device.name = "test (test)"
             mock_device.start_writing = MagicMock()
-            mock_output_device_class.return_value = mock_device
+            mock_device.stop_writing = MagicMock()
+            mock_class.return_value = mock_device
 
             device = sdm.start_output_device("test (test)")
 
@@ -299,13 +290,11 @@ class TestSoundDeviceManager:
             assert device.name == "test (test)"
             mock_device.start_writing.assert_called_once()
 
-            mock_device.stop_writing = MagicMock()
             sdm.stop_output_device("test (test)")
 
     def test_stop_all(self):
         sdm = SoundDeviceManager()
 
-        # Add mock devices
         input_device = MagicMock()
         output_device = MagicMock()
 

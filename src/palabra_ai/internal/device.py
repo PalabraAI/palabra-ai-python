@@ -1,5 +1,4 @@
 import asyncio
-import logging
 import queue
 import threading
 import time
@@ -7,14 +6,13 @@ import typing as tp
 
 import sounddevice as sd
 
-from palabra_ai.config import (
+from palabra_ai.constant import (
     AUDIO_CHUNK_SECONDS,
     OUTPUT_DEVICE_BLOCK_SIZE,
     SAMPLE_RATE_DEFAULT,
     SAMPLE_RATE_HALF,
 )
-
-logger = logging.getLogger(__name__)
+from palabra_ai.util.logger import debug, exception, info
 
 
 def batch(s: tp.Sequence, n: int = 1) -> tp.Generator:
@@ -23,7 +21,8 @@ def batch(s: tp.Sequence, n: int = 1) -> tp.Generator:
 
 
 class InputSoundDevice:
-    def __init__(self, name: str, manager: "SoundDeviceManager"):
+    def __init__(self, tg: asyncio.TaskGroup, name: str, manager: "SoundDeviceManager"):
+        self.tg = tg
         self.name = name
         self.manager = manager
 
@@ -65,9 +64,11 @@ class InputSoundDevice:
         )
         self.device_reading_thread.start()
 
-        self.callback_task = asyncio.create_task(self._run_callback_worker())
+        self.callback_task = self.tg.create_task(
+            self._run_callback_worker(), name="Device:listen"
+        )
 
-        logger.info(f"Starting reading device: {self.name}")
+        info(f"Starting reading device: {self.name}")
 
         while self.stream_latency < 0:
             await asyncio.sleep(0.01)
@@ -88,7 +89,7 @@ class InputSoundDevice:
             except (asyncio.CancelledError, RuntimeError):
                 pass
 
-        logger.debug(f"Stopped reading device: {self.name}")
+        debug(f"Stopped reading device: {self.name}")
 
     def _push_to_buffer(self, audio_bytes: bytes, *args) -> None:
         self.buffer.put(audio_bytes)
@@ -117,16 +118,16 @@ class InputSoundDevice:
                 dtype="int16",
             ) as stream:
                 self.stream_latency = stream.latency
-                logger.debug("Started reading device")
+                debug("Started reading device")
                 while self.reading_device:
                     time.sleep(self.audio_chunk_seconds)
                     assert stream.active
-                    logger.debug("Audio chunk read")
+                    debug("Audio chunk read")
         except Exception:
-            logger.exception("Failed to read device with:\n")
+            exception("Failed to read device with:\n")
         finally:
             self.reading_device = False
-            logger.debug("Stopped reading device")
+            debug("Stopped reading device")
 
 
 class OutputSoundDevice:
@@ -161,7 +162,7 @@ class OutputSoundDevice:
         )
         self.device_writing_thread.start()
 
-        logger.debug(f"Starting writing to device: {self.name}")
+        debug(f"Starting writing to device: {self.name}")
 
     def stop_writing(self, timeout: int | None = None) -> None:
         self.writing_device = False
@@ -173,7 +174,7 @@ class OutputSoundDevice:
         ):
             self.device_writing_thread.join(timeout=timeout)
 
-        logger.debug(f"Stopped writing to device: {self.name}")
+        debug(f"Stopped writing to device: {self.name}")
 
     def add_audio_data(self, audio_data: bytes) -> None:
         read_size = self.block_size * self.channels * self.stream.samplesize
@@ -192,18 +193,20 @@ class OutputSoundDevice:
             ) as stream:
                 self.stream = stream
                 self.stream_latency = stream.latency
-                logger.debug("Started writing to device")
+                debug("Started writing to device")
                 while self.writing_device:
                     time.sleep(0.01)
         except Exception:
-            logger.exception("Failed to write to device with:\n")
+            exception("Failed to write to device with:\n")
         finally:
             self.writing_device = False
             self.stream = None
-            logger.debug("Stopped writing to device")
+            debug("Stopped writing to device")
 
 
 class SoundDeviceManager:
+    tg: asyncio.TaskGroup
+
     def __init__(self):
         self.input_device_map: dict[str, InputSoundDevice] = {}
         self.output_device_map: dict[str, OutputSoundDevice] = {}
@@ -238,7 +241,7 @@ class SoundDeviceManager:
         device = self.input_device_map.get(device_name)
         if device is None:
             self.input_device_map[device_name] = device = InputSoundDevice(
-                name=device_name, manager=self
+                self.tg, name=device_name, manager=self
             )
         await device.start_reading(
             async_callback_fn, sample_rate, channels, audio_chunk_seconds

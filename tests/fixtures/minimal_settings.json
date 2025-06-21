@@ -1,0 +1,31 @@
+{
+  "input_stream": {
+    "content_type": "audio",
+    "source": {
+      "type": "webrtc"
+    }
+  },
+  "output_stream": {
+    "content_type": "audio",
+    "target": {
+      "type": "webrtc"
+    }
+  },
+  "pipeline": {
+    "preprocessing": {},
+    "transcription": {
+      "source_language": "en"
+    },
+    "translations": [
+      {
+        "target_language": "es",
+        "speech_generation": {
+          "tts_model": "auto",
+          "voice_timbre_detection": {
+            "enabled": false
+          }
+        }
+      }
+    ]
+  }
+}

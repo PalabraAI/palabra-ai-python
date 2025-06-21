@@ -1,5 +1,5 @@
 import asyncio
-from unittest.mock import patch, AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -20,7 +20,6 @@ class TestPalabraRESTClient:
 
     @pytest.mark.asyncio
     async def test_create_session_error(self, mock_aiohttp):
-        # Mock error response
         mock_aiohttp.ClientSession.return_value.post.side_effect = Exception("Network error")
 
         client = PalabraRESTClient("id", "secret")
@@ -41,7 +40,6 @@ class TestPalabraRESTClient:
 
     @pytest.mark.asyncio
     async def test_create_session_not_ok(self, mock_aiohttp):
-        # Mock response with ok=False
         resp = AsyncMock()
         resp.raise_for_status = MagicMock()
         resp.json = AsyncMock(return_value={"ok": False})
