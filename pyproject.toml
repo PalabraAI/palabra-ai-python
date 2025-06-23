@@ -22,7 +22,7 @@ dependencies = [
     "pyloudnorm>=0.1.1",
     "sounddevice>=0.5.1",
     "uvloop>=0.21.0",
-    "websockets==13.1",
+    "websockets==15.0.1",
 ]
 license = "MIT"
 keywords = ["speech-translation", "dubbing", "voice-synthesis", "api-client", "palabra-ai"]
