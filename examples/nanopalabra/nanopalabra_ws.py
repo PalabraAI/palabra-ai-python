@@ -191,12 +191,10 @@ MINIMAL_SETTINGS = {
         "target": {"type": "ws", "format": "pcm_s16le"},
     },
     "pipeline": {
-        "preprocessing": {},
         "transcription": {"source_language": "en"},
         "translations": [
             {
-                "target_language": "es",
-                "speech_generation": {},
+                "target_language": "es"
             }
         ],
     },
