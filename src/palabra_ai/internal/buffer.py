@@ -3,7 +3,7 @@ import io
 import wave
 
 import aiofile
-from livekit import rtc
+from palabra_ai.base.audio_frame import AudioFrame
 
 from palabra_ai.config import DEEPEST_DEBUG
 from palabra_ai.util.logger import debug, error, warning
@@ -13,7 +13,7 @@ class AudioBufferWriter:
     def __init__(
         self,
         tg: asyncio.TaskGroup,
-        queue: asyncio.Queue[rtc.AudioFrame] | None = None,
+        queue: asyncio.Queue[AudioFrame] | None = None,
         buffer: io.BytesIO | None = None,
         drop_empty_frames: bool = False,
     ):
@@ -23,7 +23,7 @@ class AudioBufferWriter:
         self.drop_empty_frames = drop_empty_frames
         self._stop_event = asyncio.Event()
         self._task = None
-        self._frame_sample: rtc.AudioFrame | None = None
+        self._frame_sample: AudioFrame | None = None
         self._frames_processed = 0
 
     async def start(self):
@@ -68,7 +68,7 @@ class AudioBufferWriter:
                         debug(
                             f"_write: waiting for frame from queue (size={self.queue.qsize()})"
                         )
-                    frame: rtc.AudioFrame | None = await asyncio.wait_for(
+                    frame: AudioFrame | None = await asyncio.wait_for(
                         self.queue.get(), timeout=0.1
                     )
                     if DEEPEST_DEBUG:

@@ -40,6 +40,24 @@ class ReceiverTranslatedAudio(Task):
 
     async def setup_translation(self):
         """Get translation track with retries."""
+        # For WebSocket mode, just subscribe to audio without waiting for tracks
+        from palabra_ai.config import Mode
+        
+        if self.rt.cfg.mode == Mode.WEBSOCKET:
+            debug(f"WebSocket mode: subscribing to audio for {self.target_lang!r}")
+            from palabra_ai.base.audio_frame import AudioFrame
+            
+            async def audio_callback(audio_data: bytes):
+                # Convert bytes to AudioFrame
+                frame = AudioFrame.from_bytes(audio_data, sample_rate=24000, num_channels=1)
+                await self.writer.q.put(frame)
+            
+            await self.rt.adapter.subscribe_to_audio(
+                self.target_lang.code, audio_callback
+            )
+            info(f"✔️ Now receiving audio for {self.target_lang!r} via WebSocket")
+            return
+            
         debug(f"Getting translation track for {self.target_lang!r}...")
         for i in range(TRACK_RETRY_MAX_ATTEMPTS):
             if self.stopper:
@@ -50,17 +68,41 @@ class ReceiverTranslatedAudio(Task):
                 debug(
                     f"Attempt {i + 1}/{TRACK_RETRY_MAX_ATTEMPTS} to get translation tracks..."
                 )
-                tracks = await self.rt.c.get_translation_tracks(
-                    langs=[self.target_lang.code]  # TODO: know more about this
-                )
+                # For mixed adapter, use get_translation_tracks method
+                if hasattr(self.rt.adapter, 'get_translation_tracks'):
+                    tracks = await self.rt.adapter.get_translation_tracks(
+                        langs=[self.target_lang.code]
+                    )
+                else:
+                    # For other adapters, just create a simple dict
+                    tracks = {self.target_lang.code: None}
                 debug(f"Got tracks response: {list(tracks.keys())}")
 
                 if self.target_lang.code in tracks:
                     self._track = tracks[self.target_lang.code]
-                    debug(
-                        f"Found track for {self.target_lang!r}, starting listening..."
-                    )
-                    self._track.start_listening(self.writer.q)
+                    
+                    if self._track is not None:
+                        # Mixed adapter with RemoteAudioTrack
+                        debug(
+                            f"Found track for {self.target_lang!r}, starting listening..."
+                        )
+                        self._track.start_listening(self.writer.q)
+                    else:
+                        # Other adapters - subscribe to audio
+                        debug(
+                            f"Subscribing to audio for {self.target_lang!r}..."
+                        )
+                        from palabra_ai.base.audio_frame import AudioFrame
+                        
+                        async def audio_callback(audio_data: bytes):
+                            # Convert bytes to AudioFrame
+                            frame = AudioFrame.from_bytes(audio_data, sample_rate=48000, num_channels=1)
+                            await self.writer.q.put(frame)
+                        
+                        await self.rt.adapter.subscribe_to_audio(
+                            self.target_lang.code, audio_callback
+                        )
+                    
                     info(f"✔️ Now receiving audio for {self.target_lang!r}")
                     return
 
@@ -76,7 +118,7 @@ class ReceiverTranslatedAudio(Task):
 
     async def exit(self):
         debug("Cleaning up ReceiverTranslatedAudio...")
-        if self._track:
+        if self._track and hasattr(self._track, 'stop_listening'):
             try:
                 await asyncio.wait_for(
                     self._track.stop_listening(), timeout=SHUTDOWN_TIMEOUT

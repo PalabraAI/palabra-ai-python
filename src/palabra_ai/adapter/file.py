@@ -13,7 +13,7 @@ from palabra_ai.internal.audio import (
     write_to_disk,
 )
 from palabra_ai.internal.buffer import AudioBufferWriter
-from palabra_ai.internal.webrtc import AudioTrackSettings
+from palabra_ai.adapter.realtime_webrtc import AudioTrackSettings
 from palabra_ai.util.logger import debug, error, warning
 
 
@@ -95,9 +95,10 @@ class FileWriter(Writer):
     def __post_init__(self):
         self.path = Path(self.path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._buffer_writer = AudioBufferWriter(self.sub_tg, queue=self.q)
+        self._buffer_writer = None
 
     async def boot(self):
+        self._buffer_writer = AudioBufferWriter(self.sub_tg, queue=self.q)
         await self._buffer_writer.start()
 
     async def do(self):

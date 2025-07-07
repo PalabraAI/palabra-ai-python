@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any
 
@@ -58,6 +59,12 @@ DEEP_DEBUG = env.bool("DEEP_DEBUG", default=False)
 DEEPEST_DEBUG = env.bool("DEEPEST_DEBUG", default=False)
 TIMEOUT = env.int("TIMEOUT", default=0)
 LOG_FILE = env.path("LOG_FILE", default=None)
+
+
+class Mode(StrEnum):
+    MIXED = "mixed"
+    WEBSOCKET = "websocket"
+    WEBRTC = "webrtc"
 
 
 def validate_language(v):
@@ -288,6 +295,7 @@ class Config(BaseModel):
     debug: bool = Field(default=DEBUG, exclude=True)
     deep_debug: bool = Field(default=DEEP_DEBUG, exclude=True)
     timeout: int = Field(default=TIMEOUT, exclude=True)  # TODO!
+    mode: Mode = Field(default=Mode.MIXED, exclude=True)
 
     trace_file: Path | str | None = Field(default=None, exclude=True)
 

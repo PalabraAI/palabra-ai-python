@@ -18,7 +18,7 @@ from palabra_ai.constant import (
 )
 from palabra_ai.exc import ConfigurationError
 from palabra_ai.internal.rest import SessionCredentials
-from palabra_ai.internal.webrtc import AudioTrackSettings
+from palabra_ai.adapter.realtime_webrtc import AudioTrackSettings
 from palabra_ai.task.logger import Logger
 from palabra_ai.task.monitor import RtMonitor
 from palabra_ai.task.realtime import Realtime
