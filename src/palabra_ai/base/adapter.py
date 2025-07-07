@@ -5,7 +5,7 @@ import asyncio
 from dataclasses import KW_ONLY, dataclass, field
 from typing import Optional
 
-from livekit.rtc import AudioFrame
+from palabra_ai.base.audio_frame import AudioFrame
 
 from palabra_ai.base.task import Task
 from palabra_ai.base.task_event import TaskEvent

@@ -10,7 +10,7 @@ from palabra_ai.config import (
     Config,
 )
 from palabra_ai.constant import SAFE_PUBLICATION_END_DELAY, TRACK_CLOSE_TIMEOUT
-from palabra_ai.internal.webrtc import AudioTrackSettings
+from palabra_ai.adapter.realtime_webrtc import AudioTrackSettings
 from palabra_ai.task.realtime import Realtime
 from palabra_ai.util.logger import debug, error, warning
 
@@ -29,15 +29,12 @@ class SenderSourceAudio(Task):
     translation_settings: dict[str, Any]
     track_settings: AudioTrackSettings
     _: KW_ONLY
-    _track: Any = field(default=None, init=False)
     bytes_sent: int = field(default=0, init=False)
 
     async def boot(self):
         await self.rt.ready
 
-        self._track = await self.rt.c.new_translated_publication(
-            self.translation_settings, self.track_settings
-        )
+        await self.rt.set_translation_settings(self.translation_settings)
 
     async def do(self):
         while not self.stopper and not self.eof:
@@ -52,7 +49,7 @@ class SenderSourceAudio(Task):
                 continue
 
             self.bytes_sent += len(chunk)
-            await self._track.push(chunk)
+            await self.rt.adapter.publish_audio(chunk)
 
     async def _exit(self):
         try:
@@ -69,16 +66,12 @@ class SenderSourceAudio(Task):
             warning(f"{self.name}.exit()/proto all subtasks cancelled")
 
     async def exit(self):
-        if self._track:
-            try:
-                debug(
-                    f"T{self.name}: WAITING FOR {SAFE_PUBLICATION_END_DELAY=} seconds"
-                )
-                await asyncio.sleep(SAFE_PUBLICATION_END_DELAY)
-            except asyncio.CancelledError:
-                debug(f"T{self.name}: Cancelled during publication end delay")
-            try:
-                await asyncio.wait_for(self._track.close(), timeout=TRACK_CLOSE_TIMEOUT)
-            except TimeoutError:
-                debug(f"T{self.name}: Track close timed out")
+        try:
+            debug(
+                f"T{self.name}: WAITING FOR {SAFE_PUBLICATION_END_DELAY=} seconds"
+            )
+            await asyncio.sleep(SAFE_PUBLICATION_END_DELAY)
+        except asyncio.CancelledError:
+            debug(f"T{self.name}: Cancelled during publication end delay")
+        debug(f"T{self.name}: Sender exited ({self.bytes_sent} bytes sent)")
         +self.eof  # noqa

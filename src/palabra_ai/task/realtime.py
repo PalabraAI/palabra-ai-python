@@ -3,13 +3,12 @@ from __future__ import annotations
 import asyncio
 import time
 from dataclasses import KW_ONLY, dataclass, field
-from typing import Any
+from typing import Any, Optional
 
 from palabra_ai.base.enum import Channel, Direction
 from palabra_ai.base.task import Task
 from palabra_ai.config import Config
 from palabra_ai.constant import SHUTDOWN_TIMEOUT, SLEEP_INTERVAL_LONG
-from palabra_ai.internal.realtime import PalabraRTClient
 from palabra_ai.util.fanout_queue import FanoutQueue
 from palabra_ai.util.logger import debug
 
@@ -27,82 +26,56 @@ class Realtime(Task):
     cfg: Config
     credentials: Any
     _: KW_ONLY
-    c: PalabraRTClient | None = field(default=None, init=False)
+    adapter: Any = field(default=None, init=False)  # RealtimeAdapter instance
     in_foq: FanoutQueue = field(default_factory=FanoutQueue, init=False)
     out_foq: FanoutQueue = field(default_factory=FanoutQueue, init=False)
-    ws_in_foq: FanoutQueue = field(default_factory=FanoutQueue, init=False)
-    ws_out_foq: FanoutQueue = field(default_factory=FanoutQueue, init=False)
-    webrtc_out_foq: FanoutQueue = field(default_factory=FanoutQueue, init=False)
 
-    async def _reroute(
-        self,
-        ch: Channel,
-        dir: Direction,
-        from_q: asyncio.Queue,
-        to_qs: list[FanoutQueue],
-    ):
-        while not self.stopper:
-            try:
-                msg = await asyncio.wait_for(from_q.get(), timeout=SLEEP_INTERVAL_LONG)
-                for to_q in to_qs:
-                    to_q.publish(RtMsg(ch, dir, msg))
-                from_q.task_done()
-                if msg is None:
-                    debug(f"Received None in {ch} {dir}, stopping reroute...")
-                    break
-            except TimeoutError:
-                continue
-
-    def _reroute_ws_in(self):
-        ws_in_q = self.c.wsc.ws_raw_in_foq.subscribe(self, maxsize=0)
-        self.sub_tg.create_task(
-            self._reroute(
-                Channel.WS, Direction.IN, ws_in_q, [self.in_foq, self.ws_in_foq]
-            ),
-            name="Rt:reroute_ws_in",
-        )
-
-    def _reroute_ws_out(self):
-        ws_out_q = self.c.wsc.ws_out_foq.subscribe(self, maxsize=0)
-        self.sub_tg.create_task(
-            self._reroute(
-                Channel.WS, Direction.OUT, ws_out_q, [self.out_foq, self.ws_out_foq]
-            ),
-            name="Rt:reroute_ws_out",
-        )
-
-    def _reroute_webrtc_out(self):
-        webrtc_out_q = self.c.room.out_foq.subscribe(self, maxsize=0)
-        self.sub_tg.create_task(
-            self._reroute(
-                Channel.WEBRTC,
-                Direction.OUT,
-                webrtc_out_q,
-                [self.out_foq, self.webrtc_out_foq],
-            ),
-            name="Rt:reroute_webrtc_out",
-        )
 
     async def boot(self):
-        self.c = PalabraRTClient(
-            self.sub_tg,
-            self.credentials.publisher[0],
-            self.credentials.control_url,
-            self.credentials.stream_url,
+        # Import adapters based on config mode
+        from palabra_ai.config import Mode
+        
+        if self.cfg.mode == Mode.WEBSOCKET:
+            from palabra_ai.adapter.realtime_websocket import WebSocketRealtimeAdapter
+            adapter_class = WebSocketRealtimeAdapter
+        elif self.cfg.mode == Mode.WEBRTC:
+            from palabra_ai.adapter.realtime_webrtc import WebRTCRealtimeAdapter
+            adapter_class = WebRTCRealtimeAdapter
+        else:  # Mode.MIXED is default
+            from palabra_ai.adapter.realtime_mixed import MixedRealtimeAdapter
+            adapter_class = MixedRealtimeAdapter
+        
+        # Create adapter instance
+        self.adapter = adapter_class(
+            jwt_token=self.credentials.publisher[0],
+            control_url=self.credentials.control_url,
+            stream_url=self.credentials.stream_url,
+            tg=self.sub_tg,
+            in_foq=self.in_foq,
+            out_foq=self.out_foq,
         )
-        self._reroute_ws_in()
-        self._reroute_ws_out()
-        self._reroute_webrtc_out()
-        await self.c.connect()
+        
+        # Boot the adapter
+        await self.adapter.boot()
 
     async def do(self):
         while not self.stopper:
             await asyncio.sleep(SLEEP_INTERVAL_LONG)
+    
+    async def send_message(self, message: dict[str, Any]) -> None:
+        """Send message through the adapter"""
+        await self.adapter.send_message(message)
+    
+    async def set_translation_settings(self, settings: dict[str, Any]) -> None:
+        """Set translation settings through the adapter"""
+        await self.adapter.set_translation_settings(settings)
+    
+    async def get_translation_settings(self, timeout: Optional[int] = None) -> dict[str, Any]:
+        """Get translation settings through the adapter"""
+        return await self.adapter.get_translation_settings(timeout)
 
     async def exit(self):
         self.in_foq.publish(None)
         self.out_foq.publish(None)
-        self.ws_in_foq.publish(None)
-        self.ws_out_foq.publish(None)
-        self.webrtc_out_foq.publish(None)
-        await asyncio.wait_for(self.c.close(), timeout=SHUTDOWN_TIMEOUT)
+        
+        await asyncio.wait_for(self.adapter.exit(), timeout=SHUTDOWN_TIMEOUT)

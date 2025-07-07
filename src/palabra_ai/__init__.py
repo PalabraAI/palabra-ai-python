@@ -11,7 +11,7 @@ from palabra_ai.adapter.device import (  # noqa: F401
 from palabra_ai.adapter.dummy import DummyReader, DummyWriter  # noqa: F401
 from palabra_ai.adapter.file import FileReader, FileWriter  # noqa: F401
 from palabra_ai.client import PalabraAI  # noqa: F401
-from palabra_ai.config import Config, SourceLang, TargetLang  # noqa: F401
+from palabra_ai.config import Config, Mode, SourceLang, TargetLang  # noqa: F401
 from palabra_ai.lang import (
     AR,
     AR_AE,
@@ -65,6 +65,7 @@ __all__ = [
     "PalabraAI",
     # Config
     "Config",
+    "Mode",
     "SourceLang",
     "TargetLang",
     # Adapters
