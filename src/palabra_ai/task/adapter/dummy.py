@@ -3,9 +3,11 @@ from __future__ import annotations
 import asyncio
 from dataclasses import KW_ONLY, dataclass, field
 
-from palabra_ai.base.adapter import Reader, Writer
+from palabra_ai.audio import AudioFrame
 from palabra_ai.constant import SLEEP_INTERVAL_DEFAULT
-from palabra_ai.util.logger import debug, error
+from palabra_ai.task.adapter.base import Reader, Writer
+from palabra_ai.util.aio import any_event
+from palabra_ai.util.logger import debug, error, info
 
 
 @dataclass
@@ -39,16 +41,18 @@ class DummyReader(Reader):
 @dataclass
 class DummyWriter(Writer):
     _: KW_ONLY
+    frames_processed: int = 0
     _q_reader: asyncio.Task = field(default=None, init=False, repr=False)
 
     async def q_reader(self):
         while not self.stopper and not self.eof:
             try:
-                _ = await self.q.get()
-                if _ is None:
+                frame = await self.q.get()
+                if frame is None:
                     +self.eof  # noqa
                     +self.stopper  # noqa
                     break
+                await self.write(frame)
             except asyncio.CancelledError:
                 debug(f"{self.name} q_reader cancelled")
                 +self.eof  # noqa
@@ -66,11 +70,12 @@ class DummyWriter(Writer):
         )
 
     async def do(self):
-        debug(f"{self.name}.do() begin")
-        while not self.stopper and not self.eof:
-            await asyncio.sleep(SLEEP_INTERVAL_DEFAULT)
-        debug(f"{self.name}.do() end")
+        await any_event(self.eof, self.stopper)
 
     async def exit(self):
         if self._q_reader and not self._q_reader.done():
             self._q_reader.cancel()
+        info(f"DummyWriter processed {self.frames_processed} frames")
+
+    async def write(self, frame: AudioFrame):
+        self.frames_processed += 1

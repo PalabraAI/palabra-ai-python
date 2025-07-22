@@ -9,6 +9,10 @@ from palabra_ai.util.logger import debug
 
 def _default(obj: Any) -> Any:
     try:
+        if isinstance(obj, memoryview):
+            return obj.tobytes().decode("utf-8")
+        if isinstance(obj, bytes | bytearray):
+            return obj.decode("utf-8")
         if hasattr(obj, "model_dump"):
             return obj.model_dump()
         if hasattr(obj, "dict"):

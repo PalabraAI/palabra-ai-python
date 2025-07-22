@@ -1,8 +1,10 @@
 import asyncio
+from typing import Any
 
 import aiohttp
 from pydantic import BaseModel, Field
 
+from palabra_ai.exc import ConfigurationError
 from palabra_ai.util.logger import error, warning
 
 
@@ -12,6 +14,31 @@ class SessionCredentials(BaseModel):
     room_name: str = Field(..., description="livekit room name")
     stream_url: str = Field(..., description="livekit url")
     control_url: str = Field(..., description="websocket management api url")
+
+    def model_post_init(self, context: Any, /) -> None:
+        super().model_post_init(context)
+        if not self.jwt_token or not self.control_url or not self.stream_url:
+            raise ConfigurationError("Missing JWT token, control URL, or stream URL")
+
+    @property
+    def jwt_token(self) -> str:
+        if not len(self.publisher) > 0:
+            raise ConfigurationError(
+                f"Publisher token is missing or invalid, got: {self.publisher}"
+            )
+        return self.publisher[0]
+
+    @property
+    def ws_url(self) -> str:
+        if not self.control_url:
+            raise ConfigurationError("Control (ws) URL is missing")
+        return self.control_url
+
+    @property
+    def webrtc_url(self) -> str:
+        if not self.stream_url:
+            raise ConfigurationError("Stream URL is missing")
+        return self.stream_url
 
 
 class PalabraRESTClient:

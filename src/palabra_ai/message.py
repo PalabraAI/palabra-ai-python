@@ -1,13 +1,19 @@
-import json
-from dataclasses import dataclass
+import time
+from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any, ClassVar, Union
+from typing import TYPE_CHECKING, Any, ClassVar, Union
 
+import orjson
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
 
-from palabra_ai.exc import ApiError, ApiValidationError
+from palabra_ai.enum import Channel, Direction
+from palabra_ai.exc import ApiError, ApiValidationError, TaskNotFoundError
 from palabra_ai.lang import Language
 from palabra_ai.util.logger import debug
+from palabra_ai.util.orjson import from_json
+
+if TYPE_CHECKING:
+    from palabra_ai.config import Config
 
 
 class KnownRawType(StrEnum):
@@ -16,6 +22,18 @@ class KnownRawType(StrEnum):
     string = "string"
     json = "json"
     unknown = "unknown"
+
+
+@dataclass
+class Dbg:
+    ch: Channel | None
+    dir: Direction | None
+    ts: float = field(default_factory=time.time)
+
+    @classmethod
+    def empty(cls):
+        """Create an empty debug object"""
+        return cls(ch=None, dir=None, ts=time.time())
 
 
 @dataclass
@@ -30,6 +48,7 @@ class Message(BaseModel):
 
     type_: "Message.Type" = Field(alias="message_type")
     _known_raw: KnownRaw | None = PrivateAttr(default=None)
+    _dbg: Dbg | None = PrivateAttr(default=None)
 
     class Type(StrEnum):
         PARTIAL_TRANSCRIPTION = "partial_transcription"
@@ -38,6 +57,11 @@ class Message(BaseModel):
         PARTIAL_TRANSLATED_TRANSCRIPTION = "partial_translated_transcription"
         PIPELINE_TIMINGS = "pipeline_timings"
         ERROR = "error"  # For error messages
+        END_TASK = "end_task"  # For end_task messages
+        SET_TASK = "set_task"  # For set_task messages
+        GET_TASK = "get_task"  # For get_task messages
+        CURRENT_TASK = "current_task"  # For current_task messages
+        EOS = "eos"  # End of stream marker
         _QUEUE_LEVEL = "queue_level"
         _EMPTY = "empty"  # For empty {} messages
         _UNKNOWN = "unknown"  # For unrecognized message formats
@@ -81,6 +105,8 @@ class Message(BaseModel):
         "TranscriptionMessage",
         "UnknownMessage",
         "ErrorMessage",
+        "CurrentTaskMessage",
+        "EosMessage",
     ]:
         """Factory method to create appropriate message type using pattern matching"""
         data = known_raw.data
@@ -92,8 +118,8 @@ class Message(BaseModel):
                 and isinstance(data["data"], str)
             ):
                 try:
-                    data["data"] = json.loads(data["data"])
-                except json.JSONDecodeError:
+                    data["data"] = from_json(data["data"])
+                except orjson.JSONDecodeError:
                     debug("Failed to decode nested JSON in 'data' field")
 
             match data:
@@ -114,6 +140,12 @@ class Message(BaseModel):
                 # Pipeline timings
                 case {"message_type": Message.Type.PIPELINE_TIMINGS.value, "data": _}:
                     return PipelineTimingsMessage.create(known_raw)
+
+                case {"message_type": Message.Type.CURRENT_TASK.value, "data": _}:
+                    return CurrentTaskMessage.create(known_raw)
+
+                case {"message_type": Message.Type.EOS.value, "data": _}:
+                    return EosMessage.create(known_raw)
 
                 # Queue status: non-empty dict without message_type
                 case dict() as d if d and "message_type" not in d and len(d) == 1:
@@ -154,13 +186,13 @@ class Message(BaseModel):
 
             case bytes() as b if b.startswith(b"{") and b.endswith(b"}"):
                 try:
-                    return KnownRaw(KnownRawType.json, json.loads(b.decode("utf-8")))
+                    return KnownRaw(KnownRawType.json, from_json(b))
                 except Exception as e:
                     return KnownRaw(KnownRawType.binary, b, e)
 
             case str() as s if s.startswith("{") and s.endswith("}"):
                 try:
-                    return KnownRaw(KnownRawType.json, json.loads(s))
+                    return KnownRaw(KnownRawType.json, from_json(s))
                 except Exception as e:
                     return KnownRaw(KnownRawType.string, s, e)
 
@@ -189,6 +221,63 @@ class EmptyMessage(Message):
 
     def __str__(self) -> str:
         return "⚪"
+
+
+class EndTaskMessage(Message):
+    ### {"message_type": "end_task", "data": {"force": True}}
+    """End task message"""
+
+    type_: Message.Type = Field(default=Message.Type.END_TASK, alias="message_type")
+    force: bool = Field(default=False, description="Force end the task")
+    eos_timeout: int | None = Field(
+        default=5, description="Timeout for end of stream in seconds"
+    )
+
+    def model_dump(self, **kwargs) -> dict[str, Any]:
+        return {
+            "message_type": self.type_.value,
+            "data": {"force": self.force, "eos_timeout": self.eos_timeout},
+        }
+
+
+class EosMessage(Message):
+    """End of stream message"""
+
+    type_: Message.Type = Field(default=Message.Type.EOS, alias="message_type")
+
+    def model_dump(self, **kwargs) -> dict[str, Any]:
+        return {"message_type": self.type_.value, "data": {}}
+
+
+class SetTaskMessage(Message):
+    """Set task message"""
+
+    type_: Message.Type = Field(default=Message.Type.SET_TASK, alias="message_type")
+    data: dict[str, Any] = Field(
+        default_factory=dict, description="Task configuration data"
+    )
+
+    @classmethod
+    def from_config(cls, cfg: "Config"):
+        return cls(data=cfg.to_dict())
+
+    def model_dump(self, **kwargs) -> dict[str, Any]:
+        return {
+            "message_type": self.type_.value,
+            "data": self.data,
+        }
+
+
+class GetTaskMessage(Message):
+    """Get task message"""
+
+    type_: Message.Type = Field(default=Message.Type.GET_TASK, alias="message_type")
+
+    def model_dump(self, **kwargs) -> dict[str, Any]:
+        return {
+            "message_type": self.type_.value,
+            "data": {},
+        }
 
 
 class QueueStatusMessage(Message):
@@ -247,6 +336,9 @@ class ErrorMessage(Message):
         match known_raw.data:
             case {"data": {"code": "VALIDATION_ERROR", "desc": desc}}:
                 obj._exc = ApiValidationError(str(desc))
+                obj.data = known_raw.data
+            case {"data": {"code": "NOT_FOUND", "desc": desc}}:
+                obj._exc = TaskNotFoundError(str(desc))
                 obj.data = known_raw.data
             case _:
                 obj._exc = ApiError(str(known_raw.data))
@@ -394,3 +486,26 @@ class TranscriptionMessage(Message):
 
     def __str__(self) -> str:
         return self.text
+
+
+class CurrentTaskMessage(Message):
+    """Current task message"""
+
+    type_: Message.Type = Field(default=Message.Type.CURRENT_TASK, alias="message_type")
+    data: dict[str, Any] = Field(default_factory=dict, description="Current task data")
+
+    @model_validator(mode="before")
+    @classmethod
+    def extract_from_nested(cls, values: dict[str, Any]) -> dict[str, Any]:
+        if "data" in values and "message_type" in values:
+            return {
+                "message_type": values["message_type"],
+                "data": values["data"],
+            }
+        return values
+
+    def model_dump(self, **kwargs) -> dict[str, Any]:
+        return {
+            "message_type": self.type_.value,
+            "data": self.data,
+        }

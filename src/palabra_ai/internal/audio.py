@@ -74,7 +74,7 @@ def resample_pcm(
 
 def convert_any_to_pcm16(
     audio_data: bytes,
-    sample_rate: int = 16000,
+    sample_rate: int,
     layout: str = "mono",
     normalize: bool = True,
 ) -> bytes:

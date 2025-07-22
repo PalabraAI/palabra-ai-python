@@ -1,17 +1,6 @@
-from palabra_ai.adapter.buffer import (
-    BufferReader,
-    BufferWriter,
-    RunAsPipe,
-)  # noqa: F401
-from palabra_ai.adapter.device import (  # noqa: F401
-    DeviceManager,
-    DeviceReader,
-    DeviceWriter,
-)
-from palabra_ai.adapter.dummy import DummyReader, DummyWriter  # noqa: F401
-from palabra_ai.adapter.file import FileReader, FileWriter  # noqa: F401
 from palabra_ai.client import PalabraAI  # noqa: F401
 from palabra_ai.config import Config, SourceLang, TargetLang  # noqa: F401
+from palabra_ai.enum import MessageType  # noqa: F401
 from palabra_ai.lang import (
     AR,
     AR_AE,
@@ -56,7 +45,21 @@ from palabra_ai.lang import (
     UK,
     VI,
     ZH,
+    Language,
 )  # noqa: F401
+from palabra_ai.message import Message, TranscriptionMessage  # noqa: F401
+from palabra_ai.task.adapter.buffer import (  # noqa: F401
+    BufferReader,
+    BufferWriter,
+    RunAsPipe,
+)
+from palabra_ai.task.adapter.device import (  # noqa: F401
+    DeviceManager,
+    DeviceReader,
+    DeviceWriter,
+)
+from palabra_ai.task.adapter.dummy import DummyReader, DummyWriter  # noqa: F401
+from palabra_ai.task.adapter.file import FileReader, FileWriter  # noqa: F401
 
 __version__ = "0.2.4"
 
@@ -79,6 +82,12 @@ __all__ = [
     # Dummy Adapters
     "DummyReader",
     "DummyWriter",
+    # Messages
+    "MessageType",
+    "TranscriptionMessage",
+    "Message",
+    # Language stuff
+    "Language",
     # Languages
     "AR",
     "AR_AE",

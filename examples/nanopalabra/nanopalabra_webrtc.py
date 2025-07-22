@@ -184,12 +184,10 @@ MINIMAL_SETTINGS = {
     "input_stream": {"content_type": "audio", "source": {"type": "webrtc"}},
     "output_stream": {"content_type": "audio", "target": {"type": "webrtc"}},
     "pipeline": {
-        "preprocessing": {},
         "transcription": {"source_language": "en"},
         "translations": [
             {
-                "target_language": "es",
-                "speech_generation": {},
+                "target_language": "es"
             }
         ],
     },

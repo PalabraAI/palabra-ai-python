@@ -1,9 +1,20 @@
 import sys
 from dataclasses import dataclass, field
-from logging import DEBUG, INFO, WARNING
+
+# from logging import CRITICAL, DEBUG, ERROR, INFO, WARNING
 from pathlib import Path
 
 from loguru import logger
+
+CRITICAL = 50
+FATAL = CRITICAL
+ERROR = 40
+WARNING = 30
+WARN = WARNING
+SUCCESS = 25  # Custom level for successful operations
+INFO = 20
+DEBUG = 10
+NOTSET = 0
 
 
 @dataclass
@@ -20,7 +31,7 @@ class Library:
         if debug:
             self(DEBUG)
         elif silent:
-            self(WARNING)
+            self(SUCCESS)
         else:
             self(INFO)
 
@@ -103,6 +114,7 @@ def set_logging(silent: bool, debug: bool, log_file: Path = None):
 
 
 # Direct exports from logger
+success = logger.success
 debug = logger.debug
 info = logger.info
 warning = logger.warning

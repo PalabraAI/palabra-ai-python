@@ -1,17 +1,59 @@
 import abc
 import asyncio
 from dataclasses import KW_ONLY, dataclass, field
+from typing import TYPE_CHECKING
 
-from palabra_ai.base.task_event import TaskEvent
-from palabra_ai.config import DEEP_DEBUG
 from palabra_ai.constant import SHUTDOWN_TIMEOUT
 from palabra_ai.util.emoji import Emoji
 from palabra_ai.util.logger import debug, error, warning
+
+if TYPE_CHECKING:
+    from palabra_ai.config import Config
+
+
+class TaskEvent(asyncio.Event):
+    _owner: str = ""
+
+    def __init__(self, *args, **kwargs):
+        # self._log = logger
+        super().__init__(*args, **kwargs)
+
+    def set_owner(self, owner: str):
+        self._owner = owner
+
+    def log(self):
+        status = "[+] " if self.is_set() else "[-] "
+        debug(f"{status}{self._owner}")
+
+    def __pos__(self):
+        self.set()
+        self.log()
+        return self
+
+    def __neg__(self):
+        self.clear()
+        self.log()
+        return self
+
+    def __bool__(self):
+        return self.is_set()
+
+    def __await__(self):
+        if self.is_set():
+            return self._immediate_return().__await__()
+        return self.wait().__await__()
+
+    async def _immediate_return(self):
+        return
+
+    def __repr__(self):
+        return f"TaskEvent({self.is_set()})"
 
 
 @dataclass
 class Task(abc.ABC):
     _: KW_ONLY
+    cfg: "Config"
     root_tg: asyncio.TaskGroup = field(default=None, init=False, repr=False)
     sub_tg: asyncio.TaskGroup = field(
         default_factory=asyncio.TaskGroup, init=False, repr=False
@@ -54,7 +96,12 @@ class Task(abc.ABC):
                     raise
                 except Exception as e:
                     self._state.append("💥")
-                    error(f"{self.name}.run() failed with error: {e}, exiting...")
+                    error(
+                        f"{self.name}.run() failed with error: {e}, exiting...",
+                        exc_info=True,
+                    )
+                    self.sub_tg._abort()
+                    self.root_tg._abort()
                     raise
         finally:
             +self.stopper  # noqa
@@ -126,6 +173,8 @@ class Task(abc.ABC):
         return self._task
 
     def __str__(self):
+        from palabra_ai.config import DEEP_DEBUG
+
         ready = Emoji.bool(self.ready)
         stopper = Emoji.bool(self.stopper)
         eof = Emoji.bool(self.eof)

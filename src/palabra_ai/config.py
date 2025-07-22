@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from functools import cached_property
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any
 
@@ -14,8 +15,8 @@ from pydantic import (
     model_validator,
 )
 
-from palabra_ai.base.message import Message
 from palabra_ai.constant import (
+    BYTES_PER_SAMPLE,
     CONTEXT_SIZE_DEFAULT,
     DESIRED_QUEUE_LEVEL_MS_DEFAULT,
     ENERGY_VARIANCE_FACTOR_DEFAULT,
@@ -41,12 +42,14 @@ from palabra_ai.constant import (
 )
 from palabra_ai.exc import ConfigurationError
 from palabra_ai.lang import Language
+from palabra_ai.message import Message
 from palabra_ai.types import T_ON_TRANSCRIPTION
 from palabra_ai.util.logger import set_logging
 from palabra_ai.util.orjson import from_json, to_json
 
 if TYPE_CHECKING:
-    from palabra_ai.base.adapter import Reader, Writer
+    from palabra_ai.task.adapter.base import Reader, Writer
+
 
 env = Env(prefix="PALABRA_")
 env.read_env()
@@ -75,16 +78,98 @@ LanguageField = Annotated[
 ]
 
 
+class IoMode(BaseModel):
+    name: str
+    sample_rate: int
+    num_channels: int
+    chunk_duration_ms: int
+
+    @cached_property
+    def samples_per_channel(self) -> int:
+        return int(self.sample_rate * (self.chunk_duration_ms / 1000))
+
+    @cached_property
+    def bytes_per_channel(self) -> int:
+        return self.samples_per_channel * BYTES_PER_SAMPLE
+
+    @cached_property
+    def chunk_samples(self) -> int:
+        return self.samples_per_channel * self.num_channels
+
+    @cached_property
+    def chunk_bytes(self) -> int:
+        return self.bytes_per_channel * self.num_channels
+
+    @cached_property
+    def for_audio_frame(self) -> tuple[int, int, int]:
+        return self.sample_rate, self.num_channels, self.samples_per_channel
+
+    def __str__(self) -> str:
+        return f"[{self.name}: {self.sample_rate}Hz, {self.num_channels}ch, {self.chunk_duration_ms}ms]"
+
+
+class WebrtcMode(IoMode):
+    name: str = "webrtc"
+    sample_rate: int = 48000
+    num_channels: int = 1
+    chunk_duration_ms: int = 10
+
+    def model_dump(self, *args, **kwargs) -> dict[str, Any]:
+        return {
+            "input_stream": {
+                "content_type": "audio",
+                "source": {
+                    "type": "webrtc",
+                },
+            },
+            "output_stream": {
+                "content_type": "audio",
+                "target": {
+                    "type": "webrtc",
+                },
+            },
+        }
+
+
+class WsMode(IoMode):
+    name: str = "ws"
+    sample_rate: int = 24000
+    num_channels: int = 1
+    chunk_duration_ms: int = 320
+
+    def model_dump(self, *args, **kwargs) -> dict[str, Any]:
+        return {
+            "input_stream": {
+                "content_type": "audio",
+                "source": {
+                    "type": "ws",
+                    "format": "pcm_s16le",
+                    "sample_rate": self.sample_rate,
+                    "channels": self.num_channels,
+                },
+            },
+            "output_stream": {
+                "content_type": "audio",
+                "target": {
+                    "type": "ws",
+                    "format": "pcm_s16le",
+                    "sample_rate": self.sample_rate,
+                    "channels": self.num_channels,
+                },
+            },
+        }
+
+
 class Stream(BaseModel):
     content_type: str = "audio"
 
 
 class InputStream(Stream):
-    source: dict[str, str] = {"type": "livekit"}
+    source: dict[str, str] = {"type": "webrtc"}
 
 
 class OutputStream(Stream):
-    target: dict[str, str] = {"type": "livekit"}
+    target: dict[str, str] = {"type": "webrtc"}
 
 
 class Preprocessing(BaseModel):
@@ -277,18 +362,19 @@ class Config(BaseModel):
     # TODO: SIMULTANEOUS TRANSLATION!!!
     targets: list[TargetLang] | None = Field(default=None)
 
-    input_stream: InputStream = Field(default_factory=InputStream)
-    output_stream: OutputStream = Field(default_factory=OutputStream)
+    # input_stream: InputStream = Field(default_factory=InputStream)
+    # output_stream: OutputStream = Field(default_factory=OutputStream)
+
     preprocessing: Preprocessing = Field(default_factory=Preprocessing)
     translation_queue_configs: QueueConfigs = Field(default_factory=QueueConfigs)
     allowed_message_types: list[str] = [mt.value for mt in Message.ALLOWED_TYPES]
 
+    mode: IoMode = Field(default_factory=WsMode, exclude=True)
     silent: bool = Field(default=SILENT, exclude=True)
     log_file: Path | str | None = Field(default=LOG_FILE, exclude=True)
     debug: bool = Field(default=DEBUG, exclude=True)
     deep_debug: bool = Field(default=DEEP_DEBUG, exclude=True)
     timeout: int = Field(default=TIMEOUT, exclude=True)  # TODO!
-
     trace_file: Path | str | None = Field(default=None, exclude=True)
 
     def __init__(
@@ -381,15 +467,10 @@ class Config(BaseModel):
             "allowed_message_types": data.pop("allowed_message_types"),
         }
 
-        # Final structure
-        result = {
-            "input_stream": data.pop("input_stream"),
-            "output_stream": data.pop("output_stream"),
-            "pipeline": pipeline,
-        }
+        # data.pop("input_stream", None)
+        # data.pop("output_stream", None)
 
-        # Add any remaining fields
-        result.update(data)
+        result = {**data, **{"pipeline": pipeline}, **self.mode.model_dump()}
 
         return result
 
