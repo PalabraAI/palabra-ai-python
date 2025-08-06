@@ -120,8 +120,11 @@ class Logger(Task):
                     debug(f"Received None from {q}, stopping consumer")
                     break
 
-                dbg_msg = getattr(msg, "_dbg", asdict(Dbg.empty()))
-                dbg_msg["msg"] = msg.model_dump()
+                dbg_msg = asdict(getattr(msg, "_dbg", Dbg.empty()))
+                if not isinstance(dbg_msg, dict):
+                    dbg_msg["msg"] = msg.model_dump()
+                else:
+                    dbg_msg["msg"] = msg
                 self._messages.append(dbg_msg)
                 q.task_done()
             except TimeoutError:

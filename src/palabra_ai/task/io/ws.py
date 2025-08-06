@@ -15,7 +15,7 @@ class WsIo(Io):
     _: KW_ONLY
     ws: ClientConnection | None = field(default=None, init=False)
     _ws_cm: object | None = field(default=None, init=False)
-    dbg_in: list = field(default_factory=list, init=False)
+    # dbg_in: list = field(default_factory=list, init=False)
 
     @property
     def dsn(self) -> str:
@@ -31,8 +31,11 @@ class WsIo(Io):
     async def send_frame(self, frame: AudioFrame) -> None:
         raw = frame.to_ws()
         debug(f"<- {frame}")
-        await self.ws.send(raw)
-        self.dbg_in.append((frame, raw))
+        _dbg = Dbg(Channel.WS, Direction.IN)
+        await self.send_message(raw)
+        frame._dbg = _dbg
+        self.in_msg_foq.publish(frame)
+        # self.dbg_in.append((frame, raw))
 
     def new_frame(self) -> AudioFrame:
         return AudioFrame.create(*self.cfg.mode.for_audio_frame)
@@ -42,6 +45,7 @@ class WsIo(Io):
 
         try:
             async for raw_msg in self.ws:
+                _dbg = Dbg(Channel.WS, Direction.OUT)
                 if self.stopper or raw_msg is None:
                     debug("Stopping ws_receiver due to stopper or None message")
                     raise EOFError("WebSocket connection closed or stopper triggered")
@@ -54,10 +58,12 @@ class WsIo(Io):
                 )
                 if audio_frame:
                     debug(f"-> {audio_frame!r}")
+                    audio_frame._dbg = _dbg
                     self.writer.q.put_nowait(audio_frame)
+                    self.out_msg_foq.publish(audio_frame)
                 else:
                     msg = Message.decode(raw_msg)
-                    msg._dbg = Dbg(Channel.WS, Direction.OUT)
+                    msg._dbg = _dbg
                     self.out_msg_foq.publish(msg)
                     debug(f"-> {msg!r}")
                     if isinstance(msg, EosMessage):

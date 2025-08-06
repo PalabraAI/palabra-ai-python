@@ -4,6 +4,7 @@ from asyncio import get_running_loop, sleep
 from collections.abc import Callable
 from dataclasses import KW_ONLY, dataclass, field
 from typing import TYPE_CHECKING
+from typing import Union
 
 import numpy as np
 
@@ -26,6 +27,7 @@ if TYPE_CHECKING:
     from palabra_ai.internal.rest import SessionCredentials
     from palabra_ai.message import Message
     from palabra_ai.task.adapter import Reader, Writer
+    from palabra_ai.audio import AudioFrame
 
 
 @dataclass
@@ -34,8 +36,8 @@ class Io(Task):
     reader: "Reader"
     writer: "Writer"
     _: KW_ONLY
-    in_msg_foq: FanoutQueue["Message"] = field(default_factory=FanoutQueue, init=False)
-    out_msg_foq: FanoutQueue["Message"] = field(default_factory=FanoutQueue, init=False)
+    in_msg_foq: FanoutQueue[Union["Message", "AudioFrame"]] = field(default_factory=FanoutQueue, init=False)
+    out_msg_foq: FanoutQueue[Union["Message", "AudioFrame"]] = field(default_factory=FanoutQueue, init=False)
     _buffer_callback: Callable | None = field(default=None, init=False)
 
     @property

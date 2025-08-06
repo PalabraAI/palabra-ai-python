@@ -10,6 +10,7 @@ import numpy as np
 from livekit.rtc import AudioFrame as RtcAudioFrame
 
 from palabra_ai.constant import BYTES_PER_SAMPLE
+from palabra_ai.enum import Direction
 from palabra_ai.util.logger import error
 from palabra_ai.util.orjson import from_json, to_json
 
@@ -17,7 +18,7 @@ from palabra_ai.util.orjson import from_json, to_json
 class AudioFrame:
     """Lightweight AudioFrame replacement with __slots__ for performance"""
 
-    __slots__ = ("data", "sample_rate", "num_channels", "samples_per_channel")
+    __slots__ = ("_dbg", "data", "sample_rate", "num_channels", "samples_per_channel")
 
     def __init__(
         self,
@@ -163,6 +164,18 @@ class AudioFrame:
                 "data": {"data": base64.b64encode(self.data)},
             }
         )
+
+    def model_dump(self):
+        return {
+            "message_type": "input_audio_data" if self._dbg.direction == Direction.IN else "output_audio_data",
+            "data": {
+                "data_size": len(self.data),
+                "sample_rate": self.sample_rate,
+                "num_channels": self.num_channels,
+                "samples_per_channel": self.samples_per_channel,
+            }
+        }
+
 
 
 @dataclass

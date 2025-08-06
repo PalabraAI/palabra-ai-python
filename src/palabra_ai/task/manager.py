@@ -113,9 +113,9 @@ class Manager(Task):
         )
 
         # self.rt = Realtime(self.cfg, self.io)
-        # if self.cfg.log_file:
-        #     self.logger = Logger(self.cfg, self.rt)
-        #
+        if self.cfg.log_file:
+            self.logger = Logger(self.cfg, self.io)
+
         self.transcription = Transcription(self.cfg, self.io)
         #
         # self.receiver = ReceiverTranslatedAudio(
@@ -147,7 +147,7 @@ class Manager(Task):
                     self.writer,
                     # self.rtmon,
                     self.transcription,
-                    # self.logger,
+                    self.logger,
                     self,
                     self.stat,
                 ]
