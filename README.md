@@ -367,11 +367,11 @@ output_devices = dm.get_output_devices()
 
 ## Supported languages 🌍
 
-### Speech recognition languages 🎤
-🇸🇦 Arabic (AR), 🇨🇳 Chinese (ZH), 🇨🇿 Czech (CS), 🇩🇰 Danish (DA), 🇳🇱 Dutch (NL), 🇬🇧 English (EN), 🇫🇮 Finnish (FI), 🇫🇷 French (FR), 🇩🇪 German (DE), 🇬🇷 Greek (EL), 🇮🇱 Hebrew (HE), 🇭🇺 Hungarian (HU), 🇮🇹 Italian (IT), 🇯🇵 Japanese (JA), 🇰🇷 Korean (KO), 🇵🇱 Polish (PL), 🇵🇹 Portuguese (PT), 🇷🇺 Russian (RU), 🇪🇸 Spanish (ES), 🇹🇷 Turkish (TR), 🇺🇦 Ukrainian (UK)
+### Speech recognition languages 🎤 (Source)
+🇸🇦 Arabic (AR), 🌐 Bashkir (BA), 🇧🇾 Belarusian (BE), 🇧🇬 Bulgarian (BG), 🇧🇩 Bengali (BN), 🌐 Catalan (CA), 🇨🇿 Czech (CS), 🏴 Welsh (CY), 🇩🇰 Danish (DA), 🇩🇪 German (DE), 🇬🇷 Greek (EL), 🇬🇧 English (EN), 🌐 Esperanto (EO), 🇪🇸 Spanish (ES), 🇪🇪 Estonian (ET), 🌐 Basque (EU), 🇮🇷 Persian (FA), 🇫🇮 Finnish (FI), 🇫🇷 French (FR), 🇮🇪 Irish (GA), 🌐 Galician (GL), 🇮🇱 Hebrew (HE), 🇮🇳 Hindi (HI), 🇭🇷 Croatian (HR), 🇭🇺 Hungarian (HU), 🌐 Interlingua (IA), 🇮🇩 Indonesian (ID), 🇮🇹 Italian (IT), 🇯🇵 Japanese (JA), 🇰🇷 Korean (KO), 🇱🇹 Lithuanian (LT), 🇱🇻 Latvian (LV), 🇲🇳 Mongolian (MN), 🇮🇳 Marathi (MR), 🇲🇾 Malay (MS), 🇲🇹 Maltese (MT), 🇳🇱 Dutch (NL), 🇳🇴 Norwegian (NO), 🇵🇱 Polish (PL), 🇵🇹 Portuguese (PT), 🇷🇴 Romanian (RO), 🇷🇺 Russian (RU), 🇸🇰 Slovak (SK), 🇸🇮 Slovenian (SL), 🇸🇪 Swedish (SV), 🇰🇪 Swahili (SW), 🇮🇳 Tamil (TA), 🇹🇭 Thai (TH), 🇹🇷 Turkish (TR), 🌐 Uyghur (UG), 🇺🇦 Ukrainian (UK), 🇵🇰 Urdu (UR), 🇻🇳 Vietnamese (VI), 🇨🇳 Chinese (ZH)
 
-### Translation languages 🔄
-🇸🇦 Arabic (AR), 🇧🇬 Bulgarian (BG), 🇨🇳 Chinese Mandarin (ZH), 🇨🇿 Czech (CS), 🇩🇰 Danish (DA), 🇳🇱 Dutch (NL), 🇬🇧 English UK (EN_GB), 🇺🇸 English US (EN_US), 🇫🇮 Finnish (FI), 🇫🇷 French (FR), 🇩🇪 German (DE), 🇬🇷 Greek (EL), 🇮🇱 Hebrew (HE), 🇭🇺 Hungarian (HU), 🇮🇩 Indonesian (ID), 🇮🇹 Italian (IT), 🇯🇵 Japanese (JA), 🇰🇷 Korean (KO), 🇵🇱 Polish (PL), 🇵🇹 Portuguese (PT), 🇧🇷 Portuguese Brazilian (PT_BR), 🇷🇴 Romanian (RO), 🇷🇺 Russian (RU), 🇸🇰 Slovak (SK), 🇪🇸 Spanish (ES), 🇲🇽 Spanish Mexican (ES_MX), 🇸🇪 Swedish (SV), 🇹🇷 Turkish (TR), 🇺🇦 Ukrainian (UK), 🇻🇳 Vietnamese (VI)
+### Translation languages 🔄 (Target)
+🇸🇦 Arabic (AR), 🇦🇿 Azerbaijani (AZ), 🇧🇾 Belarusian (BE), 🇧🇬 Bulgarian (BG), 🇧🇦 Bosnian (BS), 🌐 Catalan (CA), 🇨🇿 Czech (CS), 🏴 Welsh (CY), 🇩🇰 Danish (DA), 🇩🇪 German (DE), 🇬🇷 Greek (EL), 🇬🇧 English (EN), 🇦🇺 English Australian (EN_AU), 🇨🇦 English Canadian (EN_CA), 🇬🇧 English UK (EN_GB), 🇺🇸 English US (EN_US), 🇪🇸 Spanish (ES), 🇲🇽 Spanish Mexican (ES_MX), 🇪🇪 Estonian (ET), 🇫🇮 Finnish (FI), 🇵🇭 Filipino (FIL), 🇫🇷 French (FR), 🇨🇦 French Canadian (FR_CA), 🌐 Galician (GL), 🇮🇱 Hebrew (HE), 🇮🇳 Hindi (HI), 🇭🇷 Croatian (HR), 🇭🇺 Hungarian (HU), 🇮🇩 Indonesian (ID), 🇮🇸 Icelandic (IS), 🇮🇹 Italian (IT), 🇯🇵 Japanese (JA), 🇰🇿 Kazakh (KK), 🇰🇷 Korean (KO), 🇱🇹 Lithuanian (LT), 🇱🇻 Latvian (LV), 🇲🇰 Macedonian (MK), 🇲🇾 Malay (MS), 🇳🇱 Dutch (NL), 🇳🇴 Norwegian (NO), 🇵🇱 Polish (PL), 🇵🇹 Portuguese (PT), 🇧🇷 Portuguese Brazilian (PT_BR), 🇷🇴 Romanian (RO), 🇷🇺 Russian (RU), 🇸🇰 Slovak (SK), 🇸🇮 Slovenian (SL), 🇷🇸 Serbian (SR), 🇸🇪 Swedish (SV), 🇰🇪 Swahili (SW), 🇮🇳 Tamil (TA), 🇹🇷 Turkish (TR), 🇺🇦 Ukrainian (UK), 🇵🇰 Urdu (UR), 🇻🇳 Vietnamese (VI), 🇨🇳 Chinese (ZH), 🇨🇳 Chinese Simplified (ZH_HANS), 🇹🇼 Chinese Traditional (ZH_HANT)
 
 ### Available language constants 📚
 
@@ -380,11 +380,11 @@ from palabra_ai import (
     # English variants - 1.5+ billion speakers (including L2)
     EN, EN_AU, EN_CA, EN_GB, EN_US,
 
-    # Chinese - 1.3+ billion speakers
-    ZH,
+    # Chinese variants - 1.3+ billion speakers
+    ZH, ZH_HANS, ZH_HANT,  # ZH_HANS and ZH_HANT for translation only
 
-    # Hindi - 600+ million speakers
-    HI,
+    # Hindi & Indian languages - 800+ million speakers
+    HI, BN, MR, TA, UR,
 
     # Spanish variants - 500+ million speakers
     ES, ES_MX,
@@ -398,25 +398,48 @@ from palabra_ai import (
     # Portuguese variants - 260+ million speakers
     PT, PT_BR,
 
-    # Russian - 260+ million speakers
-    RU,
+    # Russian & Slavic languages - 350+ million speakers
+    RU, UK, PL, CS, SK, BG, HR, SR, SL, MK, BE,
 
     # Japanese & Korean - 200+ million speakers combined
     JA, KO,
 
     # Southeast Asian languages - 400+ million speakers
-    ID, VI, TA, MS, FIL,
+    ID, VI, MS, FIL, TH,
 
     # Germanic languages - 150+ million speakers
-    DE, NL, SV, NO, DA,
+    DE, NL, SV, NO, DA, IS,
 
-    # Other European languages - 300+ million speakers
-    TR, IT, PL, UK, RO, EL, HU, CS, BG, SK, FI, HR,
+    # Romance languages (other) - 100+ million speakers
+    IT, RO, CA, GL,
 
-    # Other languages - 40+ million speakers
-    AZ, HE
+    # Turkic & Central Asian languages - 200+ million speakers
+    TR, AZ, KK, UG,
+
+    # Baltic languages - 10+ million speakers
+    LT, LV, ET,
+
+    # Other European languages - 50+ million speakers
+    EL, HU, FI, EU, CY, MT,
+
+    # Middle Eastern languages - 50+ million speakers
+    HE, FA,
+
+    # African languages - 100+ million speakers
+    SW,
+
+    # Asian languages (other) - 50+ million speakers
+    MN, BA,
+
+    # Constructed languages
+    EO, IA,
+
+    # Other languages
+    GA, BS
 )
 ```
+
+**Note**: Source languages (for speech recognition) and target languages (for translation) have different support. The SDK automatically validates language compatibility when creating `SourceLang` and `TargetLang` objects.
 
 ## Development status 🛠️
 

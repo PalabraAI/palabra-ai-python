@@ -134,3 +134,56 @@ def test_language_registry():
     new_lang = registry.get_or_create("new")
     assert new_lang.code == "new"
     assert new_lang.flag == "🌐❓"
+
+
+def test_valid_source_language():
+    """Test source language validation"""
+    from palabra_ai.lang import (
+        is_valid_source_language, 
+        AR, BA, AZ, FIL, TH
+    )
+    
+    # Valid source languages
+    assert is_valid_source_language(AR) is True  # Arabic can be source
+    assert is_valid_source_language(EN) is True  # English can be source
+    assert is_valid_source_language(BA) is True  # Bashkir can be source
+    assert is_valid_source_language(TH) is True  # Thai can be source
+    
+    # Invalid source languages
+    assert is_valid_source_language(AZ) is False  # Azerbaijani cannot be source
+    assert is_valid_source_language(FIL) is False  # Filipino cannot be source
+
+
+def test_valid_target_language():
+    """Test target language validation"""
+    from palabra_ai.lang import (
+        is_valid_target_language,
+        ES, EN_US, ZH_HANS, BA, TH, AZ
+    )
+    
+    # Valid target languages
+    assert is_valid_target_language(ES) is True  # Spanish can be target
+    assert is_valid_target_language(EN_US) is True  # English US can be target
+    assert is_valid_target_language(ZH_HANS) is True  # Chinese Simplified can be target
+    assert is_valid_target_language(AZ) is True  # Azerbaijani can be target
+    
+    # Invalid target languages
+    assert is_valid_target_language(BA) is False  # Bashkir cannot be target
+    assert is_valid_target_language(TH) is False  # Thai cannot be target
+
+
+def test_auto_detectable_language():
+    """Test auto-detectable language validation"""
+    from palabra_ai.lang import (
+        is_auto_detectable_language,
+        EN, ES, AR, BA, AZ
+    )
+    
+    # Auto-detectable languages
+    assert is_auto_detectable_language(EN) is True
+    assert is_auto_detectable_language(ES) is True
+    assert is_auto_detectable_language(AR) is True
+    
+    # Non auto-detectable languages
+    assert is_auto_detectable_language(BA) is False  # Bashkir not in auto-detect
+    assert is_auto_detectable_language(AZ) is False  # Azerbaijani not in auto-detect
