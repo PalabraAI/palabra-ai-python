@@ -94,8 +94,14 @@ AR = Language("ar", flag="🇸🇦")
 AR_AE = Language("ar-ae", flag="🇦🇪")
 AR_SA = Language("ar-sa", flag="🇸🇦")
 AZ = Language("az", flag="🇦🇿")
+BA = Language("ba", flag="🌐")  # Bashkir
+BE = Language("be", flag="🇧🇾")  # Belarusian
 BG = Language("bg", flag="🇧🇬")
+BN = Language("bn", flag="🇧🇩")  # Bengali
+BS = Language("bs", flag="🇧🇦")  # Bosnian
+CA = Language("ca", flag="🌐")  # Catalan
 CS = Language("cs", flag="🇨🇿")
+CY = Language("cy", flag="🏴")  # Welsh
 DA = Language("da", flag="🇩🇰")
 DE = Language("de", flag="🇩🇪")
 EL = Language("el", flag="🇬🇷")
@@ -104,21 +110,36 @@ EN_AU = Language("en-au", flag="🇦🇺")
 EN_CA = Language("en-ca", flag="🇨🇦")
 EN_GB = Language("en-gb", flag="🇬🇧")
 EN_US = Language("en-us", flag="🇺🇸")
+EO = Language("eo", flag="🌐")  # Esperanto
 ES = Language("es", flag="🇪🇸")
 ES_MX = Language("es-mx", flag="🇲🇽")
+ET = Language("et", flag="🇪🇪")  # Estonian
+EU = Language("eu", flag="🌐")  # Basque
+FA = Language("fa", flag="🇮🇷")  # Persian
 FI = Language("fi", flag="🇫🇮")
 FIL = Language("fil", flag="🇵🇭")
 FR = Language("fr", flag="🇫🇷")
 FR_CA = Language("fr-ca", flag="🇨🇦")
+GA = Language("ga", flag="🇮🇪")  # Irish
+GL = Language("gl", flag="🌐")  # Galician
 HE = Language("he", flag="🇮🇱")
 HI = Language("hi", flag="🇮🇳")
 HR = Language("hr", flag="🇭🇷")
 HU = Language("hu", flag="🇭🇺")
+IA = Language("ia", flag="🌐")  # Interlingua
 ID = Language("id", flag="🇮🇩")
+IS = Language("is", flag="🇮🇸")  # Icelandic
 IT = Language("it", flag="🇮🇹")
 JA = Language("ja", flag="🇯🇵")
+KK = Language("kk", flag="🇰🇿")  # Kazakh
 KO = Language("ko", flag="🇰🇷")
+LT = Language("lt", flag="🇱🇹")  # Lithuanian
+LV = Language("lv", flag="🇱🇻")  # Latvian
+MK = Language("mk", flag="🇲🇰")  # Macedonian
+MN = Language("mn", flag="🇲🇳")  # Mongolian
+MR = Language("mr", flag="🇮🇳")  # Marathi
 MS = Language("ms", flag="🇲🇾")
+MT = Language("mt", flag="🇲🇹")  # Maltese
 NL = Language("nl", flag="🇳🇱")
 NO = Language("no", flag="🇳🇴")
 PL = Language("pl", flag="🇵🇱")
@@ -127,9 +148,61 @@ PT_BR = Language("pt-br", flag="🇧🇷")
 RO = Language("ro", flag="🇷🇴")
 RU = Language("ru", flag="🇷🇺")
 SK = Language("sk", flag="🇸🇰")
+SL = Language("sl", flag="🇸🇮")  # Slovenian
+SR = Language("sr", flag="🇷🇸")  # Serbian
 SV = Language("sv", flag="🇸🇪")
+SW = Language("sw", flag="🇰🇪")  # Swahili
 TA = Language("ta", flag="🇮🇳")
+TH = Language("th", flag="🇹🇭")  # Thai
 TR = Language("tr", flag="🇹🇷")
+UG = Language("ug", flag="🌐")  # Uyghur
 UK = Language("uk", flag="🇺🇦")
+UR = Language("ur", flag="🇵🇰")  # Urdu
 VI = Language("vi", flag="🇻🇳")
 ZH = Language("zh", flag="🇨🇳")
+ZH_HANS = Language("zh-hans", flag="🇨🇳")  # Chinese Simplified (for target)
+ZH_HANT = Language("zh-hant", flag="🇹🇼")  # Chinese Traditional (for target)
+
+
+# Validation for Palabra API supported languages
+# Languages that support Recognition (can be used as source)
+VALID_SOURCE_LANGUAGES = {
+    AR, BA, BE, BG, BN, CA, CS, CY, DA, DE,
+    EL, EN, EO, ES, ET, EU, FA, FI, FR, GA,
+    GL, HE, HI, HR, HU, IA, ID, IT, JA, KO,
+    LT, LV, MN, MR, MS, MT, NL, NO, PL, PT,
+    RO, RU, SK, SL, SV, SW, TA, TH, TR, UG,
+    UK, UR, VI, ZH
+}
+
+# Languages that support Translation (can be used as target)
+VALID_TARGET_LANGUAGES = {
+    AR, AZ, BE, BG, BS, CA, CS, CY, DA, DE,
+    EL, EN, EN_AU, EN_CA, EN_GB, EN_US, ES, ES_MX, ET,
+    FI, FIL, FR, FR_CA, GL, HE, HI, HR, HU,
+    ID, IS, IT, JA, KK, KO, LT, LV, MK, MS,
+    NL, NO, PL, PT, PT_BR, RO, RU, SK, SL, SR,
+    SV, SW, TA, TR, UK, UR, VI, ZH, ZH_HANS, ZH_HANT
+}
+
+# Languages supporting auto-detection (when asr_model='alpha')
+AUTO_DETECTABLE_LANGUAGES = {
+    EN, UK, IT, ES, DE, PT, TR, AR, RU, PL,
+    FR, ID, ZH, NL, JA, KO, FI, HU, EL, CS,
+    DA, HE, HI
+}
+
+
+def is_valid_source_language(lang: Language) -> bool:
+    """Check if language is valid for source (Recognition)"""
+    return lang in VALID_SOURCE_LANGUAGES
+
+
+def is_valid_target_language(lang: Language) -> bool:
+    """Check if language is valid for target (Translation)"""
+    return lang in VALID_TARGET_LANGUAGES
+
+
+def is_auto_detectable_language(lang: Language) -> bool:
+    """Check if language supports auto-detection (asr_model='alpha')"""
+    return lang in AUTO_DETECTABLE_LANGUAGES

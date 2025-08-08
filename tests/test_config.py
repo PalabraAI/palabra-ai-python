@@ -141,6 +141,51 @@ def test_target_lang():
     assert target.on_transcription is None
     assert target.translation.translation_model == "auto"
 
+
+def test_source_lang_validation():
+    """Test SourceLang language validation"""
+    from palabra_ai.lang import EN, BA, AZ, FIL
+    
+    # Valid source languages should work
+    source = SourceLang(lang=EN)
+    assert source.lang == EN
+    
+    source = SourceLang(lang=BA)  # Bashkir can be source
+    assert source.lang == BA
+    
+    # Invalid source languages should raise error
+    with pytest.raises(ConfigurationError) as exc_info:
+        SourceLang(lang=AZ)  # Azerbaijani cannot be source
+    assert "not supported as a source language" in str(exc_info.value)
+    
+    with pytest.raises(ConfigurationError) as exc_info:
+        SourceLang(lang=FIL)  # Filipino cannot be source
+    assert "not supported as a source language" in str(exc_info.value)
+
+
+def test_target_lang_validation():
+    """Test TargetLang language validation"""
+    from palabra_ai.lang import ES, AZ, ZH_HANS, BA, TH
+    
+    # Valid target languages should work
+    target = TargetLang(lang=ES)
+    assert target.lang == ES
+    
+    target = TargetLang(lang=AZ)  # Azerbaijani can be target
+    assert target.lang == AZ
+    
+    target = TargetLang(lang=ZH_HANS)  # Chinese Simplified can be target
+    assert target.lang == ZH_HANS
+    
+    # Invalid target languages should raise error
+    with pytest.raises(ConfigurationError) as exc_info:
+        TargetLang(lang=BA)  # Bashkir cannot be target
+    assert "not supported as a target language" in str(exc_info.value)
+    
+    with pytest.raises(ConfigurationError) as exc_info:
+        TargetLang(lang=TH)  # Thai cannot be target
+    assert "not supported as a target language" in str(exc_info.value)
+
 def test_config_basic():
     """Test basic Config creation"""
     config = Config()

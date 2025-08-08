@@ -41,7 +41,7 @@ from palabra_ai.constant import (
     VAD_THRESHOLD_DEFAULT,
 )
 from palabra_ai.exc import ConfigurationError
-from palabra_ai.lang import Language
+from palabra_ai.lang import Language, is_valid_source_language, is_valid_target_language
 from palabra_ai.message import Message
 from palabra_ai.types import T_ON_TRANSCRIPTION
 from palabra_ai.util.logger import set_logging
@@ -69,12 +69,40 @@ def validate_language(v):
     return v
 
 
+def validate_source_language(v):
+    if isinstance(v, str):
+        v = Language.get_by_bcp47(v)
+    if not is_valid_source_language(v):
+        raise ConfigurationError(
+            f"Language '{v.code}' is not supported as a source language for speech recognition"
+        )
+    return v
+
+
+def validate_target_language(v):
+    if isinstance(v, str):
+        v = Language.get_by_bcp47(v)
+    if not is_valid_target_language(v):
+        raise ConfigurationError(
+            f"Language '{v.code}' is not supported as a target language for translation"
+        )
+    return v
+
+
 def serialize_language(lang: Language) -> str:
     return lang.bcp47
 
 
 LanguageField = Annotated[
     Language, BeforeValidator(validate_language), PlainSerializer(serialize_language)
+]
+
+SourceLanguageField = Annotated[
+    Language, BeforeValidator(validate_source_language), PlainSerializer(serialize_language)
+]
+
+TargetLanguageField = Annotated[
+    Language, BeforeValidator(validate_target_language), PlainSerializer(serialize_language)
 ]
 
 
@@ -292,7 +320,7 @@ class QueueConfigs(BaseModel):
 
 
 class SourceLang(BaseModel):
-    lang: LanguageField
+    lang: SourceLanguageField
 
     _reader: Reader | None = PrivateAttr(default=None)
     _on_transcription: T_ON_TRANSCRIPTION | None = PrivateAttr(default=None)
@@ -324,7 +352,7 @@ class SourceLang(BaseModel):
 
 
 class TargetLang(BaseModel):
-    lang: LanguageField
+    lang: TargetLanguageField
 
     _writer: Writer | None = PrivateAttr(default=None)
     _on_transcription: T_ON_TRANSCRIPTION | None = PrivateAttr(default=None)
