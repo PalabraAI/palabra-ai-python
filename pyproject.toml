@@ -1,6 +1,6 @@
 [project]
 name = "palabra-ai"
-version = "0.3.0"
+version = "0.3.1"
 description = "Client library for Palabra AI's real-time speech translation, dubbing, and voice synthesis APIs across 25+ languages."
 readme = "README.md"
 authors = [
