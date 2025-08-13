@@ -14,6 +14,7 @@ from palabra_ai.constant import (
     SLEEP_INTERVAL_DEFAULT,
 )
 from palabra_ai.message import Dbg
+from palabra_ai.model import LogData
 from palabra_ai.task.base import Task
 from palabra_ai.task.io.base import Io
 
@@ -34,13 +35,18 @@ class Logger(Task):
     _messages: list[dict] = field(default_factory=list, init=False)
     _start_ts: float = field(default_factory=time.time, init=False)
     _io_in_sub: Subscription | None = field(default=None, init=False)
+    _io_audio_in_sub: Subscription | None = field(default=None, init=False)
+    _io_audio_out_sub: Subscription | None = field(default=None, init=False)
     _io_out_sub: Subscription | None = field(default=None, init=False)
     _in_task: asyncio.Task | None = field(default=None, init=False)
     _out_task: asyncio.Task | None = field(default=None, init=False)
+    _audio_inout_task: asyncio.Task | None = field(default=None, init=False)
 
     def __post_init__(self):
         self._io_in_sub = self.io.in_msg_foq.subscribe(self, maxsize=0)
         self._io_out_sub = self.io.out_msg_foq.subscribe(self, maxsize=0)
+        if self.cfg.benchmark:
+            self._io_audio_in_sub = self.io.bench_audio_foq.subscribe(self, maxsize=0)
 
     async def boot(self):
         self._in_task = self.sub_tg.create_task(
@@ -49,6 +55,10 @@ class Logger(Task):
         self._out_task = self.sub_tg.create_task(
             self._consume(self._io_out_sub.q), name="Logger:io_out"
         )
+        if self.cfg.benchmark:
+            self._audio_inout_task = self.sub_tg.create_task(
+                self._consume(self._io_audio_in_sub.q), name="Logger:io_audio_inout"
+            )
         debug(f"Logger started, writing to {self.cfg.log_file}")
 
     async def do(self):
@@ -57,56 +67,74 @@ class Logger(Task):
             await asyncio.sleep(SLEEP_INTERVAL_DEFAULT)
         debug(f"{self.name} task stopped, exiting...")
 
-    async def exit(self):
-        debug("Finalizing Logger...")
-        if self._in_task:
-            self._in_task.cancel()
-        if self._out_task:
-            self._out_task.cancel()
-
-        logs = []
+    async def cancel_subtasks(self):
+        debug("Cancelling Logger subtasks...")
+        +self.stopper # noqa
+        tasks_to_wait = []
+        if self._in_task and self._out_task:
+            tasks_to_wait.extend([self._in_task, self._out_task])
+        if self.cfg.benchmark and self._audio_inout_task:
+            tasks_to_wait.append(self._audio_inout_task)
+        for t in tasks_to_wait:
+            t.cancel()
+        debug(f"Waiting for {len(tasks_to_wait)} tasks to complete...")
         try:
-            with open(self.cfg.log_file) as f:
-                logs = f.readlines()
-        except BaseException as e:
-            logs = ["Can't collect logs", str(e)]
+            await asyncio.gather(
+                *(asyncio.wait_for(t, timeout=SHUTDOWN_TIMEOUT) for t in tasks_to_wait),
+                return_exceptions=True,  # This will return CancelledError instead of raising it
+            )
+            debug("All Logger subtasks cancelled successfully")
+        except Exception:
+            debug("Some Logger subtasks were cancelled or failed")
+
+    async def _exit(self):
+        debug(f"{self.name}._exit()")
+        return await self.exit()
+
+    async def exit(self) -> LogData:
+        debug("Finalizing Logger...")
+        cancel_task = asyncio.create_task(self.cancel_subtasks())
+
+        self.cfg.internal_logs.seek(0)
+        logs = self.cfg.internal_logs.readlines()
+        debug(f"Collected {len(logs)} internal log lines")
 
         try:
             sysinfo = get_system_info()
         except BaseException as e:
             sysinfo = {"error": str(e)}
+        debug(f"Collected system info: {sysinfo}")
 
-        json_data = {
-            "version": getattr(palabra_ai, "__version__", "n/a"),
-            "sysinfo": sysinfo,
-            "messages": self._messages,
-            "start_ts": self._start_ts,
-            "cfg": self.cfg.to_dict() if hasattr(self.cfg, "to_dict") else {},
-            "log_file": str(self.cfg.log_file),
-            "trace_file": str(self.cfg.trace_file),
-            "debug": self.cfg.debug,
-            "logs": logs,
-        }
+        log_data = LogData(
+            version= getattr(palabra_ai, "__version__", "n/a"),
+            sysinfo= sysinfo,
+            messages= self._messages,
+            start_ts= self._start_ts,
+            cfg= self.cfg.to_dict() if hasattr(self.cfg, "to_dict") else {},
+            log_file= str(self.cfg.log_file),
+            trace_file= str(self.cfg.trace_file),
+            debug= self.cfg.debug,
+            logs= logs,
+        )
+        self.result = log_data
+        debug(f"Prepared LogData with {len(self._messages)} messages")
 
-        with open(self.cfg.trace_file, "wb") as f:
-            f.write(to_json(json_data))
+        if self.cfg.trace_file:
+            with open(self.cfg.trace_file, "wb") as f:
+                f.write(to_json(log_data))
 
-        debug(f"Saved {len(self._messages)} messages to {self.cfg.trace_file}")
+            debug(f"Saved {len(self._messages)} messages to {self.cfg.trace_file}")
 
         self.io.in_msg_foq.unsubscribe(self)
         self.io.out_msg_foq.unsubscribe(self)
+        if self.cfg.benchmark:
+            self.io.bench_audio_foq.unsubscribe(self)
+        debug(f"Unsubscribed from IO queues")
 
         debug(f"{self.name} tasks cancelled, waiting for completion...")
-        if self._in_task and self._out_task:
-            try:
-                await asyncio.gather(
-                    asyncio.wait_for(self._in_task, timeout=SHUTDOWN_TIMEOUT),
-                    asyncio.wait_for(self._out_task, timeout=SHUTDOWN_TIMEOUT),
-                    return_exceptions=True,  # This will return CancelledError instead of raising it
-                )
-            except Exception:
-                pass  # Tasks may be cancelled, which is expected
+        await cancel_task
         debug(f"{self.name} tasks completed")
+        return log_data
 
     async def _exit(self):
         return await self.exit()
@@ -120,9 +148,17 @@ class Logger(Task):
                     debug(f"Received None from {q}, stopping consumer")
                     break
 
-                dbg_msg = getattr(msg, "_dbg", asdict(Dbg.empty()))
-                dbg_msg["msg"] = msg.model_dump()
+                dbg_msg = asdict(getattr(msg, "_dbg", Dbg.empty()))
+                if hasattr(msg, "model_dump"):
+                    dbg_msg["msg"] = msg.model_dump()
+                elif hasattr(msg, "to_bench"):
+                    dbg_msg["msg"] = msg.to_bench()
+                else:
+                    raise TypeError(
+                        f"Message {msg} does not have model_dump() or to_bench() method"
+                    )
                 self._messages.append(dbg_msg)
+                debug(f"Consumed message from {q}: {dbg_msg}")
                 q.task_done()
             except TimeoutError:
                 continue

@@ -7,6 +7,7 @@ import orjson
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
 
 from palabra_ai.enum import Channel, Direction
+from palabra_ai.enum import Kind
 from palabra_ai.exc import ApiError, ApiValidationError, TaskNotFoundError
 from palabra_ai.lang import Language
 from palabra_ai.util.logger import debug
@@ -26,15 +27,21 @@ class KnownRawType(StrEnum):
 
 @dataclass
 class Dbg:
+    kind: Kind | None
     ch: Channel | None
     dir: Direction | None
     ts: float = field(default_factory=time.time)
+    idx: int | None = field(default=None)
+    num: int | None = field(default=None)
 
     @classmethod
     def empty(cls):
         """Create an empty debug object"""
-        return cls(ch=None, dir=None, ts=time.time())
+        return cls(kind=None, ch=None, dir=None, ts=time.time())
 
+    @classmethod
+    def now_ts(cls):
+        return time.time()
 
 @dataclass
 class KnownRaw:

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import io
 from functools import cached_property
 from pathlib import Path
+from typing import TextIO
 from typing import TYPE_CHECKING, Annotated, Any
 
 from environs import Env
@@ -384,14 +386,11 @@ class TargetLang(BaseModel):
 
 
 class Config(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
+    model_config = ConfigDict(populate_by_name=True, arbitrary_types_allowed=True)
 
     source: SourceLang | None = Field(default=None)
     # TODO: SIMULTANEOUS TRANSLATION!!!
     targets: list[TargetLang] | None = Field(default=None)
-
-    # input_stream: InputStream = Field(default_factory=InputStream)
-    # output_stream: OutputStream = Field(default_factory=OutputStream)
 
     preprocessing: Preprocessing = Field(default_factory=Preprocessing)
     translation_queue_configs: QueueConfigs = Field(default_factory=QueueConfigs)
@@ -400,6 +399,8 @@ class Config(BaseModel):
     mode: IoMode = Field(default_factory=WsMode, exclude=True)
     silent: bool = Field(default=SILENT, exclude=True)
     log_file: Path | str | None = Field(default=LOG_FILE, exclude=True)
+    benchmark: bool = Field(default=False, exclude=True)
+    internal_logs: TextIO | None = Field(default_factory=io.StringIO, exclude=True)
     debug: bool = Field(default=DEBUG, exclude=True)
     deep_debug: bool = Field(default=DEEP_DEBUG, exclude=True)
     timeout: int = Field(default=TIMEOUT, exclude=True)  # TODO!
@@ -426,7 +427,7 @@ class Config(BaseModel):
             self.log_file = Path(self.log_file).absolute()
             self.log_file.parent.mkdir(exist_ok=True, parents=True)
             self.trace_file = self.log_file.with_suffix(".trace.json")
-        set_logging(self.silent, self.debug, self.log_file)
+        set_logging(self.silent, self.debug, self.internal_logs, self.log_file)
         super().model_post_init(context)
 
     @model_validator(mode="before")

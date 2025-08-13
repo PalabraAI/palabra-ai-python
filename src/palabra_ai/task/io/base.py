@@ -3,6 +3,8 @@ import time
 from asyncio import get_running_loop, sleep
 from collections.abc import Callable
 from dataclasses import KW_ONLY, dataclass, field
+from itertools import count
+from typing import Iterator
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -10,6 +12,7 @@ import numpy as np
 from palabra_ai.audio import AudioFrame
 from palabra_ai.constant import BOOT_TIMEOUT, BYTES_PER_SAMPLE, SLEEP_INTERVAL_LONG
 from palabra_ai.enum import Channel, Direction
+from palabra_ai.enum import Kind
 from palabra_ai.message import (
     CurrentTaskMessage,
     Dbg,
@@ -36,7 +39,13 @@ class Io(Task):
     _: KW_ONLY
     in_msg_foq: FanoutQueue["Message"] = field(default_factory=FanoutQueue, init=False)
     out_msg_foq: FanoutQueue["Message"] = field(default_factory=FanoutQueue, init=False)
+    bench_audio_foq: FanoutQueue[AudioFrame] = field(default_factory=FanoutQueue, init=False)
     _buffer_callback: Callable | None = field(default=None, init=False)
+    _idx: Iterator[int] = field(default_factory=count, init=False)
+    _in_msg_num: Iterator[int] = field(default_factory=count, init=False)
+    _out_msg_num: Iterator[int] = field(default_factory=count, init=False)
+    _in_audio_num: Iterator[int] = field(default_factory=count, init=False)
+    _out_audio_num: Iterator[int] = field(default_factory=count, init=False)
 
     @property
     @abc.abstractmethod
@@ -56,8 +65,8 @@ class Io(Task):
 
     async def push_in_msg(self, msg: "Message") -> None:
         """Push an incoming message with debug tracking."""
-        dbg = Dbg(self.channel, Direction.IN)
-        msg._dbg = dbg
+        _dbg = Dbg(Kind.MESSAGE, self.channel, Direction.IN, num=next(self._in_msg_num), idx=next(self._idx))
+        msg._dbg = _dbg
         debug(f"Pushing message: {msg!r}")
         self.in_msg_foq.publish(msg)
 
@@ -120,6 +129,11 @@ class Io(Task):
                 padded_chunk = np.frombuffer(frame_chunk, dtype=np.int16)
 
             np.copyto(audio_data, padded_chunk)
+
+            if self.cfg.benchmark:
+                _dbg = Dbg(Kind.AUDIO, self.channel, Direction.IN, idx=next(self._idx), num=next(self._in_audio_num))
+                audio_frame._dbg = _dbg
+                self.bench_audio_foq.publish(audio_frame)
 
             await self.send_frame(audio_frame)
 

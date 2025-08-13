@@ -12,6 +12,7 @@ from palabra_ai.constant import (
     SLEEP_INTERVAL_SHORT,
 )
 from palabra_ai.enum import Channel, Direction
+from palabra_ai.enum import Kind
 from palabra_ai.message import (
     Dbg,
     EosMessage,
@@ -92,7 +93,14 @@ class WebrtcIo(Io):
         try:
             async for frame_ev in stream:
                 frame_ev: rtc.AudioFrameEvent
+                _dbg = Dbg(Kind.AUDIO, Channel.WEBRTC, Direction.OUT)
+                audio_frame = AudioFrame.from_rtc(frame_ev.frame)
                 self.writer.q.put_nowait(AudioFrame.from_rtc(frame_ev.frame))
+                if self.cfg.benchmark:
+                    _dbg.idx = next(self._idx)
+                    _dbg.num = next(self._out_audio_num)
+                    audio_frame._dbg = _dbg
+                    self.bench_audio_foq.publish(audio_frame)
                 await asyncio.sleep(0)
                 if self.stopper or self.eof:
                     debug(f"Stopping audio stream for {lang!r} due to stopper")
@@ -104,10 +112,10 @@ class WebrtcIo(Io):
             debug(f"Closed audio stream for {lang!r}")
 
     def on_data_received(self, data: rtc.DataPacket):
-        dbg = Dbg(Channel.WEBRTC, Direction.OUT)
+        _dbg = Dbg(Kind.MESSAGE, Channel.WEBRTC, Direction.OUT, idx=next(self._idx), num=next(self._out_msg_num))
         debug(f"Received packet: {data}"[:100])
         msg = Message.decode(data.data)
-        msg._dbg = dbg
+        msg._dbg = _dbg
         self.out_msg_foq.publish(msg)
         if isinstance(msg, EosMessage):
             debug(f"End of stream received: {msg}")

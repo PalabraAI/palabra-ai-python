@@ -12,6 +12,7 @@ from palabra_ai.config import CLIENT_ID, CLIENT_SECRET, DEEP_DEBUG, Config
 from palabra_ai.debug.hang_coroutines import diagnose_hanging_tasks
 from palabra_ai.exc import ConfigurationError, unwrap_exceptions
 from palabra_ai.internal.rest import PalabraRESTClient
+from palabra_ai.model import RunResult
 from palabra_ai.task.base import TaskEvent
 from palabra_ai.task.manager import Manager
 from palabra_ai.util.logger import debug, error, success
@@ -29,17 +30,36 @@ class PalabraAI:
         if not self.client_secret:
             raise ConfigurationError("PALABRA_CLIENT_SECRET is not set")
 
-    def run(self, cfg: Config, stopper: TaskEvent | None = None) -> None:
-        async def _run():
+    def run(self, cfg: Config, stopper: TaskEvent | None = None, no_raise = False) -> asyncio.Task | RunResult | None:
+        async def _run() -> RunResult | None:
+            async def _run_with_result(manager: Manager) -> RunResult:
+                try:
+                    await manager.task
+                    return RunResult(ok=True, log_data=manager.logger.result)
+                except asyncio.CancelledError as e:
+                    debug("Task was cancelled")
+                    if no_raise:
+                        return RunResult(ok=False, exc=e)
+                    raise e
+                except BaseException as e:
+                    error(f"Error in PalabraAI.run(): {e}")
+                    if no_raise:
+                        return RunResult(ok=False, exc=e)
+                    raise e
+
             try:
                 async with self.process(cfg, stopper) as manager:
                     if DEEP_DEBUG:
                         debug(diagnose_hanging_tasks())
-                    await manager.task
+                    coro = _run_with_result(manager)
+                    result = await coro
                     if DEEP_DEBUG:
                         debug(diagnose_hanging_tasks())
+                    return result
             except BaseException as e:
                 error(f"Error in PalabraAI.run(): {e}")
+                if no_raise:
+                    return RunResult(ok=False, exc=e)
                 raise
             finally:
                 if DEEP_DEBUG:
@@ -73,13 +93,16 @@ class PalabraAI:
 
             try:
                 with SIGTERM | SIGHUP | SIGINT as shutdown_loop:
-                    shutdown_loop.run_until_complete(_run())
+                    run_result = shutdown_loop.run_until_complete(_run())
+                    return run_result
             except KeyboardInterrupt:
                 debug("Received keyboard interrupt (Ctrl+C)")
                 return
-            except Exception as e:
+            except BaseException as e:
                 error(f"An error occurred during execution: {e}")
-                raise
+                if no_raise:
+                    return RunResult(ok=False, exc=e)
+                raise e
             finally:
                 debug("Shutdown complete")
 

@@ -5,6 +5,7 @@ from websockets.asyncio.client import connect as ws_connect
 
 from palabra_ai.audio import AudioFrame
 from palabra_ai.enum import Channel, Direction
+from palabra_ai.enum import Kind
 from palabra_ai.message import Dbg
 from palabra_ai.task.io.base import Io
 from palabra_ai.util.logger import debug, trace
@@ -15,7 +16,6 @@ class WsIo(Io):
     _: KW_ONLY
     ws: ClientConnection | None = field(default=None, init=False)
     _ws_cm: object | None = field(default=None, init=False)
-    dbg_in: list = field(default_factory=list, init=False)
 
     @property
     def dsn(self) -> str:
@@ -32,7 +32,6 @@ class WsIo(Io):
         raw = frame.to_ws()
         debug(f"<- {frame}")
         await self.ws.send(raw)
-        self.dbg_in.append((frame, raw))
 
     def new_frame(self) -> AudioFrame:
         return AudioFrame.create(*self.cfg.mode.for_audio_frame)
@@ -45,6 +44,7 @@ class WsIo(Io):
                 if self.stopper or raw_msg is None:
                     debug("Stopping ws_receiver due to stopper or None message")
                     raise EOFError("WebSocket connection closed or stopper triggered")
+                ts = Dbg.now_ts()
                 trace(f"-> {raw_msg[:30]}")
                 audio_frame = AudioFrame.from_ws(
                     raw_msg,
@@ -54,10 +54,29 @@ class WsIo(Io):
                 )
                 if audio_frame:
                     debug(f"-> {audio_frame!r}")
+                    if self.cfg.benchmark:
+                        _dbg = Dbg(
+                            Kind.AUDIO,
+                            Channel.WS,
+                            Direction.OUT,
+                            ts=ts,
+                            idx=next(self._idx),
+                            num=next(self._out_audio_num)
+                        )
+                        audio_frame._dbg = _dbg
+                        self.bench_audio_foq.publish(audio_frame)
                     self.writer.q.put_nowait(audio_frame)
                 else:
+                    _dbg = Dbg(
+                        Kind.MESSAGE,
+                        Channel.WS,
+                        Direction.OUT,
+                        ts=ts,
+                        idx=next(self._idx),
+                        num=next(self._out_audio_num)
+                    )
                     msg = Message.decode(raw_msg)
-                    msg._dbg = Dbg(Channel.WS, Direction.OUT)
+                    msg._dbg = _dbg
                     self.out_msg_foq.publish(msg)
                     debug(f"-> {msg!r}")
                     if isinstance(msg, EosMessage):
