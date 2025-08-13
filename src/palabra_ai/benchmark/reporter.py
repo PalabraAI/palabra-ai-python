@@ -198,6 +198,7 @@ def generate_text_report(analysis: Dict[str, Any]) -> str:
     lines.append("\n" + "=" * 80)
     lines.append("LATENCY STATISTICS (seconds)")
     lines.append("=" * 80)
+    lines.append("\nLatency = Time from sending audio chunk to receiving response from API")
     
     metrics_order = ["asr_first_partial", "asr_validated", "translation", "tts_audio"]
     metric_names = {
@@ -294,19 +295,47 @@ def generate_text_report(analysis: Dict[str, Any]) -> str:
     
     # Sample chunk details
     lines.append("\n" + "=" * 80)
-    lines.append("SAMPLE CHUNK DETAILS (first 5)")
-    lines.append("=" * 80)
     
-    for i, (chunk_id, chunk) in enumerate(list(analysis["chunks"].items())[:5]):
-        lines.append(f"\nChunk {chunk_id} (offset: {chunk['time_offset']:.2f}s)")
+    # Select representative chunks
+    chunk_items = list(analysis["chunks"].items())
+    total_chunks = len(chunk_items)
+    
+    if total_chunks <= 5:
+        # Show all chunks if 5 or fewer
+        selected_chunks = chunk_items
+        lines.append(f"CHUNK DETAILS (all {total_chunks} chunks)")
+    else:
+        # Select representative sample: first, last, and 3 evenly distributed in between
+        selected_indices = [0]  # First chunk
+        
+        # Add 3 evenly distributed middle chunks
+        step = (total_chunks - 1) / 4
+        for i in range(1, 4):
+            selected_indices.append(int(i * step))
+        
+        selected_indices.append(total_chunks - 1)  # Last chunk
+        
+        # Remove duplicates and sort
+        selected_indices = sorted(set(selected_indices))
+        
+        selected_chunks = [chunk_items[i] for i in selected_indices]
+        lines.append(f"SAMPLE CHUNK DETAILS (representative selection from {total_chunks} chunks)")
+    
+    lines.append("=" * 80)
+    lines.append("\nNote: Numbers show latency (seconds from chunk send to response receipt)")
+    lines.append("      Offset is the chunk's position in the audio file")
+    lines.append("-" * 60)
+    
+    for chunk_id, chunk in selected_chunks:
+        lines.append(f"\nChunk {chunk_id} (audio position: {chunk['time_offset']:.2f}s)")
         if chunk["asr_first_partial"]:
-            lines.append(f"  ASR Partial:  {chunk['asr_first_partial']:.3f}s - \"{chunk['partial_text']}\"")
+            lines.append(f"  ASR Partial:  {chunk['asr_first_partial']:.3f}s latency → \"{chunk['partial_text']}\"")
         if chunk["asr_validated"]:
-            lines.append(f"  ASR Valid:    {chunk['asr_validated']:.3f}s - \"{chunk['validated_text']}\"")
+            lines.append(f"  ASR Valid:    {chunk['asr_validated']:.3f}s latency → \"{chunk['validated_text']}\"")
         if chunk["translation"]:
-            lines.append(f"  Translation:  {chunk['translation']:.3f}s - \"{chunk['translated_text']}\"")
+            lines.append(f"  Translation:  {chunk['translation']:.3f}s latency → \"{chunk['translated_text']}\"")
         if chunk["tts_audio"]:
-            lines.append(f"  TTS Audio:    {chunk['tts_audio']:.3f}s")
+            lines.append(f"  TTS Audio:    {chunk['tts_audio']:.3f}s latency (audio output started)")
     
     lines.append("\n" + "=" * 80)
     
