@@ -21,6 +21,9 @@ Examples:
   python -m palabra_ai.benchmark audio.mp3 es en
   python -m palabra_ai.benchmark audio.mp3 es en --html --json
   python -m palabra_ai.benchmark audio.mp3 es en --output-dir results/
+  python -m palabra_ai.benchmark audio.mp3 es en --chunks 5  # Show only 5 chunks
+  python -m palabra_ai.benchmark audio.mp3 es en --chunks 10 --show-empty
+  python -m palabra_ai.benchmark audio.mp3 es en --json --all-data  # Include raw data
   python -m palabra_ai.benchmark audio.mp3 es en --no-progress
         """
     )
@@ -41,6 +44,12 @@ Examples:
                        help="Disable progress bar")
     parser.add_argument("--verbose", action="store_true",
                        help="Enable verbose output (disable silent mode)")
+    parser.add_argument("--chunks", type=int, default=-1,
+                       help="Number of chunks to show in detail (default: all, use positive number to limit)")
+    parser.add_argument("--show-empty", action="store_true",
+                       help="Include empty chunks in detailed view")
+    parser.add_argument("--all-data", action="store_true",
+                       help="Include full raw result data in JSON report")
     
     args = parser.parse_args()
     
@@ -69,7 +78,7 @@ Examples:
         analyzer.analyze()
         
         # Print text report to console (always)
-        print("\n" + analyzer.get_text_report())
+        print("\n" + analyzer.get_text_report(args.chunks, args.show_empty))
         
         # Save additional reports if requested
         if args.html or args.json:
@@ -77,6 +86,7 @@ Examples:
                 output_dir=args.output_dir,
                 html=args.html,
                 json=args.json,
+                include_raw_data=args.all_data
             )
             
             print("\nReports saved:")

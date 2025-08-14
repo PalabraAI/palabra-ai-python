@@ -177,8 +177,15 @@ def create_ascii_time_series(x_values: List[float], y_values: List[float],
     return "\n".join(lines)
 
 
-def generate_text_report(analysis: Dict[str, Any]) -> str:
-    """Generate formatted text report for console output"""
+def generate_text_report(analysis: Dict[str, Any], max_chunks: int = -1, show_empty: bool = False) -> str:
+    """
+    Generate formatted text report for console output
+    
+    Args:
+        analysis: Analysis data from analyze_latency
+        max_chunks: Maximum number of chunks to display in detail (-1 for all)
+        show_empty: Whether to include empty chunks in the detailed view
+    """
     
     lines = []
     lines.append("=" * 80)
@@ -191,9 +198,27 @@ def generate_text_report(analysis: Dict[str, Any]) -> str:
     lines.append("-" * 40)
     lines.append(f"Total audio chunks:     {summary['total_chunks']}")
     lines.append(f"Total duration:         {summary['total_duration']:.1f} seconds")
+    # Handle backward compatibility for new fields
+    if 'average_completion' in summary:
+        lines.append(f"Average completion:     {summary['average_completion']:.1%}")
+    
     lines.append(f"Chunks transcribed:     {summary['chunks_with_validated']} ({summary['chunks_with_validated']/summary['total_chunks']*100:.1f}%)")
     lines.append(f"Chunks translated:      {summary['chunks_with_translation']} ({summary['chunks_with_translation']/summary['total_chunks']*100:.1f}%)")
     lines.append(f"Chunks with TTS:        {summary['chunks_with_tts']} ({summary['chunks_with_tts']/summary['total_chunks']*100:.1f}%)")
+    
+    # Handle backward compatibility for empty chunks count
+    empty_chunks = summary.get('empty_chunks', 0)
+    lines.append(f"Empty chunks:           {empty_chunks} ({empty_chunks/summary['total_chunks']*100:.1f}%)")
+    
+    # Pipeline stage breakdown (if available)
+    if 'pipeline_stages' in summary:
+        lines.append(f"\nPIPELINE STAGE BREAKDOWN")
+        lines.append("-" * 40)
+        pipeline_stages = summary["pipeline_stages"]
+        stage_names = {"empty": "Empty (no data)", "partial": "Partial ASR", "validated": "Validated ASR", "translated": "Translated", "complete": "Complete (with TTS)"}
+        for stage, count in pipeline_stages.items():
+            percentage = count / summary['total_chunks'] * 100
+            lines.append(f"{stage_names[stage]:20s} {count:3d} ({percentage:5.1f}%)")
     
     # Statistics
     lines.append("\n" + "=" * 80)
@@ -297,30 +322,48 @@ def generate_text_report(analysis: Dict[str, Any]) -> str:
     # Sample chunk details
     lines.append("\n" + "=" * 80)
     
-    # Select representative chunks
+    # Filter chunks based on show_empty parameter
     chunk_items = list(analysis["chunks"].items())
-    total_chunks = len(chunk_items)
+    if not show_empty:
+        chunk_items = [(chunk_id, chunk) for chunk_id, chunk in chunk_items if not chunk.get("is_empty", False)]
     
-    if total_chunks <= 5:
-        # Show all chunks if 5 or fewer
+    total_chunks = len(chunk_items)
+    total_all_chunks = len(analysis["chunks"])
+    
+    # Select chunks to display
+    if max_chunks == -1 or total_chunks <= max_chunks:
+        # Show all chunks
         selected_chunks = chunk_items
-        lines.append(f"CHUNK DETAILS (all {total_chunks} chunks)")
+        if max_chunks == -1:
+            lines.append(f"ALL CHUNK DETAILS ({total_chunks} chunks shown)")
+        else:
+            lines.append(f"CHUNK DETAILS (all {total_chunks} chunks)")
+        if not show_empty and total_all_chunks != total_chunks:
+            lines.append(f"Note: {total_all_chunks - total_chunks} empty chunks hidden (use --show-empty to display)")
     else:
-        # Select representative sample: first, last, and 3 evenly distributed in between
-        selected_indices = [0]  # First chunk
+        # Select representative sample
+        if max_chunks <= 3:
+            # For very small numbers, just take first chunks
+            selected_chunks = chunk_items[:max_chunks]
+        else:
+            # Select first, last, and evenly distributed middle chunks
+            selected_indices = [0]  # First chunk
+            
+            # Add evenly distributed middle chunks
+            if max_chunks > 2:
+                step = (total_chunks - 1) / (max_chunks - 1)
+                for i in range(1, max_chunks - 1):
+                    selected_indices.append(int(i * step))
+            
+            selected_indices.append(total_chunks - 1)  # Last chunk
+            
+            # Remove duplicates and sort
+            selected_indices = sorted(set(selected_indices))
+            selected_chunks = [chunk_items[i] for i in selected_indices]
         
-        # Add 3 evenly distributed middle chunks
-        step = (total_chunks - 1) / 4
-        for i in range(1, 4):
-            selected_indices.append(int(i * step))
-        
-        selected_indices.append(total_chunks - 1)  # Last chunk
-        
-        # Remove duplicates and sort
-        selected_indices = sorted(set(selected_indices))
-        
-        selected_chunks = [chunk_items[i] for i in selected_indices]
-        lines.append(f"SAMPLE CHUNK DETAILS (representative selection from {total_chunks} chunks)")
+        lines.append(f"SAMPLE CHUNK DETAILS (showing {len(selected_chunks)} of {total_chunks} chunks)")
+        if not show_empty and total_all_chunks != total_chunks:
+            lines.append(f"Note: {total_all_chunks - total_chunks} empty chunks hidden")
     
     lines.append("=" * 80)
     lines.append("\nNote: Numbers show latency (seconds from chunk send to response receipt)")
@@ -328,15 +371,35 @@ def generate_text_report(analysis: Dict[str, Any]) -> str:
     lines.append("-" * 60)
     
     for chunk_id, chunk in selected_chunks:
-        lines.append(f"\nChunk {chunk_id} (audio position: {chunk['time_offset']:.2f}s)")
-        if chunk["asr_first_partial"]:
-            lines.append(f"  ASR Partial:  {chunk['asr_first_partial']:.3f}s latency → \"{chunk['partial_text']}\"")
-        if chunk["asr_validated"]:
-            lines.append(f"  ASR Valid:    {chunk['asr_validated']:.3f}s latency → \"{chunk['validated_text']}\"")
-        if chunk["translation"]:
-            lines.append(f"  Translation:  {chunk['translation']:.3f}s latency → \"{chunk['translated_text']}\"")
-        if chunk["tts_audio"]:
-            lines.append(f"  TTS Audio:    {chunk['tts_audio']:.3f}s latency (audio output started)")
+        # Handle backward compatibility for new fields
+        stage = chunk.get("pipeline_stage", "unknown")
+        completion = chunk.get("completion_score", 0.0)
+        
+        # Determine if chunk is empty based on available data
+        is_empty = chunk.get("is_empty", False)
+        if not is_empty and stage == "unknown":
+            # For backward compatibility, calculate if empty
+            is_empty = (chunk.get("asr_first_partial") is None and 
+                       chunk.get("asr_validated") is None and
+                       not chunk.get("partial_text", "") and
+                       not chunk.get("validated_text", ""))
+        
+        if stage != "unknown" or completion > 0.0:
+            lines.append(f"\nChunk {chunk_id} (audio position: {chunk['time_offset']:.2f}s, stage: {stage}, completion: {completion:.0%})")
+        else:
+            lines.append(f"\nChunk {chunk_id} (audio position: {chunk['time_offset']:.2f}s)")
+        
+        if is_empty:
+            lines.append("  Status: Empty (no transcription data)")
+        else:
+            if chunk.get("asr_first_partial"):
+                lines.append(f"  ASR Partial:  {chunk['asr_first_partial']:.3f}s latency → \"{chunk.get('partial_text', '')}\"")
+            if chunk.get("asr_validated"):
+                lines.append(f"  ASR Valid:    {chunk['asr_validated']:.3f}s latency → \"{chunk.get('validated_text', '')}\"")
+            if chunk.get("translation"):
+                lines.append(f"  Translation:  {chunk['translation']:.3f}s latency → \"{chunk.get('translated_text', '')}\"")
+            if chunk.get("tts_audio"):
+                lines.append(f"  TTS Audio:    {chunk['tts_audio']:.3f}s latency (audio output started)")
     
     lines.append("\n" + "=" * 80)
     
@@ -401,9 +464,21 @@ def generate_html_report(analysis: Dict[str, Any]) -> str:
     
 
 
-def generate_json_report(analysis: Dict[str, Any]) -> str:
-    """Generate JSON report"""
-    return to_json(analysis, indent=True).decode('utf-8')
+def generate_json_report(analysis: Dict[str, Any], include_raw_data: bool = False, raw_result: Dict[str, Any] = None) -> str:
+    """
+    Generate JSON report
+    
+    Args:
+        analysis: Analysis data from analyze_latency
+        include_raw_data: Whether to include full raw result data
+        raw_result: Raw result data to include (if include_raw_data is True)
+    """
+    report_data = analysis.copy()
+    
+    if include_raw_data and raw_result is not None:
+        report_data["raw_result"] = raw_result
+    
+    return to_json(report_data, indent=True).decode('utf-8')
 
 
 def save_html_report(analysis: Dict[str, Any], output_file: Path) -> None:

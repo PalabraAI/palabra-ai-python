@@ -28,6 +28,42 @@ class ChunkMetrics:
     
     # Associated IDs
     transcription_ids: List[str] = field(default_factory=list)
+    
+    @property
+    def is_empty(self) -> bool:
+        """Check if chunk has no transcription data"""
+        return (self.asr_first_partial is None and 
+                self.asr_validated is None and 
+                not self.partial_text and 
+                not self.validated_text)
+    
+    @property
+    def pipeline_stage(self) -> str:
+        """Get the furthest pipeline stage reached"""
+        if self.tts_audio is not None:
+            return "complete"
+        elif self.translation is not None:
+            return "translated"
+        elif self.asr_validated is not None:
+            return "validated"
+        elif self.asr_first_partial is not None:
+            return "partial"
+        else:
+            return "empty"
+    
+    @property
+    def completion_score(self) -> float:
+        """Calculate completion score (0.0 to 1.0)"""
+        score = 0.0
+        if self.asr_first_partial is not None:
+            score += 0.25
+        if self.asr_validated is not None:
+            score += 0.25
+        if self.translation is not None:
+            score += 0.25
+        if self.tts_audio is not None:
+            score += 0.25
+        return score
 
 
 def calculate_percentiles(data: List[float]) -> Dict[str, float]:
@@ -189,6 +225,8 @@ def analyze_latency(messages: List[Dict[str, Any]]) -> Dict[str, Any]:
     
     # Convert chunks to serializable format
     chunks_data = {}
+    pipeline_stage_counts = {"empty": 0, "partial": 0, "validated": 0, "translated": 0, "complete": 0}
+    
     for chunk_id, chunk in sorted(chunks.items()):
         chunks_data[chunk_id] = {
             "time_offset": chunk.time_offset,
@@ -199,11 +237,21 @@ def analyze_latency(messages: List[Dict[str, Any]]) -> Dict[str, Any]:
             "partial_text": chunk.partial_text[:50] + "..." if len(chunk.partial_text) > 50 else chunk.partial_text,
             "validated_text": chunk.validated_text[:50] + "..." if len(chunk.validated_text) > 50 else chunk.validated_text,
             "translated_text": chunk.translated_text[:50] + "..." if len(chunk.translated_text) > 50 else chunk.translated_text,
-            "transcription_ids": chunk.transcription_ids
+            "transcription_ids": chunk.transcription_ids,
+            "is_empty": chunk.is_empty,
+            "pipeline_stage": chunk.pipeline_stage,
+            "completion_score": chunk.completion_score
         }
+        
+        # Count pipeline stages
+        pipeline_stage_counts[chunk.pipeline_stage] += 1
     
     # Find first audio timestamp as reference
     first_audio_ts = min(chunk.send_timestamp for chunk in chunks.values())
+    
+    # Calculate average completion score
+    completion_scores = [chunk.completion_score for chunk in chunks.values()]
+    avg_completion = sum(completion_scores) / len(completion_scores) if completion_scores else 0.0
     
     # Build results
     return {
@@ -213,6 +261,9 @@ def analyze_latency(messages: List[Dict[str, Any]]) -> Dict[str, Any]:
             "chunks_with_validated": len(all_metrics["asr_validated"]),
             "chunks_with_translation": len(all_metrics["translation"]),
             "chunks_with_tts": len(all_metrics["tts_audio"]),
+            "empty_chunks": pipeline_stage_counts["empty"],
+            "pipeline_stages": pipeline_stage_counts,
+            "average_completion": avg_completion,
             "first_audio_timestamp": first_audio_ts,
             "total_duration": max(chunk.time_offset for chunk in chunks.values()) + CHUNK_DURATION
         },
