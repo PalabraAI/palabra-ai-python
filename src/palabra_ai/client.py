@@ -30,7 +30,7 @@ class PalabraAI:
         if not self.client_secret:
             raise ConfigurationError("PALABRA_CLIENT_SECRET is not set")
 
-    def run(self, cfg: Config, stopper: TaskEvent | None = None, no_raise = False) -> asyncio.Task | RunResult | None:
+    def run(self, cfg: Config, stopper: TaskEvent | None = None, no_raise = False, without_signal_handlers = False) -> asyncio.Task | RunResult | None:
         async def _run() -> RunResult | None:
             async def _run_with_result(manager: Manager) -> RunResult:
                 try:
@@ -92,9 +92,20 @@ class PalabraAI:
                 pass
 
             try:
-                with SIGTERM | SIGHUP | SIGINT as shutdown_loop:
-                    run_result = shutdown_loop.run_until_complete(_run())
-                    return run_result
+                if without_signal_handlers:
+                    # Run without signal handlers for environments where they're not supported
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    try:
+                        run_result = loop.run_until_complete(_run())
+                        return run_result
+                    finally:
+                        loop.close()
+                else:
+                    # Normal run with signal handlers
+                    with SIGTERM | SIGHUP | SIGINT as shutdown_loop:
+                        run_result = shutdown_loop.run_until_complete(_run())
+                        return run_result
             except KeyboardInterrupt:
                 debug("Received keyboard interrupt (Ctrl+C)")
                 return

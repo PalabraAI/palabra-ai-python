@@ -30,7 +30,7 @@ Examples:
     parser.add_argument("target_lang", help="Target language code (e.g., en, es, fr)")
     
     # Optional arguments
-    parser.add_argument("--html", action="store_true", 
+    parser.add_argument("--html", action="store_true",
                        help="Save HTML report to file")
     parser.add_argument("--json", action="store_true",
                        help="Save JSON report to file")
@@ -75,7 +75,7 @@ Examples:
             saved_files = analyzer.save_reports(
                 output_dir=args.output_dir,
                 html=args.html,
-                json=args.json
+                json=args.json,
             )
             
             print("\nReports saved:")

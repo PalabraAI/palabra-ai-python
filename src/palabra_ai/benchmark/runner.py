@@ -13,10 +13,11 @@ from palabra_ai import PalabraAI, Config, SourceLang, TargetLang
 from palabra_ai.lang import Language, is_valid_source_language, is_valid_target_language
 from palabra_ai.task.adapter.file import FileReader
 from palabra_ai.task.adapter.dummy import DummyWriter
-from palabra_ai.util.orjson import to_json
+from palabra_ai.util.orjson import to_json, from_json
 
 from .analyzer import analyze_latency
 from .reporter import generate_text_report, generate_html_report, generate_json_report
+
 
 
 class BenchmarkRunner:
@@ -101,7 +102,24 @@ class BenchmarkRunner:
             )
             
             # Run the processing
-            result = palabra.run(config)
+            # Note: When running from subprocess, we're in main thread so signal handlers work
+            # When running from threads, use without_signal_handlers=True
+            import threading
+            if threading.current_thread() == threading.main_thread():
+                result = palabra.run(config, no_raise=True)
+            else:
+                result = palabra.run(config, without_signal_handlers=True, no_raise=True)
+            
+            # Debug output
+            print(f"DEBUG: Raw result: {result}")
+            if result:
+                print(f"DEBUG: Result.ok: {result.ok}")
+                print(f"DEBUG: Result.exc: {result.exc}")
+                print(f"DEBUG: Result.log_data: {result.log_data}")
+                if result.exc:
+                    import traceback
+                    print(f"DEBUG: Exception traceback:")
+                    traceback.print_exception(type(result.exc), result.exc, result.exc.__traceback__)
             
             # Close progress bar
             if self.progress_bar:
@@ -127,7 +145,44 @@ class BenchmarkAnalyzer:
             result: Result from BenchmarkRunner.run()
         """
         self.result = result
-        self.messages = result.log_data.messages if hasattr(result, 'log_data') else []
+        # Debug output
+        print(f"DEBUG: Result type: {type(result)}")
+        
+        # Handle different result scenarios
+        if result is None:
+            print(f"ERROR: Result is None!")
+            self.messages = []
+        elif hasattr(result, 'exc') and result.exc:
+            print(f"ERROR: Benchmark failed with exception: {result.exc}")
+            import traceback
+            traceback.print_exception(type(result.exc), result.exc, result.exc.__traceback__)
+            # Try to extract log_data even with exception
+            self.messages = result.log_data.messages if result.log_data else []
+            print(f"DEBUG: Extracted {len(self.messages)} messages despite exception")
+        elif hasattr(result, 'log_data'):
+            print(f"DEBUG: Has log_data: True")
+            print(f"DEBUG: log_data is None: {result.log_data is None}")
+            if result.log_data:
+                print(f"DEBUG: Messages count: {len(result.log_data.messages)}")
+                self.messages = result.log_data.messages
+            else:
+                print(f"WARNING: log_data is None!")
+                self.messages = []
+        else:
+            print(f"WARNING: Result has no log_data attribute!")
+            self.messages = []
+        
+        print(f"DEBUG: Final extracted messages count: {len(self.messages)}")
+        
+        # Save messages to file for debugging
+        if self.messages:
+            import json
+            from pathlib import Path
+            debug_file = Path("/tmp/benchmark_messages_debug.json")
+            with open(debug_file, 'w') as f:
+                json.dump(self.messages, f, indent=2, default=str)
+            print(f"DEBUG: Saved messages to {debug_file}")
+        
         self.analysis = None
     
     def analyze(self) -> Dict[str, Any]:
@@ -154,7 +209,10 @@ class BenchmarkAnalyzer:
             self.analyze()
         
         return generate_text_report(self.analysis)
-    
+
+    def get_result(self) -> Dict[str, Any]:
+        return from_json(to_json(self.result))
+
     def get_html_report(self) -> str:
         """
         Get HTML report
@@ -166,7 +224,7 @@ class BenchmarkAnalyzer:
             self.analyze()
         
         return generate_html_report(self.analysis)
-    
+
     def get_json_report(self) -> str:
         """
         Get JSON report

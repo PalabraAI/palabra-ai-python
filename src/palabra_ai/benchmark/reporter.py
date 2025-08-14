@@ -3,12 +3,13 @@ Report generation for Palabra AI benchmark results
 Supports text (console), HTML, and JSON formats
 """
 
-import json
 import statistics
 import datetime
 from typing import List, Dict, Any
 from pathlib import Path
 from jinja2 import Template
+
+from palabra_ai.util.orjson import to_json
 
 
 def create_ascii_histogram(values: List[float], bins: int = 20, width: int = 50, title: str = "") -> str:
@@ -402,7 +403,7 @@ def generate_html_report(analysis: Dict[str, Any]) -> str:
 
 def generate_json_report(analysis: Dict[str, Any]) -> str:
     """Generate JSON report"""
-    return json.dumps(analysis, indent=2)
+    return to_json(analysis, indent=True).decode('utf-8')
 
 
 def save_html_report(analysis: Dict[str, Any], output_file: Path) -> None:
