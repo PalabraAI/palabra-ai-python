@@ -7,6 +7,7 @@ import argparse
 import sys
 from pathlib import Path
 
+from palabra_ai.util.logger import error
 from .runner import run_benchmark
 
 
@@ -46,7 +47,7 @@ Examples:
     # Validate audio file exists
     audio_path = Path(args.audio)
     if not audio_path.exists():
-        print(f"Error: Audio file not found: {args.audio}", file=sys.stderr)
+        error(f"Audio file not found: {args.audio}")
         sys.exit(1)
     
     try:
@@ -83,10 +84,10 @@ Examples:
                 print(f"  {report_type.upper()}: {path}")
         
     except KeyboardInterrupt:
-        print("\n\nBenchmark interrupted by user", file=sys.stderr)
+        error("\nBenchmark interrupted by user")
         sys.exit(1)
     except Exception as e:
-        print(f"\nError during benchmark: {e}", file=sys.stderr)
+        error(f"Error during benchmark: {e}")
         sys.exit(1)
 
 
