@@ -464,19 +464,19 @@ def generate_html_report(analysis: Dict[str, Any]) -> str:
     
 
 
-def generate_json_report(analysis: Dict[str, Any], include_raw_data: bool = False, raw_result: Dict[str, Any] = None) -> str:
+def generate_json_report(analysis: Dict[str, Any], raw_result: bool = False, raw_result_data: Dict[str, Any] = None) -> str:
     """
     Generate JSON report
     
     Args:
         analysis: Analysis data from analyze_latency
-        include_raw_data: Whether to include full raw result data
-        raw_result: Raw result data to include (if include_raw_data is True)
+        raw_result: Whether to include full raw result data
+        raw_result_data: Raw result data to include (if raw_result is True)
     """
     report_data = analysis.copy()
     
-    if include_raw_data and raw_result is not None:
-        report_data["raw_result"] = raw_result
+    if raw_result and raw_result_data is not None:
+        report_data["raw_result"] = raw_result_data
     
     return to_json(report_data, indent=True).decode('utf-8')
 

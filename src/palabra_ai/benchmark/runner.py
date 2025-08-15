@@ -236,12 +236,12 @@ class BenchmarkAnalyzer:
         
         return generate_html_report(self.analysis)
 
-    def get_json_report(self, include_raw_data: bool = False) -> str:
+    def get_json_report(self, raw_result: bool = False) -> str:
         """
         Get JSON report
         
         Args:
-            include_raw_data: Whether to include full raw result data
+            raw_result: Whether to include full raw result data
         
         Returns:
             JSON report content
@@ -249,10 +249,10 @@ class BenchmarkAnalyzer:
         if not self.analysis:
             self.analyze()
         
-        return generate_json_report(self.analysis, include_raw_data, self.get_result() if include_raw_data else None)
+        return generate_json_report(self.analysis, raw_result, self.get_result() if raw_result else None)
     
     def save_reports(self, output_dir: Optional[Path] = None, 
-                     html: bool = False, json: bool = False, include_raw_data: bool = False) -> Dict[str, Path]:
+                     html: bool = False, json: bool = False, raw_result: bool = False) -> Dict[str, Path]:
         """
         Save reports to files
         
@@ -260,7 +260,7 @@ class BenchmarkAnalyzer:
             output_dir: Directory to save reports (default: current directory)
             html: Whether to save HTML report
             json: Whether to save JSON report
-            include_raw_data: Whether to include full raw result data in JSON
+            raw_result: Whether to include full raw result data in JSON
             
         Returns:
             Dictionary with paths to saved files
@@ -280,7 +280,7 @@ class BenchmarkAnalyzer:
         
         if json:
             json_file = output_dir / "benchmark_analysis.json"
-            json_file.write_text(self.get_json_report(include_raw_data))
+            json_file.write_text(self.get_json_report(raw_result))
             saved_files['json'] = json_file
         
         return saved_files
