@@ -42,6 +42,14 @@ from palabra_ai.constant import (
     VAD_RIGHT_PADDING_DEFAULT,
     VAD_THRESHOLD_DEFAULT,
 )
+from palabra_ai.constant import QUEUE_MAX_TEMPO
+from palabra_ai.constant import QUEUE_MIN_TEMPO
+from palabra_ai.constant import WEBRTC_MODE_CHANNELS
+from palabra_ai.constant import WEBRTC_MODE_CHUNK_DURATION_MS
+from palabra_ai.constant import WEBRTC_MODE_SAMPLE_RATE
+from palabra_ai.constant import WS_MODE_CHANNELS
+from palabra_ai.constant import WS_MODE_CHUNK_DURATION_MS
+from palabra_ai.constant import WS_MODE_SAMPLE_RATE
 from palabra_ai.exc import ConfigurationError
 from palabra_ai.lang import Language, is_valid_source_language, is_valid_target_language
 from palabra_ai.message import Message
@@ -140,9 +148,9 @@ class IoMode(BaseModel):
 
 class WebrtcMode(IoMode):
     name: str = "webrtc"
-    sample_rate: int = 48000
-    num_channels: int = 1
-    chunk_duration_ms: int = 10
+    sample_rate: int = WEBRTC_MODE_SAMPLE_RATE
+    num_channels: int = WEBRTC_MODE_CHANNELS
+    chunk_duration_ms: int = WEBRTC_MODE_CHUNK_DURATION_MS
 
     def model_dump(self, *args, **kwargs) -> dict[str, Any]:
         return {
@@ -163,9 +171,9 @@ class WebrtcMode(IoMode):
 
 class WsMode(IoMode):
     name: str = "ws"
-    sample_rate: int = 24000
-    num_channels: int = 1
-    chunk_duration_ms: int = 320
+    sample_rate: int = WS_MODE_SAMPLE_RATE
+    num_channels: int = WS_MODE_CHANNELS
+    chunk_duration_ms: int = WS_MODE_CHUNK_DURATION_MS
 
     def model_dump(self, *args, **kwargs) -> dict[str, Any]:
         return {
@@ -314,8 +322,8 @@ class QueueConfig(BaseModel):
     desired_queue_level_ms: int = DESIRED_QUEUE_LEVEL_MS_DEFAULT
     max_queue_level_ms: int = MAX_QUEUE_LEVEL_MS_DEFAULT
     auto_tempo: bool = True
-    min_tempo: float = 1.0
-    max_tempo: float = 1.2
+    min_tempo: float = QUEUE_MIN_TEMPO
+    max_tempo: float = QUEUE_MAX_TEMPO
 
 
 class QueueConfigs(BaseModel):

@@ -10,6 +10,7 @@ import librosa
 from tqdm import tqdm
 
 from palabra_ai import PalabraAI, Config, SourceLang, TargetLang
+from palabra_ai.config import WsMode, WebrtcMode
 from palabra_ai.lang import Language, is_valid_source_language, is_valid_target_language
 from palabra_ai.task.adapter.file import FileReader
 from palabra_ai.task.adapter.dummy import DummyWriter
@@ -24,7 +25,8 @@ from .reporter import generate_text_report, generate_html_report, generate_json_
 class BenchmarkRunner:
     """Run Palabra AI benchmark with progress tracking"""
     
-    def __init__(self, audio_file: str, source_lang: str, target_lang: str, silent: bool = True):
+    def __init__(self, audio_file: str, source_lang: str, target_lang: str, silent: bool = True,
+                 mode: str = "ws", chunk_duration_ms: int = 100):
         self.audio_file = Path(audio_file)
         
         # Get language objects using existing functionality
@@ -38,6 +40,8 @@ class BenchmarkRunner:
             raise ValueError(f"Language '{target_lang}' is not a valid target language for Palabra API")
         
         self.silent = silent
+        self.mode = mode
+        self.chunk_duration_ms = chunk_duration_ms
         self.progress_bar = None
         self.audio_duration = None
         self.last_timestamp = 0.0
@@ -94,12 +98,19 @@ class BenchmarkRunner:
             reader = FileReader(str(self.audio_file))
             writer = DummyWriter()
             
+            # Create appropriate IoMode based on mode parameter
+            if self.mode == "webrtc":
+                io_mode = WebrtcMode(chunk_duration_ms=self.chunk_duration_ms)
+            else:  # default to ws
+                io_mode = WsMode(chunk_duration_ms=self.chunk_duration_ms)
+            
             # Configure with benchmark mode
             config = Config(
                 SourceLang(self.source_lang, reader, on_transcription=self._on_transcription),
                 [TargetLang(self.target_lang, writer, on_transcription=self._on_transcription)],
                 silent=self.silent,
                 benchmark=True,
+                mode=io_mode,
             )
             
             # Run the processing
@@ -236,7 +247,7 @@ class BenchmarkAnalyzer:
         
         return generate_html_report(self.analysis)
 
-    def get_json_report(self, raw_result: bool = False) -> str:
+    def get_json_report(self, raw_result: bool = False) -> bytes:
         """
         Get JSON report
         
@@ -280,14 +291,19 @@ class BenchmarkAnalyzer:
         
         if json:
             json_file = output_dir / "benchmark_analysis.json"
-            json_file.write_text(self.get_json_report(raw_result))
+            json_file.write_bytes(self.get_json_report(raw_result))
             saved_files['json'] = json_file
+
+            result_file = output_dir / "benchmark_result.json"
+            result_file.write_bytes(to_json(self.result))
+            saved_files['result'] = result_file
         
         return saved_files
 
 
 def run_benchmark(audio_file: str, source_lang: str, target_lang: str,
-                 silent: bool = True, show_progress: bool = True) -> BenchmarkAnalyzer:
+                 silent: bool = True, show_progress: bool = True,
+                 mode: str = "ws", chunk_duration_ms: int = 100) -> BenchmarkAnalyzer:
     """
     Convenience function to run benchmark and return analyzer
     
@@ -297,10 +313,12 @@ def run_benchmark(audio_file: str, source_lang: str, target_lang: str,
         target_lang: Target language code
         silent: Whether to run Palabra in silent mode
         show_progress: Whether to show progress bar
+        mode: Connection mode - "ws" or "webrtc" (default: "ws")
+        chunk_duration_ms: Audio chunk duration in milliseconds (default: 100)
         
     Returns:
         BenchmarkAnalyzer instance with results
     """
-    runner = BenchmarkRunner(audio_file, source_lang, target_lang, silent)
+    runner = BenchmarkRunner(audio_file, source_lang, target_lang, silent, mode, chunk_duration_ms)
     result = runner.run(show_progress)
     return BenchmarkAnalyzer(result)

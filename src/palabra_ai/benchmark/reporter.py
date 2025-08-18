@@ -464,7 +464,7 @@ def generate_html_report(analysis: Dict[str, Any]) -> str:
     
 
 
-def generate_json_report(analysis: Dict[str, Any], raw_result: bool = False, raw_result_data: Dict[str, Any] = None) -> str:
+def generate_json_report(analysis: Dict[str, Any], raw_result: bool = False, raw_result_data: Dict[str, Any] = None) -> bytes:
     """
     Generate JSON report
     
@@ -478,7 +478,7 @@ def generate_json_report(analysis: Dict[str, Any], raw_result: bool = False, raw
     if raw_result and raw_result_data is not None:
         report_data["raw_result"] = raw_result_data
     
-    return to_json(report_data, indent=True).decode('utf-8')
+    return to_json(report_data, indent=True)
 
 
 def save_html_report(analysis: Dict[str, Any], output_file: Path) -> None:
@@ -490,4 +490,4 @@ def save_html_report(analysis: Dict[str, Any], output_file: Path) -> None:
 def save_json_report(analysis: Dict[str, Any], output_file: Path) -> None:
     """Save JSON report to file"""
     json_content = generate_json_report(analysis)
-    output_file.write_text(json_content)
+    output_file.write_bytes(json_content)

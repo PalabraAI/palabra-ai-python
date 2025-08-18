@@ -1,5 +1,8 @@
 from dataclasses import KW_ONLY, dataclass, field
 
+import asyncio as aio
+
+import numpy as np
 from websockets.asyncio.client import ClientConnection
 from websockets.asyncio.client import connect as ws_connect
 
@@ -61,8 +64,10 @@ class WsIo(Io):
                             Direction.OUT,
                             ts=ts,
                             idx=next(self._idx),
-                            num=next(self._out_audio_num)
+                            num=next(self._out_audio_num),
+                            chunk_duration_ms=self.cfg.mode.chunk_duration_ms,
                         )
+                        _dbg.rms = await aio.to_thread(self.calc_rms_db, audio_frame)
                         audio_frame._dbg = _dbg
                         self.bench_audio_foq.publish(audio_frame)
                     self.writer.q.put_nowait(audio_frame)

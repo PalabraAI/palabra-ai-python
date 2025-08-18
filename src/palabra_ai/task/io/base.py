@@ -1,6 +1,6 @@
 import abc
 import time
-from asyncio import get_running_loop, sleep
+import asyncio as aio
 from collections.abc import Callable
 from dataclasses import KW_ONLY, dataclass, field
 from itertools import count
@@ -63,6 +63,13 @@ class Io(Task):
         """Send a message through the transport."""
         ...
 
+    @staticmethod
+    def calc_rms_db(audio_frame: AudioFrame) -> float:
+        audio_data = np.frombuffer(audio_frame.data, dtype=np.int16)
+        rms = np.sqrt(np.mean(audio_data.astype(np.float32) ** 2)) / 32768.0
+        return float(20 * np.log10(rms) if rms > 0 else -np.inf)
+
+
     async def push_in_msg(self, msg: "Message") -> None:
         """Push an incoming message with debug tracking."""
         _dbg = Dbg(Kind.MESSAGE, self.channel, Direction.IN, num=next(self._in_msg_num), idx=next(self._idx))
@@ -102,7 +109,7 @@ class Io(Task):
 
     async def wait_after_push(self, delta: float):
         """Hook for subclasses to add post-chunk processing."""
-        await sleep(self.cfg.mode.chunk_duration_ms / 1000 - delta)
+        await aio.sleep(self.cfg.mode.chunk_duration_ms / 1000 - delta)
 
     def new_frame(self) -> "AudioFrame":
         return AudioFrame.create(*self.cfg.mode.for_audio_frame)
@@ -115,7 +122,7 @@ class Io(Task):
         audio_data = np.frombuffer(audio_frame.data, dtype=np.int16)
 
         for i in range(0, total_samples, samples_per_channel):
-            if get_running_loop().is_closed():
+            if aio.get_running_loop().is_closed():
                 break
             frame_chunk = audio_bytes[
                 i * BYTES_PER_SAMPLE : (i + samples_per_channel) * BYTES_PER_SAMPLE
@@ -131,7 +138,8 @@ class Io(Task):
             np.copyto(audio_data, padded_chunk)
 
             if self.cfg.benchmark:
-                _dbg = Dbg(Kind.AUDIO, self.channel, Direction.IN, idx=next(self._idx), num=next(self._in_audio_num))
+                _dbg = Dbg(Kind.AUDIO, self.channel, Direction.IN, idx=next(self._idx), num=next(self._in_audio_num), chunk_duration_ms=self.cfg.mode.chunk_duration_ms)
+                _dbg.rms = await aio.to_thread(self.calc_rms_db, audio_frame)
                 audio_frame._dbg = _dbg
                 self.bench_audio_foq.publish(audio_frame)
 
@@ -143,11 +151,11 @@ class Io(Task):
 
     async def set_task(self):
         debug("Setting task configuration...")
-        await sleep(SLEEP_INTERVAL_LONG)
+        await aio.sleep(SLEEP_INTERVAL_LONG)
         async with self.out_msg_foq.receiver(self, self.stopper) as msgs_out:
             await self.push_in_msg(SetTaskMessage.from_config(self.cfg))
             start_ts = time.time()
-            await sleep(SLEEP_INTERVAL_LONG)
+            await aio.sleep(SLEEP_INTERVAL_LONG)
             while start_ts + BOOT_TIMEOUT > time.time():
                 await self.push_in_msg(GetTaskMessage())
                 msg = await anext(msgs_out)
@@ -155,6 +163,6 @@ class Io(Task):
                     debug(f"Received current task: {msg.data}")
                     return
                 debug(f"Received unexpected message: {msg}")
-                await sleep(SLEEP_INTERVAL_LONG)
+                await aio.sleep(SLEEP_INTERVAL_LONG)
         debug("Timeout waiting for task configuration")
         raise TimeoutError("Timeout waiting for task configuration")

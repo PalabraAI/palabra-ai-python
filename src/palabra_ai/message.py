@@ -33,6 +33,16 @@ class Dbg:
     ts: float = field(default_factory=time.time)
     idx: int | None = field(default=None)
     num: int | None = field(default=None)
+    chunk_duration_ms: float | None = field(default=None)
+    relative_audio_time_ms: float | None = field(default=None)
+    rms: float | None = field(default=None)
+
+    def __post_init__(self):
+        self.calc_relative_audio_time_ms()
+
+    def calc_relative_audio_time_ms(self) -> float | None:
+        if self.kind == Kind.AUDIO and self.num is not None and self.chunk_duration_ms:
+            self.relative_audio_time_ms = self.chunk_duration_ms * self.num
 
     @classmethod
     def empty(cls):

@@ -25,6 +25,9 @@ Examples:
   python -m palabra_ai.benchmark audio.mp3 es en --chunks 10 --show-empty
   python -m palabra_ai.benchmark audio.mp3 es en --json --raw-result  # Include raw data
   python -m palabra_ai.benchmark audio.mp3 es en --no-progress
+  python -m palabra_ai.benchmark audio.mp3 es en --mode webrtc  # Use WebRTC mode
+  python -m palabra_ai.benchmark audio.mp3 es en --chunk-duration-ms 50  # 50ms chunks
+  python -m palabra_ai.benchmark audio.mp3 es en --mode webrtc --chunk-duration-ms 20
         """
     )
     
@@ -50,6 +53,10 @@ Examples:
                        help="Include empty chunks in detailed view")
     parser.add_argument("--raw-result", action="store_true",
                        help="Include full raw result data in JSON report")
+    parser.add_argument("--mode", choices=["ws", "webrtc"], default="ws",
+                       help="Connection mode: ws (WebSocket) or webrtc (default: ws)")
+    parser.add_argument("--chunk-duration-ms", type=int, default=100,
+                       help="Audio chunk duration in milliseconds (default: 100)")
     
     args = parser.parse_args()
     
@@ -70,7 +77,9 @@ Examples:
             args.source_lang,
             args.target_lang,
             silent=not args.verbose,
-            show_progress=not args.no_progress
+            show_progress=not args.no_progress,
+            mode=args.mode,
+            chunk_duration_ms=args.chunk_duration_ms
         )
         
         # Analyze results
