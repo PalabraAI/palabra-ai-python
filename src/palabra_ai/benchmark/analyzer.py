@@ -31,6 +31,7 @@ class LatencyMeasurement:
     latency_sec: float
     chunk_index: int
     segment_start_sec: float
+    text: str = ""  # Text content from the transcription
 
 
 def find_nearest_sound_chunk(chunks: List[AudioChunk], target_index: int, 
@@ -194,6 +195,7 @@ def analyze_latency(messages: List[Dict[str, Any]]) -> Dict[str, Any]:
             transcription = data.get("transcription", {})
             trans_id = transcription.get("transcription_id")
             segments = transcription.get("segments", [])
+            text = transcription.get("text", "")  # Extract text content
             
             # Skip if has _part_ suffix (we only want base IDs)
             if not trans_id or '_part_' in trans_id:
@@ -251,7 +253,8 @@ def analyze_latency(messages: List[Dict[str, Any]]) -> Dict[str, Any]:
                                 transcription_id=trans_id,
                                 latency_sec=latency,
                                 chunk_index=nearest_chunk.index,
-                                segment_start_sec=segment_start
+                                segment_start_sec=segment_start,
+                                text=text  # Save text content
                             )
                             latency_measurements.append(measurement)
                         
@@ -292,9 +295,39 @@ def analyze_latency(messages: List[Dict[str, Any]]) -> Dict[str, Any]:
         "tts_audio": []
     }
     
+    # Also create detailed chunk information with texts
+    chunk_details = {}
+    
     for m in all_measurements:
         if m.event_type in measurements_by_type:
             measurements_by_type[m.event_type].append(m.latency_sec)
+            
+            # Store detailed info for each chunk
+            if m.chunk_index not in chunk_details:
+                chunk_details[m.chunk_index] = {
+                    "chunk_index": m.chunk_index,
+                    "audio_time": m.segment_start_sec,
+                    "partial_text": "",
+                    "validated_text": "",
+                    "translated_text": "",
+                    "partial_latency": None,
+                    "validated_latency": None,
+                    "translated_latency": None,
+                    "tts_latency": None
+                }
+            
+            # Update with specific event data
+            if m.event_type == "partial_transcription":
+                chunk_details[m.chunk_index]["partial_text"] = m.text
+                chunk_details[m.chunk_index]["partial_latency"] = m.latency_sec
+            elif m.event_type == "validated_transcription":
+                chunk_details[m.chunk_index]["validated_text"] = m.text
+                chunk_details[m.chunk_index]["validated_latency"] = m.latency_sec
+            elif m.event_type == "translated_transcription":
+                chunk_details[m.chunk_index]["translated_text"] = m.text
+                chunk_details[m.chunk_index]["translated_latency"] = m.latency_sec
+            elif m.event_type == "tts_audio":
+                chunk_details[m.chunk_index]["tts_latency"] = m.latency_sec
     
     # Calculate statistics for each type
     statistics_data = {}
@@ -386,6 +419,7 @@ def analyze_latency(messages: List[Dict[str, Any]]) -> Dict[str, Any]:
             "tts_audio": "Latency from audio chunk send to first TTS audio with sound"
         },
         "time_progression": time_progression,
+        "chunk_details": chunk_details,  # Add detailed chunk information with texts
         "chunks": {
             "in_audio": [
                 {

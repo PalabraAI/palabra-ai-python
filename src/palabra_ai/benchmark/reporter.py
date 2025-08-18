@@ -286,31 +286,66 @@ def generate_text_report(analysis: Dict[str, Any], max_chunks: int = -1, show_em
                 title="Frequency Distribution"
             ))
     
-    # Audio chunk analysis
-    if "chunks" in analysis:
+    # Sample chunk details with latencies and texts - show ALL validated chunks
+    if "chunk_details" in analysis and analysis["chunk_details"]:
         lines.append("\n" + "=" * 80)
-        lines.append("AUDIO CHUNK ANALYSIS")
+        lines.append("TRANSCRIPTION DETAILS (All Validated Chunks)")
         lines.append("=" * 80)
         
-        in_chunks = analysis["chunks"].get("in_audio", [])
-        out_chunks = analysis["chunks"].get("out_audio", [])
+        # Sort chunk details by chunk index
+        sorted_chunks = sorted(analysis["chunk_details"].items(), key=lambda x: x[0])
         
-        if in_chunks:
-            lines.append("\nSample IN Audio Chunks (first 10):")
+        # Show ALL chunks that have validated transcription
+        displayed_count = 0
+        for chunk_idx, details in sorted_chunks:
+            # Only show chunks with validated transcription
+            if details["validated_latency"] is None:
+                continue
+            
+            displayed_count += 1
+            lines.append(f"\nChunk #{chunk_idx} (Audio time: {details['audio_time']:.2f}s)")
             lines.append("-" * 60)
-            lines.append("Index  Audio Time  RMS (dB)  Has Sound")
-            lines.append("-" * 60)
-            for chunk in in_chunks[:10]:
-                lines.append(f"{chunk['index']:5d}  {chunk['audio_time']:9.2f}s  {chunk['rms_db']:8.1f}  {'Yes' if chunk['has_sound'] else 'No':9s}")
+            
+            # Show partial transcription
+            if details["partial_latency"] is not None:
+                text = details["partial_text"][:80] + "..." if len(details["partial_text"]) > 80 else details["partial_text"]
+                lines.append(f"  Partial ({details['partial_latency']:.3f}s): {text}")
+            
+            # Show validated transcription
+            text = details["validated_text"][:80] + "..." if len(details["validated_text"]) > 80 else details["validated_text"]
+            lines.append(f"  Validated ({details['validated_latency']:.3f}s): {text}")
+            
+            # Show translation
+            if details["translated_latency"] is not None:
+                text = details["translated_text"][:80] + "..." if len(details["translated_text"]) > 80 else details["translated_text"]
+                lines.append(f"  Translation ({details['translated_latency']:.3f}s): {text}")
         
-        if out_chunks:
-            lines.append("\nSample OUT Audio Chunks (first 10):")
-            lines.append("-" * 60)
-            lines.append("Index  Audio Time  RMS (dB)  Has Sound")
-            lines.append("-" * 60)
-            for chunk in out_chunks[:10]:
-                lines.append(f"{chunk['index']:5d}  {chunk['audio_time']:9.2f}s  {chunk['rms_db']:8.1f}  {'Yes' if chunk['has_sound'] else 'No':9s}")
-    
+        if displayed_count == 0:
+            lines.append("\nNo chunks with validated transcription found.")
+    elif "measurements" in analysis:
+        # Fallback to simpler display if chunk_details not available
+        lines.append("\n" + "=" * 80)
+        lines.append("SAMPLE CHUNK DETAILS")
+        lines.append("=" * 80)
+        
+        # Show latency ranges for each event type
+        lines.append("\nLatency Ranges by Event Type:")
+        lines.append("-" * 60)
+        
+        event_names = {
+            "partial_transcription": "Partial Transcription",
+            "validated_transcription": "Validated Transcription",
+            "translated_transcription": "Translation",
+            "tts_audio": "TTS Audio"
+        }
+        
+        for event_type, name in event_names.items():
+            if event_type in analysis["measurements"] and analysis["measurements"][event_type]:
+                latencies = analysis["measurements"][event_type]
+                if latencies:
+                    min_lat = min(latencies)
+                    max_lat = max(latencies)
+                    lines.append(f"{name:25s}: {min_lat:6.3f}s (min) - {max_lat:6.3f}s (max)")
     
     lines.append("\n" + "=" * 80)
     
