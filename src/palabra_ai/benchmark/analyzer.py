@@ -4,66 +4,67 @@ Provides data analysis for benchmark results
 """
 
 import statistics
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass, field
 
 
 @dataclass
-class ChunkMetrics:
-    """Metrics for a single audio chunk"""
-    chunk_id: int
-    send_timestamp: float
-    time_offset: float  # Seconds from start
-    
-    # Latencies from chunk send time
-    asr_first_partial: Optional[float] = None
-    asr_validated: Optional[float] = None
-    translation: Optional[float] = None
-    tts_audio: Optional[float] = None
-    
-    # Text content
-    partial_text: str = ""
-    validated_text: str = ""
-    translated_text: str = ""
-    
-    # Associated IDs
-    transcription_ids: List[str] = field(default_factory=list)
+class AudioChunk:
+    """Metadata for audio chunk"""
+    index: int
+    timestamp: float  # perf_counter timestamp when sent/received
+    rms_db: float  # RMS in decibels
+    chunk_duration_ms: float
+    direction: str  # 'in' or 'out'
     
     @property
-    def is_empty(self) -> bool:
-        """Check if chunk has no transcription data"""
-        return (self.asr_first_partial is None and 
-                self.asr_validated is None and 
-                not self.partial_text and 
-                not self.validated_text)
+    def audio_time_sec(self) -> float:
+        """Audio time position in seconds from start"""
+        return self.index * (self.chunk_duration_ms / 1000.0)
+
+
+@dataclass 
+class LatencyMeasurement:
+    """Single latency measurement"""
+    event_type: str  # partial_transcription, validated_transcription, etc
+    transcription_id: str
+    latency_sec: float
+    chunk_index: int
+    segment_start_sec: float
+
+
+def find_nearest_sound_chunk(chunks: List[AudioChunk], target_index: int, 
+                            rms_threshold_db: float = -40.0,
+                            max_lookahead_ms: int = 10000) -> Optional[AudioChunk]:
+    """
+    Find nearest chunk with sound (RMS > threshold) starting from target_index.
+    Searches forward up to max_lookahead_ms.
+    """
+    if not chunks or target_index < 0:
+        return None
     
-    @property
-    def pipeline_stage(self) -> str:
-        """Get the furthest pipeline stage reached"""
-        if self.tts_audio is not None:
-            return "complete"
-        elif self.translation is not None:
-            return "translated"
-        elif self.asr_validated is not None:
-            return "validated"
-        elif self.asr_first_partial is not None:
-            return "partial"
-        else:
-            return "empty"
+    # Ensure target_index is within bounds
+    target_index = min(target_index, len(chunks) - 1)
     
-    @property
-    def completion_score(self) -> float:
-        """Calculate completion score (0.0 to 1.0)"""
-        score = 0.0
-        if self.asr_first_partial is not None:
-            score += 0.25
-        if self.asr_validated is not None:
-            score += 0.25
-        if self.translation is not None:
-            score += 0.25
-        if self.tts_audio is not None:
-            score += 0.25
-        return score
+    # Get chunk duration from first chunk
+    chunk_duration_ms = chunks[0].chunk_duration_ms if chunks else 100
+    max_steps = int(max_lookahead_ms / chunk_duration_ms)
+    
+    # Search forward from target_index
+    for step in range(max_steps + 1):
+        idx = target_index + step
+        if idx >= len(chunks):
+            break
+            
+        chunk = chunks[idx]
+        if chunk.rms_db > rms_threshold_db:
+            return chunk
+    
+    # If no sound found, return original target
+    if target_index < len(chunks):
+        return chunks[target_index]
+    
+    return None
 
 
 def calculate_percentiles(data: List[float]) -> Dict[str, float]:
@@ -91,33 +92,96 @@ def calculate_percentiles(data: List[float]) -> Dict[str, float]:
 
 def analyze_latency(messages: List[Dict[str, Any]]) -> Dict[str, Any]:
     """
-    Analyze message trace for latency metrics
+    Analyze message trace for latency metrics with proper time synchronization.
     
-    Returns comprehensive latency analysis including:
-    - Per-chunk latencies
-    - Aggregate statistics
-    - Time progression analysis
+    The key insight: segment.start values are relative to the audio file start,
+    but we need to sync this with our chunk send timestamps to calculate accurate latencies.
+    
+    Synchronization approach:
+    1. Use the first partial transcription as a synchronization point
+    2. Map its segment.start to the corresponding chunk to establish the time relationship
+    3. Use this mapping for all subsequent latency calculations
+    
+    Calculates one-way latency from sending audio chunk to receiving events:
+    - partial_transcription
+    - validated_transcription  
+    - translated_transcription
+    - TTS audio output (first non-silent OUT audio chunk)
+    
+    Returns comprehensive latency analysis.
     """
     
     # Constants
-    CHUNK_DURATION = 0.32  # 320ms per chunk at 24kHz
+    RMS_THRESHOLD_DB = -40.0  # Threshold in dB for detecting sound
+    MAX_LOOKAHEAD_MS = 10000  # Max 10 seconds lookahead for sound
     
-    # Collect all input audio chunks
-    chunks = {}
+    # Collect IN audio chunks
+    in_audio_chunks = []
+    in_chunks_by_index = {}
+    
+    # Collect OUT audio chunks (for TTS)
+    out_audio_chunks = []
+    
+    # Time synchronization state
+    sync_established = False
+    sync_reference_chunk_ts = None  # Timestamp of the reference chunk
+    sync_reference_segment_start = None  # segment.start of the reference transcription
+    sync_reference_chunk_idx = None  # Index of the reference chunk
+    
+    # Extract chunk_duration_ms from first audio message
+    chunk_duration_ms = None
+    
     for msg in messages:
-        if msg.get("dir") == "in" and msg.get("kind") == "audio":
+        if msg.get("kind") == "audio":
+            # Extract chunk duration from first audio message
+            if chunk_duration_ms is None:
+                chunk_duration_ms = msg.get("chunk_duration_ms")
+                if chunk_duration_ms:
+                    chunk_duration_ms = float(chunk_duration_ms)
+            
+            direction = msg.get("dir")
             chunk_num = msg.get("num")
-            if chunk_num is not None:
-                chunks[chunk_num] = ChunkMetrics(
-                    chunk_id=chunk_num,
-                    send_timestamp=msg.get("ts"),
-                    time_offset=chunk_num * CHUNK_DURATION
+            timestamp = msg.get("ts")
+            rms_db = msg.get("rms")
+            
+            if chunk_num is not None and timestamp is not None:
+                chunk = AudioChunk(
+                    index=chunk_num,
+                    timestamp=timestamp,
+                    rms_db=rms_db if rms_db is not None else -100.0,
+                    chunk_duration_ms=chunk_duration_ms or 100.0,
+                    direction=direction
                 )
+                
+                if direction == "in":
+                    in_audio_chunks.append(chunk)
+                    in_chunks_by_index[chunk_num] = chunk
+                elif direction == "out":
+                    out_audio_chunks.append(chunk)
     
-    if not chunks:
-        raise ValueError("No audio chunks found in messages")
+    # Sort chunks by index for IN, by timestamp for OUT
+    in_audio_chunks.sort(key=lambda c: c.index)
+    out_audio_chunks.sort(key=lambda c: c.timestamp)  # Sort by timestamp to find first in time
     
-    # Process transcription messages
+    if not in_audio_chunks:
+        raise ValueError("No input audio chunks found in messages")
+    
+    # Use detected chunk_duration_ms or default
+    if chunk_duration_ms is None:
+        chunk_duration_ms = 100.0  # Default fallback
+    
+    # Process transcription events with deduplication
+    # For each message type, track which base transcription_ids we've seen
+    processed_ids = {
+        "partial_transcription": set(),
+        "validated_transcription": set(),
+        "translated_transcription": set()
+    }
+    latency_measurements = []
+    
+    # Track translation events for TTS correlation
+    translation_events = []  # List of (timestamp, transcription_id, chunk_index)
+    
     for msg in messages:
         if msg.get("dir") != "out":
             continue
@@ -130,150 +194,216 @@ def analyze_latency(messages: List[Dict[str, Any]]) -> Dict[str, Any]:
             transcription = data.get("transcription", {})
             trans_id = transcription.get("transcription_id")
             segments = transcription.get("segments", [])
-            text = transcription.get("text", "")
             
-            if segments:
-                seg_start = segments[0].get("start", 0)
-                seg_end = segments[-1].get("end", 0)
+            # Skip if has _part_ suffix (we only want base IDs)
+            if not trans_id or '_part_' in trans_id:
+                continue
+            
+            # Deduplication - only process first occurrence of each transcription_id per message type
+            if trans_id in processed_ids[msg_type]:
+                continue
+            processed_ids[msg_type].add(trans_id)
+            
+            if segments and len(segments) > 0:
+                # Get first segment start time  
+                segment_start = segments[0].get("start", 0)
                 
-                # Map to chunks based on timing overlap
-                for chunk_id, chunk in chunks.items():
-                    chunk_start = chunk.time_offset
-                    chunk_end = chunk_start + CHUNK_DURATION
+                # Establish synchronization on first partial transcription
+                if msg_type == "partial_transcription" and not sync_established:
+                    # This is our synchronization point
+                    target_idx = round(segment_start * 1000 / chunk_duration_ms)  # round, not floor!
                     
-                    # Check overlap
-                    if seg_start < chunk_end and seg_end > chunk_start:
-                        latency = msg_ts - chunk.send_timestamp
+                    # Find the chunk with sound that corresponds to this segment
+                    sync_chunk = find_nearest_sound_chunk(
+                        in_audio_chunks,
+                        target_idx,
+                        RMS_THRESHOLD_DB,
+                        MAX_LOOKAHEAD_MS
+                    )
+                    
+                    if sync_chunk:
+                        sync_established = True
+                        sync_reference_chunk_ts = sync_chunk.timestamp
+                        sync_reference_segment_start = segment_start
+                        sync_reference_chunk_idx = sync_chunk.index
+                
+                # Calculate latency using synchronized time reference
+                if sync_established:
+                    # Calculate target chunk index (using round as per spec)
+                    target_index = round(segment_start * 1000 / chunk_duration_ms)  # round, not floor!
+                    
+                    # Find nearest chunk with sound
+                    nearest_chunk = find_nearest_sound_chunk(
+                        in_audio_chunks, 
+                        target_index,
+                        RMS_THRESHOLD_DB,
+                        MAX_LOOKAHEAD_MS
+                    )
+                    
+                    if nearest_chunk:
+                        # Calculate latency
+                        latency = msg_ts - nearest_chunk.timestamp
                         
-                        if trans_id and trans_id not in chunk.transcription_ids:
-                            chunk.transcription_ids.append(trans_id)
+                        # Skip only negative latencies (impossible)
+                        if latency >= 0:
+                            measurement = LatencyMeasurement(
+                                event_type=msg_type,
+                                transcription_id=trans_id,
+                                latency_sec=latency,
+                                chunk_index=nearest_chunk.index,
+                                segment_start_sec=segment_start
+                            )
+                            latency_measurements.append(measurement)
                         
-                        if msg_type == "partial_transcription":
-                            if chunk.asr_first_partial is None or latency < chunk.asr_first_partial:
-                                chunk.asr_first_partial = latency
-                                chunk.partial_text = text
-                        
-                        elif msg_type == "validated_transcription":
-                            chunk.asr_validated = latency
-                            chunk.validated_text = text
-                        
-                        elif msg_type == "translated_transcription":
-                            chunk.translation = latency
-                            chunk.translated_text = text
-        
-        # Handle TTS audio output
-        elif msg.get("kind") == "audio" and msg.get("dir") == "out":
-            # Simple mapping - correlate based on timing
-            for chunk in chunks.values():
-                if chunk.tts_audio is None and chunk.translation:
-                    time_since_send = msg_ts - chunk.send_timestamp
-                    if chunk.translation < time_since_send < chunk.translation + 2.0:
-                        chunk.tts_audio = time_since_send
-                        break
+                        # Track translation events for TTS correlation
+                        if msg_type == "translated_transcription":
+                            translation_events.append((msg_ts, trans_id, nearest_chunk.index))
     
-    # Collect all latencies
-    all_metrics = {
-        "asr_first_partial": [],
-        "asr_validated": [],
-        "translation": [],
+    # Process TTS audio (OUT audio chunks after translation)
+    tts_measurements = []
+    
+    for trans_ts, trans_id, in_chunk_idx in translation_events:
+        # Find first OUT audio chunk with sound after this translation
+        for out_chunk in out_audio_chunks:
+            if out_chunk.timestamp > trans_ts and out_chunk.rms_db > RMS_THRESHOLD_DB:
+                # Get corresponding IN chunk
+                if in_chunk_idx in in_chunks_by_index:
+                    in_chunk = in_chunks_by_index[in_chunk_idx]
+                    tts_latency = out_chunk.timestamp - in_chunk.timestamp
+                    
+                    measurement = LatencyMeasurement(
+                        event_type="tts_audio",
+                        transcription_id=trans_id,
+                        latency_sec=tts_latency,
+                        chunk_index=in_chunk_idx,
+                        segment_start_sec=in_chunk.audio_time_sec
+                    )
+                    tts_measurements.append(measurement)
+                    break  # Only first sound chunk per translation
+    
+    # Combine all measurements
+    all_measurements = latency_measurements + tts_measurements
+    
+    # Group measurements by event type
+    measurements_by_type = {
+        "partial_transcription": [],
+        "validated_transcription": [],
+        "translated_transcription": [],
         "tts_audio": []
     }
     
-    for chunk in chunks.values():
-        if chunk.asr_first_partial is not None:
-            all_metrics["asr_first_partial"].append(chunk.asr_first_partial)
-        if chunk.asr_validated is not None:
-            all_metrics["asr_validated"].append(chunk.asr_validated)
-        if chunk.translation is not None:
-            all_metrics["translation"].append(chunk.translation)
-        if chunk.tts_audio is not None:
-            all_metrics["tts_audio"].append(chunk.tts_audio)
+    for m in all_measurements:
+        if m.event_type in measurements_by_type:
+            measurements_by_type[m.event_type].append(m.latency_sec)
     
-    # Calculate statistics
+    # Calculate statistics for each type
     statistics_data = {}
-    for metric_name, values in all_metrics.items():
-        if values:
-            statistics_data[metric_name] = calculate_percentiles(values)
+    for event_type, latencies in measurements_by_type.items():
+        if latencies:
+            statistics_data[event_type] = calculate_percentiles(latencies)
     
-    # Time progression analysis (group by 5-second windows)
-    time_windows = {}
-    window_size = 5.0  # seconds
+    # Calculate summary statistics
+    total_in_chunks = len(in_audio_chunks)
+    chunks_with_sound = sum(1 for c in in_audio_chunks if c.rms_db > RMS_THRESHOLD_DB)
+    silent_chunks = total_in_chunks - chunks_with_sound
     
-    for chunk in chunks.values():
-        window = int(chunk.time_offset / window_size)
-        if window not in time_windows:
-            time_windows[window] = {
-                "start_time": window * window_size,
-                "end_time": (window + 1) * window_size,
-                "latencies": []
-            }
+    # Audio duration
+    if in_audio_chunks:
+        total_duration = max(c.audio_time_sec for c in in_audio_chunks) + chunk_duration_ms/1000
+    else:
+        total_duration = 0
+    
+    # Calculate time progression (for charts)
+    time_progression = {}
+    window_size_sec = 5.0  # 5-second windows
+    
+    # Group measurements by time window for validated transcription
+    if measurements_by_type["validated_transcription"]:
+        validated_with_time = [(m.segment_start_sec, m.latency_sec) for m in all_measurements if m.event_type == "validated_transcription"]
+        validated_with_time.sort(key=lambda x: x[0])  # Sort by audio time
         
-        # Use validated transcription as primary metric
-        if chunk.asr_validated is not None:
-            time_windows[window]["latencies"].append(chunk.asr_validated)
-    
-    # Calculate window statistics
-    for window_data in time_windows.values():
-        if window_data["latencies"]:
-            window_data["mean"] = statistics.mean(window_data["latencies"])
-            window_data["median"] = statistics.median(window_data["latencies"])
-            window_data["count"] = len(window_data["latencies"])
-        else:
-            window_data["mean"] = None
-            window_data["median"] = None
-            window_data["count"] = 0
-    
-    # Convert chunks to serializable format
-    chunks_data = {}
-    pipeline_stage_counts = {"empty": 0, "partial": 0, "validated": 0, "translated": 0, "complete": 0}
-    
-    for chunk_id, chunk in sorted(chunks.items()):
-        chunks_data[chunk_id] = {
-            "time_offset": chunk.time_offset,
-            "asr_first_partial": chunk.asr_first_partial,
-            "asr_validated": chunk.asr_validated,
-            "translation": chunk.translation,
-            "tts_audio": chunk.tts_audio,
-            "partial_text": chunk.partial_text[:50] + "..." if len(chunk.partial_text) > 50 else chunk.partial_text,
-            "validated_text": chunk.validated_text[:50] + "..." if len(chunk.validated_text) > 50 else chunk.validated_text,
-            "translated_text": chunk.translated_text[:50] + "..." if len(chunk.translated_text) > 50 else chunk.translated_text,
-            "transcription_ids": chunk.transcription_ids,
-            "is_empty": chunk.is_empty,
-            "pipeline_stage": chunk.pipeline_stage,
-            "completion_score": chunk.completion_score
-        }
+        for audio_time, latency in validated_with_time:
+            window_id = int(audio_time / window_size_sec)
+            if window_id not in time_progression:
+                time_progression[window_id] = {
+                    "start_time": window_id * window_size_sec,
+                    "end_time": (window_id + 1) * window_size_sec,
+                    "latencies": []
+                }
+            time_progression[window_id]["latencies"].append(latency)
         
-        # Count pipeline stages
-        pipeline_stage_counts[chunk.pipeline_stage] += 1
-    
-    # Find first audio timestamp as reference
-    first_audio_ts = min(chunk.send_timestamp for chunk in chunks.values())
-    
-    # Calculate average completion score
-    completion_scores = [chunk.completion_score for chunk in chunks.values()]
-    avg_completion = sum(completion_scores) / len(completion_scores) if completion_scores else 0.0
+        # Calculate stats for each window
+        for window_id, window_data in time_progression.items():
+            latencies = window_data["latencies"]
+            if latencies:
+                window_data["mean"] = statistics.mean(latencies)
+                window_data["median"] = statistics.median(latencies)
+                window_data["min"] = min(latencies)
+                window_data["max"] = max(latencies)
+                window_data["count"] = len(latencies)
+            else:
+                window_data["mean"] = None
+                window_data["median"] = None
+                window_data["min"] = None
+                window_data["max"] = None
+                window_data["count"] = 0
+            # Remove raw latencies to save space
+            del window_data["latencies"]
     
     # Build results
     return {
         "summary": {
-            "total_chunks": len(chunks),
-            "chunks_with_partial": len(all_metrics["asr_first_partial"]),
-            "chunks_with_validated": len(all_metrics["asr_validated"]),
-            "chunks_with_translation": len(all_metrics["translation"]),
-            "chunks_with_tts": len(all_metrics["tts_audio"]),
-            "empty_chunks": pipeline_stage_counts["empty"],
-            "pipeline_stages": pipeline_stage_counts,
-            "average_completion": avg_completion,
-            "first_audio_timestamp": first_audio_ts,
-            "total_duration": max(chunk.time_offset for chunk in chunks.values()) + CHUNK_DURATION
+            "total_chunks": total_in_chunks,
+            "chunks_with_sound": chunks_with_sound,
+            "silent_chunks": silent_chunks,
+            "silent_percentage": (silent_chunks / total_in_chunks * 100) if total_in_chunks > 0 else 0,
+            "chunk_duration_ms": chunk_duration_ms,
+            "rms_threshold_db": RMS_THRESHOLD_DB,
+            "total_duration": total_duration,
+            "chunks_with_partial": len(measurements_by_type["partial_transcription"]),
+            "chunks_with_validated": len(measurements_by_type["validated_transcription"]),
+            "chunks_with_translation": len(measurements_by_type["translated_transcription"]),
+            "chunks_with_tts": len(measurements_by_type["tts_audio"]),
+            "out_audio_chunks": len(out_audio_chunks),
+            "sync_established": sync_established,
+            "sync_reference": {
+                "segment_start": sync_reference_segment_start,
+                "chunk_index": sync_reference_chunk_idx,
+                "chunk_ts": sync_reference_chunk_ts
+            } if sync_established else None
         },
         "statistics": statistics_data,
-        "time_progression": time_windows,
-        "chunks": chunks_data,
+        "measurements": {
+            "partial_transcription": measurements_by_type["partial_transcription"],
+            "validated_transcription": measurements_by_type["validated_transcription"],
+            "translated_transcription": measurements_by_type["translated_transcription"],
+            "tts_audio": measurements_by_type["tts_audio"]
+        },
         "metric_descriptions": {
-            "asr_first_partial": "Latency from audio chunk send to first partial transcription",
-            "asr_validated": "Latency from audio chunk send to validated transcription",
-            "translation": "Latency from audio chunk send to text translation",
-            "tts_audio": "Latency from audio chunk send to TTS audio output"
+            "partial_transcription": "Latency from audio chunk send to first partial transcription",
+            "validated_transcription": "Latency from audio chunk send to validated transcription",
+            "translated_transcription": "Latency from audio chunk send to text translation",
+            "tts_audio": "Latency from audio chunk send to first TTS audio with sound"
+        },
+        "time_progression": time_progression,
+        "chunks": {
+            "in_audio": [
+                {
+                    "index": c.index,
+                    "audio_time": c.audio_time_sec,
+                    "rms_db": c.rms_db,
+                    "has_sound": c.rms_db > RMS_THRESHOLD_DB
+                }
+                for c in in_audio_chunks[:10]  # First 10 for debugging
+            ],
+            "out_audio": [
+                {
+                    "index": c.index,
+                    "audio_time": c.audio_time_sec,
+                    "rms_db": c.rms_db,
+                    "has_sound": c.rms_db > RMS_THRESHOLD_DB
+                }
+                for c in out_audio_chunks[:10]  # First 10 for debugging
+            ]
         }
     }

@@ -1,4 +1,3 @@
-import time
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, ClassVar, Union
@@ -12,6 +11,7 @@ from palabra_ai.exc import ApiError, ApiValidationError, TaskNotFoundError
 from palabra_ai.lang import Language
 from palabra_ai.util.logger import debug
 from palabra_ai.util.orjson import from_json
+from palabra_ai.util.timing import get_utc_ts
 
 if TYPE_CHECKING:
     from palabra_ai.config import Config
@@ -30,7 +30,7 @@ class Dbg:
     kind: Kind | None
     ch: Channel | None
     dir: Direction | None
-    ts: float = field(default_factory=time.time)
+    ts: float = field(default_factory=get_utc_ts)
     idx: int | None = field(default=None)
     num: int | None = field(default=None)
     chunk_duration_ms: float | None = field(default=None)
@@ -47,11 +47,11 @@ class Dbg:
     @classmethod
     def empty(cls):
         """Create an empty debug object"""
-        return cls(kind=None, ch=None, dir=None, ts=time.time())
+        return cls(kind=None, ch=None, dir=None, ts=get_utc_ts())
 
     @classmethod
     def now_ts(cls):
-        return time.time()
+        return get_utc_ts()
 
 @dataclass
 class KnownRaw:

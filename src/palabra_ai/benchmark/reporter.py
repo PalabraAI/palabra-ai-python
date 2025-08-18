@@ -196,43 +196,51 @@ def generate_text_report(analysis: Dict[str, Any], max_chunks: int = -1, show_em
     summary = analysis["summary"]
     lines.append(f"\nSUMMARY")
     lines.append("-" * 40)
-    lines.append(f"Total audio chunks:     {summary['total_chunks']}")
-    lines.append(f"Total duration:         {summary['total_duration']:.1f} seconds")
-    # Handle backward compatibility for new fields
-    if 'average_completion' in summary:
-        lines.append(f"Average completion:     {summary['average_completion']:.1%}")
+    lines.append(f"Total audio chunks:      {summary['total_chunks']}")
+    lines.append(f"Chunks with sound:       {summary.get('chunks_with_sound', 0)} (RMS > {summary.get('rms_threshold_db', -40.0):.1f} dB)")
+    lines.append(f"Silent chunks:           {summary.get('silent_chunks', 0)} ({summary.get('silent_percentage', 0):.1f}%)")
+    lines.append(f"Chunk duration:          {summary.get('chunk_duration_ms', 100):.0f} ms")
+    lines.append(f"Total duration:          {summary['total_duration']:.1f} seconds")
+    lines.append(f"")
+    lines.append(f"Events processed:")
+    lines.append(f"  Partial transcriptions:    {summary['chunks_with_partial']}")
+    lines.append(f"  Validated transcriptions:  {summary['chunks_with_validated']}")
+    lines.append(f"  Translations:              {summary['chunks_with_translation']}")
+    lines.append(f"  TTS audio outputs:         {summary['chunks_with_tts']}")
+    if summary.get('out_audio_chunks', 0) > 0:
+        lines.append(f"  OUT audio chunks:          {summary['out_audio_chunks']}")
     
-    lines.append(f"Chunks transcribed:     {summary['chunks_with_validated']} ({summary['chunks_with_validated']/summary['total_chunks']*100:.1f}%)")
-    lines.append(f"Chunks translated:      {summary['chunks_with_translation']} ({summary['chunks_with_translation']/summary['total_chunks']*100:.1f}%)")
-    lines.append(f"Chunks with TTS:        {summary['chunks_with_tts']} ({summary['chunks_with_tts']/summary['total_chunks']*100:.1f}%)")
-    
-    # Handle backward compatibility for empty chunks count
-    empty_chunks = summary.get('empty_chunks', 0)
-    lines.append(f"Empty chunks:           {empty_chunks} ({empty_chunks/summary['total_chunks']*100:.1f}%)")
-    
-    # Pipeline stage breakdown (if available)
-    if 'pipeline_stages' in summary:
-        lines.append(f"\nPIPELINE STAGE BREAKDOWN")
-        lines.append("-" * 40)
-        pipeline_stages = summary["pipeline_stages"]
-        stage_names = {"empty": "Empty (no data)", "partial": "Partial ASR", "validated": "Validated ASR", "translated": "Translated", "complete": "Complete (with TTS)"}
-        for stage, count in pipeline_stages.items():
-            percentage = count / summary['total_chunks'] * 100
-            lines.append(f"{stage_names[stage]:20s} {count:3d} ({percentage:5.1f}%)")
     
     # Statistics
     lines.append("\n" + "=" * 80)
     lines.append("LATENCY STATISTICS (seconds)")
     lines.append("=" * 80)
-    lines.append("\nLatency = Time from sending audio chunk to receiving response from API")
+    lines.append("\nOne-way latency from sending audio chunk to receiving response")
+    lines.append("")
     
-    metrics_order = ["asr_first_partial", "asr_validated", "translation", "tts_audio"]
+    # Simplified table format
+    lines.append("Category                          Count    Avg    Max    p50    p90    p95")
+    lines.append("-" * 78)
+    
+    metrics_order = ["partial_transcription", "validated_transcription", "translated_transcription", "tts_audio"]
     metric_names = {
-        "asr_first_partial": "ASR First Partial",
-        "asr_validated": "ASR Validated",
-        "translation": "Translation (S2TT)",
-        "tts_audio": "TTS Audio Output"
+        "partial_transcription": "Partial Transcription Latency",
+        "validated_transcription": "Validated Transcription Latency",
+        "translated_transcription": "Translated Transcription Latency",
+        "tts_audio": "Translated Speech (TTS) Latency"
     }
+    
+    for metric in metrics_order:
+        if metric in analysis["statistics"]:
+            stats = analysis["statistics"][metric]
+            name = metric_names[metric]
+            # Format as table row
+            lines.append(f"{name:33s} {stats['count']:5d} {stats['mean']:6.3f} {stats['max']:6.3f} {stats['p50']:6.3f} {stats['p90']:6.3f} {stats['p95']:6.3f}")
+    
+    # Detailed statistics
+    lines.append("\n" + "=" * 80)
+    lines.append("DETAILED LATENCY STATISTICS")
+    lines.append("=" * 80)
     
     for metric in metrics_order:
         if metric in analysis["statistics"]:
@@ -250,156 +258,59 @@ def generate_text_report(analysis: Dict[str, Any], max_chunks: int = -1, show_em
             lines.append(f"  Mean:   {stats['mean']:.3f}s")
             lines.append(f"  StDev:  {stats['stdev']:.3f}s")
     
-    # Box plots for each metric
-    lines.append("\n" + "=" * 80)
-    lines.append("LATENCY DISTRIBUTION (Box Plots)")
-    lines.append("=" * 80)
-    lines.append("\nEach metric showing: Min ├──[Q1 ███ Median ███ Q3]──┤ Max\n")
-    
-    # Collect values for each metric
-    metric_values = {}
-    for chunk in analysis["chunks"].values():
-        for metric in ["asr_first_partial", "asr_validated", "translation", "tts_audio"]:
-            if chunk[metric] is not None:
-                if metric not in metric_values:
-                    metric_values[metric] = []
-                metric_values[metric].append(chunk[metric])
-    
-    # Create box plots
-    for metric in ["asr_first_partial", "asr_validated", "translation", "tts_audio"]:
-        if metric in metric_values:
-            label = metric_names[metric]
-            lines.append(create_ascii_box_plot(metric_values[metric], width=50, label=label))
-            lines.append("")
-    
-    # Histogram for ASR Validated latency
-    if "asr_validated" in metric_values:
+    # Box plots for each metric (if measurements available)
+    if "measurements" in analysis:
         lines.append("\n" + "=" * 80)
-        lines.append("ASR VALIDATED LATENCY DISTRIBUTION (Histogram)")
+        lines.append("LATENCY DISTRIBUTION (Box Plots)")
         lines.append("=" * 80)
-        lines.append("\n" + create_ascii_histogram(
-            metric_values["asr_validated"], 
-            bins=15, 
-            width=50, 
-            title="Frequency Distribution"
-        ))
-    
-    # Time series chart
-    lines.append("\n" + "=" * 80)
-    lines.append("LATENCY PROGRESSION OVER TIME")
-    lines.append("=" * 80)
-    
-    # Prepare time series data
-    x_vals = []
-    y_vals = []
-    for window_id in sorted(analysis["time_progression"].keys()):
-        window = analysis["time_progression"][window_id]
-        if window["mean"] is not None:
-            x_vals.append(window["start_time"])
-            y_vals.append(window["mean"])
-    
-    if x_vals and y_vals:
-        lines.append("\n" + create_ascii_time_series(
-            x_vals, y_vals, 
-            width=70, height=12, 
-            title="Mean Latency Over Time"
-        ))
-    
-    lines.append("\nTime Window Details:")
-    lines.append("-" * 60)
-    lines.append("Time Window        Chunks  Mean Latency  Median Latency")
-    lines.append("-" * 60)
-    
-    time_windows = sorted(analysis["time_progression"].items())
-    for window_id, window_data in time_windows[:10]:  # Show first 10 windows
-        if window_data["mean"] is not None:
-            lines.append(f"[{window_data['start_time']:5.1f}s - {window_data['end_time']:5.1f}s]    "
-                        f"{window_data['count']:3d}     {window_data['mean']:6.3f}s      {window_data['median']:6.3f}s")
-    
-    if len(time_windows) > 10:
-        lines.append(f"... and {len(time_windows) - 10} more time windows")
-    
-    # Sample chunk details
-    lines.append("\n" + "=" * 80)
-    
-    # Filter chunks based on show_empty parameter
-    chunk_items = list(analysis["chunks"].items())
-    if not show_empty:
-        chunk_items = [(chunk_id, chunk) for chunk_id, chunk in chunk_items if not chunk.get("is_empty", False)]
-    
-    total_chunks = len(chunk_items)
-    total_all_chunks = len(analysis["chunks"])
-    
-    # Select chunks to display
-    if max_chunks == -1 or total_chunks <= max_chunks:
-        # Show all chunks
-        selected_chunks = chunk_items
-        if max_chunks == -1:
-            lines.append(f"ALL CHUNK DETAILS ({total_chunks} chunks shown)")
-        else:
-            lines.append(f"CHUNK DETAILS (all {total_chunks} chunks)")
-        if not show_empty and total_all_chunks != total_chunks:
-            lines.append(f"Note: {total_all_chunks - total_chunks} empty chunks hidden (use --show-empty to display)")
-    else:
-        # Select representative sample
-        if max_chunks <= 3:
-            # For very small numbers, just take first chunks
-            selected_chunks = chunk_items[:max_chunks]
-        else:
-            # Select first, last, and evenly distributed middle chunks
-            selected_indices = [0]  # First chunk
-            
-            # Add evenly distributed middle chunks
-            if max_chunks > 2:
-                step = (total_chunks - 1) / (max_chunks - 1)
-                for i in range(1, max_chunks - 1):
-                    selected_indices.append(int(i * step))
-            
-            selected_indices.append(total_chunks - 1)  # Last chunk
-            
-            # Remove duplicates and sort
-            selected_indices = sorted(set(selected_indices))
-            selected_chunks = [chunk_items[i] for i in selected_indices]
+        lines.append("\nEach metric showing: Min ├──[Q1 ███ Median ███ Q3]──┤ Max\n")
         
-        lines.append(f"SAMPLE CHUNK DETAILS (showing {len(selected_chunks)} of {total_chunks} chunks)")
-        if not show_empty and total_all_chunks != total_chunks:
-            lines.append(f"Note: {total_all_chunks - total_chunks} empty chunks hidden")
+        measurements = analysis["measurements"]
+        for metric in metrics_order:
+            if metric in measurements and measurements[metric]:
+                label = metric_names[metric]
+                lines.append(create_ascii_box_plot(measurements[metric], width=50, label=label))
+                lines.append("")
     
-    lines.append("=" * 80)
-    lines.append("\nNote: Numbers show latency (seconds from chunk send to response receipt)")
-    lines.append("      Offset is the chunk's position in the audio file")
-    lines.append("-" * 60)
+    # Histogram for Validated Transcription latency
+    if "measurements" in analysis and "validated_transcription" in analysis["measurements"]:
+        validated_latencies = analysis["measurements"]["validated_transcription"]
+        if validated_latencies:
+            lines.append("\n" + "=" * 80)
+            lines.append("VALIDATED TRANSCRIPTION LATENCY DISTRIBUTION (Histogram)")
+            lines.append("=" * 80)
+            lines.append("\n" + create_ascii_histogram(
+                validated_latencies, 
+                bins=15, 
+                width=50, 
+                title="Frequency Distribution"
+            ))
     
-    for chunk_id, chunk in selected_chunks:
-        # Handle backward compatibility for new fields
-        stage = chunk.get("pipeline_stage", "unknown")
-        completion = chunk.get("completion_score", 0.0)
+    # Audio chunk analysis
+    if "chunks" in analysis:
+        lines.append("\n" + "=" * 80)
+        lines.append("AUDIO CHUNK ANALYSIS")
+        lines.append("=" * 80)
         
-        # Determine if chunk is empty based on available data
-        is_empty = chunk.get("is_empty", False)
-        if not is_empty and stage == "unknown":
-            # For backward compatibility, calculate if empty
-            is_empty = (chunk.get("asr_first_partial") is None and 
-                       chunk.get("asr_validated") is None and
-                       not chunk.get("partial_text", "") and
-                       not chunk.get("validated_text", ""))
+        in_chunks = analysis["chunks"].get("in_audio", [])
+        out_chunks = analysis["chunks"].get("out_audio", [])
         
-        if stage != "unknown" or completion > 0.0:
-            lines.append(f"\nChunk {chunk_id} (audio position: {chunk['time_offset']:.2f}s, stage: {stage}, completion: {completion:.0%})")
-        else:
-            lines.append(f"\nChunk {chunk_id} (audio position: {chunk['time_offset']:.2f}s)")
+        if in_chunks:
+            lines.append("\nSample IN Audio Chunks (first 10):")
+            lines.append("-" * 60)
+            lines.append("Index  Audio Time  RMS (dB)  Has Sound")
+            lines.append("-" * 60)
+            for chunk in in_chunks[:10]:
+                lines.append(f"{chunk['index']:5d}  {chunk['audio_time']:9.2f}s  {chunk['rms_db']:8.1f}  {'Yes' if chunk['has_sound'] else 'No':9s}")
         
-        if is_empty:
-            lines.append("  Status: Empty (no transcription data)")
-        else:
-            if chunk.get("asr_first_partial"):
-                lines.append(f"  ASR Partial:  {chunk['asr_first_partial']:.3f}s latency → \"{chunk.get('partial_text', '')}\"")
-            if chunk.get("asr_validated"):
-                lines.append(f"  ASR Valid:    {chunk['asr_validated']:.3f}s latency → \"{chunk.get('validated_text', '')}\"")
-            if chunk.get("translation"):
-                lines.append(f"  Translation:  {chunk['translation']:.3f}s latency → \"{chunk.get('translated_text', '')}\"")
-            if chunk.get("tts_audio"):
-                lines.append(f"  TTS Audio:    {chunk['tts_audio']:.3f}s latency (audio output started)")
+        if out_chunks:
+            lines.append("\nSample OUT Audio Chunks (first 10):")
+            lines.append("-" * 60)
+            lines.append("Index  Audio Time  RMS (dB)  Has Sound")
+            lines.append("-" * 60)
+            for chunk in out_chunks[:10]:
+                lines.append(f"{chunk['index']:5d}  {chunk['audio_time']:9.2f}s  {chunk['rms_db']:8.1f}  {'Yes' if chunk['has_sound'] else 'No':9s}")
+    
     
     lines.append("\n" + "=" * 80)
     
@@ -436,9 +347,9 @@ def generate_html_report(analysis: Dict[str, Any]) -> str:
     }
     
     metric_labels = {
-        "asr_first_partial": "ASR First Partial",
-        "asr_validated": "ASR Validated",
-        "translation": "Translation",
+        "partial_transcription": "Partial Transcription",
+        "validated_transcription": "Validated Transcription",
+        "translated_transcription": "Translation",
         "tts_audio": "TTS Audio"
     }
     

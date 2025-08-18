@@ -102,9 +102,9 @@ class Io(Task):
 
             if not chunk:
                 continue
-            start_time = time.time()
+            start_time = time.perf_counter()
             await self.push(chunk)
-            stop_time = time.time()
+            stop_time = time.perf_counter()
             await self.wait_after_push(stop_time - start_time)
 
     async def wait_after_push(self, delta: float):
@@ -154,9 +154,9 @@ class Io(Task):
         await aio.sleep(SLEEP_INTERVAL_LONG)
         async with self.out_msg_foq.receiver(self, self.stopper) as msgs_out:
             await self.push_in_msg(SetTaskMessage.from_config(self.cfg))
-            start_ts = time.time()
+            start_time = time.perf_counter()
             await aio.sleep(SLEEP_INTERVAL_LONG)
-            while start_ts + BOOT_TIMEOUT > time.time():
+            while start_time + BOOT_TIMEOUT > time.perf_counter():
                 await self.push_in_msg(GetTaskMessage())
                 msg = await anext(msgs_out)
                 if isinstance(msg, CurrentTaskMessage):
