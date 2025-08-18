@@ -313,7 +313,9 @@ class Translation(BaseModel):
 class QueueConfig(BaseModel):
     desired_queue_level_ms: int = DESIRED_QUEUE_LEVEL_MS_DEFAULT
     max_queue_level_ms: int = MAX_QUEUE_LEVEL_MS_DEFAULT
-    auto_tempo: bool = False
+    auto_tempo: bool = True
+    min_tempo: float = 1.0
+    max_tempo: float = 1.2
 
 
 class QueueConfigs(BaseModel):
