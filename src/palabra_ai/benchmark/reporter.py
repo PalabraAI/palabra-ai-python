@@ -219,7 +219,7 @@ def generate_text_report(analysis: Dict[str, Any], max_chunks: int = -1, show_em
     lines.append("")
     
     # Simplified table format
-    lines.append("Category                          Count    Avg    Max    p50    p90    p95")
+    lines.append("Category                          Count    Min    Avg    Max    p50    p90    p95")
     lines.append("-" * 78)
     
     metrics_order = ["partial_transcription", "validated_transcription", "translated_transcription", "tts_audio"]
@@ -235,7 +235,7 @@ def generate_text_report(analysis: Dict[str, Any], max_chunks: int = -1, show_em
             stats = analysis["statistics"][metric]
             name = metric_names[metric]
             # Format as table row
-            lines.append(f"{name:33s} {stats['count']:5d} {stats['mean']:6.3f} {stats['max']:6.3f} {stats['p50']:6.3f} {stats['p90']:6.3f} {stats['p95']:6.3f}")
+            lines.append(f"{name:33s} {stats['count']:5d} {stats['min']:6.3f} {stats['mean']:6.3f} {stats['max']:6.3f} {stats['p50']:6.3f} {stats['p90']:6.3f} {stats['p95']:6.3f}")
     
     # Detailed statistics
     lines.append("\n" + "=" * 80)
@@ -319,6 +319,10 @@ def generate_text_report(analysis: Dict[str, Any], max_chunks: int = -1, show_em
             if details["translated_latency"] is not None:
                 text = details["translated_text"][:80] + "..." if len(details["translated_text"]) > 80 else details["translated_text"]
                 lines.append(f"  Translation ({details['translated_latency']:.3f}s): {text}")
+            
+            # Show TTS
+            if details.get("tts_latency") is not None:
+                lines.append(f"  TTS ({details['tts_latency']:.3f}s): Audio output started")
         
         if displayed_count == 0:
             lines.append("\nNo chunks with validated transcription found.")

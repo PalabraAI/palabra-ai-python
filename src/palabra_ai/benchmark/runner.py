@@ -9,6 +9,12 @@ from typing import Optional, Dict, Any, Callable
 import librosa
 from tqdm import tqdm
 
+try:
+    import uvloop
+    asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
+except ImportError:
+    pass  # uvloop not available, use default event loop
+
 from palabra_ai import PalabraAI, Config, SourceLang, TargetLang
 from palabra_ai.config import WsMode, WebrtcMode
 from palabra_ai.lang import Language, is_valid_source_language, is_valid_target_language

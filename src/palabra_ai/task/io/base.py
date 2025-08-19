@@ -46,6 +46,9 @@ class Io(Task):
     _out_msg_num: Iterator[int] = field(default_factory=count, init=False)
     _in_audio_num: Iterator[int] = field(default_factory=count, init=False)
     _out_audio_num: Iterator[int] = field(default_factory=count, init=False)
+    _start_time: float | None = field(default=None, init=False)
+    _sent_count: int = field(default=0, init=False)
+    _pending: list = field(default_factory=list, init=False)
 
     @property
     @abc.abstractmethod
@@ -91,6 +94,8 @@ class Io(Task):
     async def do(self):
         """Main processing loop - read audio chunks and push them."""
         await self.reader.ready
+        MAX_BURST = 20
+        
         while not self.stopper and not self.eof:
             chunk = await self.reader.read(self.cfg.mode.chunk_bytes)
 
@@ -102,10 +107,42 @@ class Io(Task):
 
             if not chunk:
                 continue
+            
+            # Initialize on first chunk
+            if self._start_time is None:
+                self._start_time = time.perf_counter()
+            
+            # Check if we're behind schedule
+            now = time.perf_counter()
+            elapsed_ms = (now - self._start_time) * 1000
+            should_have_sent = int(elapsed_ms / self.cfg.mode.chunk_duration_ms)
+            behind = should_have_sent - self._sent_count
+            
+            # If behind by more than 1 chunk - enable burst mode
+            if behind > 1:
+                self._pending.append(chunk)
+                burst_count = min(len(self._pending), min(behind - 1, MAX_BURST))
+                
+                if burst_count > 0:
+                    debug(f"BURST: Behind by {behind}, sending {burst_count} extra chunks")
+                    for _ in range(burst_count):
+                        await self.push(self._pending.pop(0))
+                        self._sent_count += 1
+            
+            # Send current chunk (or from queue if any)
+            if self._pending:
+                chunk_to_send = self._pending.pop(0)
+            else:
+                chunk_to_send = chunk
+                
             start_time = time.perf_counter()
-            await self.push(chunk)
+            await self.push(chunk_to_send)
             stop_time = time.perf_counter()
+            self._sent_count += 1
+            
+            # Wait until next chunk time
             await self.wait_after_push(stop_time - start_time)
+
 
     async def wait_after_push(self, delta: float):
         """Hook for subclasses to add post-chunk processing."""
@@ -144,6 +181,7 @@ class Io(Task):
                 self.bench_audio_foq.publish(audio_frame)
 
             await self.send_frame(audio_frame)
+
 
     async def _exit(self):
         await self.writer.q.put(None)
