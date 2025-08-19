@@ -4,12 +4,10 @@ from dataclasses import KW_ONLY, dataclass, field
 from functools import partial
 from typing import TYPE_CHECKING
 
-import numpy as np
 from livekit import rtc
 
 from palabra_ai.audio import AudioFrame
 from palabra_ai.constant import (
-    BYTES_PER_SAMPLE,
     SLEEP_INTERVAL_SHORT,
 )
 from palabra_ai.enum import Channel, Direction
@@ -75,11 +73,11 @@ class WebrtcIo(Io):
             while True:
                 for tpub in self.peer.track_publications.values():
                     if all(
-                        [
-                            str(tpub.name).lower().startswith(name),
-                            tpub.kind == rtc.TrackKind.KIND_AUDIO,
-                            tpub.track is not None,
-                        ]
+                            [
+                                str(tpub.name).lower().startswith(name),
+                                tpub.kind == rtc.TrackKind.KIND_AUDIO,
+                                tpub.track is not None,
+                            ]
                     ):
                         debug(f"Found translation track: {tpub.name}")
                         return tpub
@@ -165,74 +163,6 @@ class WebrtcIo(Io):
         self.out_track_publications[lang.code] = pub
         self.out_tracks[lang.code] = pub.track
         self.sub_tg.create_task(self.out_audio(lang), name=f"Io:out_audio({lang!r})")
-
-    async def push(self, audio_bytes: bytes) -> None:
-        """Process and send audio chunks - WebRTC version.
-        
-        Receives logical chunks (e.g., 100ms) and:
-        1. Publishes logical chunk to benchmark queue
-        2. Splits into 10ms frames for LiveKit
-        3. Sends each frame to LiveKit
-        """
-        # First, publish the logical chunk to benchmark queue if enabled
-        if self.cfg.benchmark:
-            # Create a frame for the entire logical chunk
-            logical_frame = self.new_frame()
-            logical_audio_data = np.frombuffer(logical_frame.data, dtype=np.int16)
-            
-            # Copy the logical chunk data
-            chunk_samples = len(audio_bytes) // BYTES_PER_SAMPLE
-            chunk_data = np.frombuffer(audio_bytes[:chunk_samples * BYTES_PER_SAMPLE], dtype=np.int16)
-            
-            # Pad if necessary
-            if len(chunk_data) < self.cfg.mode.samples_per_channel:
-                padded_data = np.zeros(self.cfg.mode.samples_per_channel, dtype=np.int16)
-                padded_data[:len(chunk_data)] = chunk_data
-                np.copyto(logical_audio_data, padded_data)
-            else:
-                np.copyto(logical_audio_data, chunk_data[:self.cfg.mode.samples_per_channel])
-            
-            # Create debug info for the logical chunk
-            _dbg = Dbg(
-                Kind.AUDIO, 
-                self.channel, 
-                Direction.IN, 
-                idx=next(self._idx), 
-                num=next(self._in_audio_num), 
-                chunk_duration_ms=self.cfg.mode.chunk_duration_ms
-            )
-            _dbg.rms = await aio.to_thread(self.calc_rms_db, logical_frame)
-            logical_frame._dbg = _dbg
-            self.bench_audio_foq.publish(logical_frame)
-        
-        # Now split the logical chunk into 10ms frames for LiveKit
-        # WebRTC/LiveKit requires 10ms frames (480 samples at 48kHz)
-        WEBRTC_FRAME_SAMPLES = 480  # 10ms at 48kHz
-        WEBRTC_FRAME_BYTES = WEBRTC_FRAME_SAMPLES * BYTES_PER_SAMPLE
-        
-        # Create a frame for WebRTC (10ms)
-        webrtc_frame = AudioFrame.create(self.cfg.mode.sample_rate, self.cfg.mode.num_channels, WEBRTC_FRAME_SAMPLES)
-        webrtc_audio_data = np.frombuffer(webrtc_frame.data, dtype=np.int16)
-        
-        # Process the audio bytes in 10ms chunks
-        for i in range(0, len(audio_bytes), WEBRTC_FRAME_BYTES):
-            if aio.get_running_loop().is_closed():
-                break
-            
-            frame_chunk = audio_bytes[i:i + WEBRTC_FRAME_BYTES]
-            
-            # Pad the last chunk if necessary
-            if len(frame_chunk) < WEBRTC_FRAME_BYTES:
-                padded_chunk = np.zeros(WEBRTC_FRAME_SAMPLES, dtype=np.int16)
-                frame_chunk_samples = np.frombuffer(frame_chunk, dtype=np.int16)
-                padded_chunk[:len(frame_chunk_samples)] = frame_chunk_samples
-                np.copyto(webrtc_audio_data, padded_chunk)
-            else:
-                chunk_samples = np.frombuffer(frame_chunk, dtype=np.int16)
-                np.copyto(webrtc_audio_data, chunk_samples)
-            
-            # Send the 10ms frame to LiveKit
-            await self.send_frame(webrtc_frame)
 
     async def exit(self):
         if self.in_track:
