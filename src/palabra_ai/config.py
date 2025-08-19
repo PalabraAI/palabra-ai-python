@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from functools import cached_property
 from pathlib import Path
+from typing import Optional
 from typing import TYPE_CHECKING, Annotated, Any
 
 from environs import Env
