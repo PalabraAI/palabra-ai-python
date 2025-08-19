@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from functools import cached_property
 from pathlib import Path
+from typing import Optional
 from typing import TYPE_CHECKING, Annotated, Any
 
 from environs import Env
@@ -49,6 +50,7 @@ from palabra_ai.util.orjson import from_json, to_json
 
 if TYPE_CHECKING:
     from palabra_ai.task.adapter.base import Reader, Writer
+    from palabra_ai.internal.rest import SessionCredentials
 
 
 env = Env(prefix="PALABRA_")
@@ -404,6 +406,7 @@ class Config(BaseModel):
     deep_debug: bool = Field(default=DEEP_DEBUG, exclude=True)
     timeout: int = Field(default=TIMEOUT, exclude=True)  # TODO!
     trace_file: Path | str | None = Field(default=None, exclude=True)
+    session_credentials: Optional["SessionCredentials"] = Field(default=None, exclude=True)
 
     def __init__(
         self,

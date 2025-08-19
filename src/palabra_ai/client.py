@@ -90,12 +90,14 @@ class PalabraAI:
         success(f"🤖 Connecting to Palabra.ai API with {cfg.mode}...")
         if stopper is None:
             stopper = TaskEvent()
-
-        credentials = await PalabraRESTClient(
-            self.client_id,
-            self.client_secret,
-            base_url=self.api_endpoint,
-        ).create_session()
+        if cfg.session_credentials is not None:
+            credentials = cfg.session_credentials
+        else:
+            credentials = await PalabraRESTClient(
+                self.client_id,
+                self.client_secret,
+                base_url=self.api_endpoint,
+            ).create_session()
 
         manager = None
         try:
