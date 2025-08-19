@@ -61,7 +61,7 @@ from palabra_ai.task.adapter.device import (  # noqa: F401
 from palabra_ai.task.adapter.dummy import DummyReader, DummyWriter  # noqa: F401
 from palabra_ai.task.adapter.file import FileReader, FileWriter  # noqa: F401
 
-__version__ = "0.3.1"
+__version__ = "0.3.2"
 
 __all__ = [
     # Client

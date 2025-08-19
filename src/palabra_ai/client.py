@@ -12,6 +12,7 @@ from palabra_ai.config import CLIENT_ID, CLIENT_SECRET, DEEP_DEBUG, Config
 from palabra_ai.debug.hang_coroutines import diagnose_hanging_tasks
 from palabra_ai.exc import ConfigurationError, unwrap_exceptions
 from palabra_ai.internal.rest import PalabraRESTClient
+from palabra_ai.internal.rest import SessionCredentials
 from palabra_ai.model import RunResult
 from palabra_ai.task.base import TaskEvent
 from palabra_ai.task.manager import Manager
@@ -23,6 +24,7 @@ class PalabraAI:
     client_id: str | None = field(default=CLIENT_ID)
     client_secret: str | None = field(default=CLIENT_SECRET)
     api_endpoint: str = "https://api.palabra.ai"
+    session_credentials: SessionCredentials | None = None
 
     def __post_init__(self):
         if not self.client_id:
@@ -36,7 +38,7 @@ class PalabraAI:
                 log_data = None
                 exc = None
                 ok = False
-                
+
                 try:
                     await manager.task
                     ok = True
@@ -46,7 +48,7 @@ class PalabraAI:
                 except BaseException as e:
                     error(f"Error in manager task: {e}")
                     exc = e
-                
+
                 # CRITICAL: Always try to get log_data from logger
                 try:
                     if manager.logger and manager.logger._task:
@@ -57,7 +59,7 @@ class PalabraAI:
                                 await asyncio.wait_for(manager.logger._task, timeout=5.0)
                             except (asyncio.CancelledError, asyncio.TimeoutError):
                                 debug("Logger task timeout or cancelled, checking result anyway")
-                        
+
                         # Try to get the result
                         log_data = manager.logger.result
                         if not log_data:
@@ -68,7 +70,7 @@ class PalabraAI:
                                 debug(f"Failed to get log_data from logger.exit(): {e}")
                 except Exception as e:
                     error(f"Failed to retrieve log_data: {e}")
-                
+
                 # Return result with whatever we managed to get
                 if no_raise or ok:
                     return RunResult(ok=ok, exc=exc if not ok else None, log_data=log_data)
@@ -153,12 +155,14 @@ class PalabraAI:
         success(f"🤖 Connecting to Palabra.ai API with {cfg.mode}...")
         if stopper is None:
             stopper = TaskEvent()
-
-        credentials = await PalabraRESTClient(
-            self.client_id,
-            self.client_secret,
-            base_url=self.api_endpoint,
-        ).create_session()
+        if self.session_credentials is not None:
+            credentials = self.session_credentials
+        else:
+            credentials = await PalabraRESTClient(
+                self.client_id,
+                self.client_secret,
+                base_url=self.api_endpoint,
+            ).create_session()
 
         manager = None
         try:
