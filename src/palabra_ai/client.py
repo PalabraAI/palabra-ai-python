@@ -12,6 +12,7 @@ from palabra_ai.config import CLIENT_ID, CLIENT_SECRET, DEEP_DEBUG, Config
 from palabra_ai.debug.hang_coroutines import diagnose_hanging_tasks
 from palabra_ai.exc import ConfigurationError, unwrap_exceptions
 from palabra_ai.internal.rest import PalabraRESTClient
+from palabra_ai.internal.rest import SessionCredentials
 from palabra_ai.task.base import TaskEvent
 from palabra_ai.task.manager import Manager
 from palabra_ai.util.logger import debug, error, success
@@ -22,6 +23,7 @@ class PalabraAI:
     client_id: str | None = field(default=CLIENT_ID)
     client_secret: str | None = field(default=CLIENT_SECRET)
     api_endpoint: str = "https://api.palabra.ai"
+    session_credentials: SessionCredentials | None = None
 
     def __post_init__(self):
         if not self.client_id:
@@ -90,8 +92,8 @@ class PalabraAI:
         success(f"🤖 Connecting to Palabra.ai API with {cfg.mode}...")
         if stopper is None:
             stopper = TaskEvent()
-        if cfg.session_credentials is not None:
-            credentials = cfg.session_credentials
+        if self.session_credentials is not None:
+            credentials = self.session_credentials
         else:
             credentials = await PalabraRESTClient(
                 self.client_id,
