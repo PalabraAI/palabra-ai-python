@@ -33,7 +33,8 @@ class BenchmarkRunner:
     
     def __init__(self, audio_file: str, source_lang: Optional[str] = None, target_lang: Optional[str] = None, 
                  silent: bool = True, mode: Optional[str] = None, chunk_duration_ms: Optional[int] = None, 
-                 base_config: Optional[Config] = None):
+                 base_config: Optional[Config] = None, palabra_client: PalabraAI | None = None):
+        self.palabra_client = palabra_client or PalabraAI()
         self.audio_file = Path(audio_file)
         self.base_config = base_config
         
@@ -130,9 +131,6 @@ class BenchmarkRunner:
             )
         
         try:
-            # Initialize Palabra AI
-            palabra = PalabraAI()
-            
             # Create reader and writer
             reader = FileReader(str(self.audio_file))
             writer = DummyWriter()
@@ -204,9 +202,9 @@ class BenchmarkRunner:
             # When running from threads, use without_signal_handlers=True
             import threading
             if threading.current_thread() == threading.main_thread():
-                result = palabra.run(config, no_raise=True)
+                result = self.palabra_client.run(config, no_raise=True)
             else:
-                result = palabra.run(config, without_signal_handlers=True, no_raise=True)
+                result = self.palabra_client.run(config, without_signal_handlers=True, no_raise=True)
             
             # Detailed diagnostics
             debug(f"Result type: {type(result)}")
@@ -390,7 +388,8 @@ class BenchmarkAnalyzer:
 def run_benchmark(audio_file: str, source_lang: Optional[str] = None, target_lang: Optional[str] = None,
                  silent: bool = True, show_progress: bool = True,
                  mode: Optional[str] = None, chunk_duration_ms: Optional[int] = None,
-                 base_config: Optional[Config] = None) -> BenchmarkAnalyzer:
+                 base_config: Optional[Config] = None,
+                  palabra_client: PalabraAI | None = None) -> BenchmarkAnalyzer:
     """
     Convenience function to run benchmark and return analyzer
     
@@ -407,6 +406,6 @@ def run_benchmark(audio_file: str, source_lang: Optional[str] = None, target_lan
     Returns:
         BenchmarkAnalyzer instance with results
     """
-    runner = BenchmarkRunner(audio_file, source_lang, target_lang, silent, mode, chunk_duration_ms, base_config)
+    runner = BenchmarkRunner(audio_file, source_lang, target_lang, silent, mode, chunk_duration_ms, base_config, palabra_client)
     result = runner.run(show_progress)
     return BenchmarkAnalyzer(result)
