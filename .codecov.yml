@@ -2,17 +2,19 @@ coverage:
   status:
     project:
       default:
-        target: 60%  # Target coverage percentage
+        target: 80%  # Target coverage percentage
         threshold: 10%  # Allow 10% drop from target
         paths:
           - "src/*"
         ignore:
           - "src/palabra_ai/experimental/**/*"
+          - "src/palabra_ai/benchmark/**/*"
     patch:
       default:
-        target: 60%  # Target for new code
+        target: 80%  # Target for new code
         threshold: 10%  # Allow 10% drop from target
         paths:
           - "src/*"
         ignore:
           - "src/palabra_ai/experimental/**/*"
+          - "src/palabra_ai/benchmark/**/*"

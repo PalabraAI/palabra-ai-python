@@ -171,8 +171,10 @@ class TestManager:
         manager.root_tg = MagicMock()
         manager.sub_tg = MagicMock()
         
-        # Mock logger as None to skip that branch
-        manager.logger = None
+        # Mock logger properly
+        manager.logger = MagicMock()
+        manager.logger.ready = TaskEvent()
+        +manager.logger.ready  # Set it
         
         await manager.start_system()
         

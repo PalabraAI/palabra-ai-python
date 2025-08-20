@@ -1,6 +1,5 @@
-import asyncio
+import asyncio as aio
 import uuid
-from asyncio import CancelledError
 from dataclasses import KW_ONLY, dataclass, field
 from functools import partial
 from typing import TYPE_CHECKING
@@ -12,6 +11,7 @@ from palabra_ai.constant import (
     SLEEP_INTERVAL_SHORT,
 )
 from palabra_ai.enum import Channel, Direction
+from palabra_ai.enum import Kind
 from palabra_ai.message import (
     Dbg,
     EosMessage,
@@ -39,7 +39,7 @@ class WebrtcIo(Io):
     in_audio_source: rtc.AudioSource | None = None
     room: rtc.Room | None = None
     room_options: rtc.RoomOptions = field(default_factory=rtc.RoomOptions)
-    loop: asyncio.AbstractEventLoop | None = None
+    loop: aio.AbstractEventLoop | None = None
     out_tracks: dict[str, rtc.RemoteAudioTrack] = field(
         default_factory=dict, init=False
     )
@@ -61,8 +61,8 @@ class WebrtcIo(Io):
                     if str(peer.identity).lower().startswith(name):
                         debug(f"Found Palabra peer: {peer.identity}")
                         return peer
-                await asyncio.sleep(SLEEP_INTERVAL_SHORT)
-        except (TimeoutError, CancelledError):
+                await aio.sleep(SLEEP_INTERVAL_SHORT)
+        except (TimeoutError, aio.CancelledError):
             debug(f"Didn't wait Palabra peer {name!r} to appear")
             raise
 
@@ -73,16 +73,16 @@ class WebrtcIo(Io):
             while True:
                 for tpub in self.peer.track_publications.values():
                     if all(
-                        [
-                            str(tpub.name).lower().startswith(name),
-                            tpub.kind == rtc.TrackKind.KIND_AUDIO,
-                            tpub.track is not None,
-                        ]
+                            [
+                                str(tpub.name).lower().startswith(name),
+                                tpub.kind == rtc.TrackKind.KIND_AUDIO,
+                                tpub.track is not None,
+                            ]
                     ):
                         debug(f"Found translation track: {tpub.name}")
                         return tpub
-                await asyncio.sleep(SLEEP_INTERVAL_SHORT)
-        except (TimeoutError, CancelledError):
+                await aio.sleep(SLEEP_INTERVAL_SHORT)
+        except (TimeoutError, aio.CancelledError):
             debug(f"Didn't wait track {name!r} to appear")
             raise
 
@@ -92,8 +92,18 @@ class WebrtcIo(Io):
         try:
             async for frame_ev in stream:
                 frame_ev: rtc.AudioFrameEvent
+                _dbg = Dbg(Kind.AUDIO, Channel.WEBRTC, Direction.OUT)
+                audio_frame = AudioFrame.from_rtc(frame_ev.frame)
                 self.writer.q.put_nowait(AudioFrame.from_rtc(frame_ev.frame))
-                await asyncio.sleep(0)
+                if self.cfg.benchmark:
+                    _dbg.idx = next(self._idx)
+                    _dbg.num = next(self._out_audio_num)
+                    _dbg.chunk_duration_ms = self.cfg.mode.chunk_duration_ms
+                    _dbg.calc_relative_audio_time_ms()
+                    _dbg.rms = await aio.to_thread(self.calc_rms_db, audio_frame)
+                    audio_frame._dbg = _dbg
+                    self.bench_audio_foq.publish(audio_frame)
+                await aio.sleep(0)
                 if self.stopper or self.eof:
                     debug(f"Stopping audio stream for {lang!r} due to stopper")
                     return
@@ -104,10 +114,10 @@ class WebrtcIo(Io):
             debug(f"Closed audio stream for {lang!r}")
 
     def on_data_received(self, data: rtc.DataPacket):
-        dbg = Dbg(Channel.WEBRTC, Direction.OUT)
+        _dbg = Dbg(Kind.MESSAGE, Channel.WEBRTC, Direction.OUT, idx=next(self._idx), num=next(self._out_msg_num))
         debug(f"Received packet: {data}"[:100])
         msg = Message.decode(data.data)
-        msg._dbg = dbg
+        msg._dbg = _dbg
         self.out_msg_foq.publish(msg)
         if isinstance(msg, EosMessage):
             debug(f"End of stream received: {msg}")

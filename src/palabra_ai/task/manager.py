@@ -113,8 +113,7 @@ class Manager(Task):
         )
 
         # self.rt = Realtime(self.cfg, self.io)
-        # if self.cfg.log_file:
-        #     self.logger = Logger(self.cfg, self.rt)
+        self.logger = Logger(self.cfg, self.io)
         #
         self.transcription = Transcription(self.cfg, self.io)
         #
@@ -147,7 +146,7 @@ class Manager(Task):
                     self.writer,
                     # self.rtmon,
                     self.transcription,
-                    # self.logger,
+                    self.logger,
                     self,
                     self.stat,
                 ]
@@ -156,9 +155,8 @@ class Manager(Task):
         )
 
     async def start_system(self):
-        if self.logger:
-            self.logger(self.root_tg)
-            await self.logger.ready
+        self.logger(self.root_tg)
+        await self.logger.ready
 
         self.stat(self.root_tg)
         await self.stat.ready
@@ -231,8 +229,7 @@ class Manager(Task):
             debug(f"🔧 {self.name}.exit() exiting...")
             +self.stopper  # noqa
             +self.stat.stopper  # noqa
-            if self.logger:
-                +self.logger.stopper  # noqa
+            +self.logger.stopper  # noqa
             debug(f"🔧 {self.name}.exit() tasks: {[t.name for t in self.tasks]}")
             # DON'T use _abort() - it's internal!
             # Cancel all subtasks properly

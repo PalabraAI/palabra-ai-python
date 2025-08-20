@@ -38,3 +38,8 @@ class Direction(StrEnum):
 
     IN = "in"
     OUT = "out"
+
+
+class Kind(StrEnum):
+    AUDIO = "audio"
+    MESSAGE = "message"

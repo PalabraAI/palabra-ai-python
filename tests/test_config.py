@@ -1,4 +1,5 @@
 import pytest
+import json
 from pathlib import Path
 from palabra_ai.config import (
     Config, SourceLang, TargetLang, IoMode, WsMode, WebrtcMode,
@@ -43,7 +44,7 @@ def test_webrtc_mode():
     assert mode.name == "webrtc"
     assert mode.sample_rate == 48000
     assert mode.num_channels == 1
-    assert mode.chunk_duration_ms == 10
+    assert mode.chunk_duration_ms == 320
     
     dump = mode.model_dump()
     assert dump["input_stream"]["source"]["type"] == "webrtc"
@@ -104,9 +105,9 @@ def test_translation():
 def test_queue_configs():
     """Test QueueConfigs with alias"""
     qc = QueueConfigs()
-    assert qc.global_.desired_queue_level_ms == 8000
+    assert qc.global_.desired_queue_level_ms == 10000
     assert qc.global_.max_queue_level_ms == 24000
-    assert qc.global_.auto_tempo is False
+    assert qc.global_.auto_tempo is True
 
 def test_source_lang():
     """Test SourceLang creation"""
@@ -273,3 +274,196 @@ def test_config_allowed_message_types():
     allowed = set(config.allowed_message_types)
     expected = {mt.value for mt in Message.ALLOWED_TYPES}
     assert allowed == expected
+
+
+def test_config_round_trip_ws_mode():
+    """Test that Config with WsMode survives round-trip serialization"""
+    # Create config with WsMode
+    config1 = Config(
+        source=SourceLang(lang="es"),
+        targets=[TargetLang(lang="en")],
+        mode=WsMode(sample_rate=24000, num_channels=1, chunk_duration_ms=100)
+    )
+
+    # Serialize to JSON string
+    json_str1 = config1.to_json()
+
+    # Deserialize back to Config
+    config2 = Config.from_json(json_str1)
+
+    # Serialize again
+    json_str2 = config2.to_json()
+
+    # JSON strings should be identical (idempotent)
+    assert json_str1 == json_str2
+
+    # Check that mode was preserved
+    assert isinstance(config2.mode, WsMode)
+    assert config2.mode.sample_rate == 24000
+    assert config2.mode.num_channels == 1
+    assert config2.mode.chunk_duration_ms == 320  # Default for WsMode
+
+    # Check languages preserved
+    assert config2.source.lang.code == "es"
+    assert config2.targets[0].lang.code == "en"
+
+
+def test_config_round_trip_webrtc_mode():
+    """Test that Config with WebrtcMode survives round-trip serialization"""
+    # Create config with WebrtcMode
+    config1 = Config(
+        source=SourceLang(lang="fr"),
+        targets=[TargetLang(lang="de")],
+        mode=WebrtcMode()
+    )
+
+    # Serialize to JSON string
+    json_str1 = config1.to_json()
+
+    # Deserialize back to Config
+    config2 = Config.from_json(json_str1)
+
+    # Serialize again
+    json_str2 = config2.to_json()
+
+    # JSON strings should be identical (idempotent)
+    assert json_str1 == json_str2
+
+    # Check that mode was preserved
+    assert isinstance(config2.mode, WebrtcMode)
+
+    # Check languages preserved
+    assert config2.source.lang.code == "fr"
+    assert config2.targets[0].lang.code == "de"
+
+
+def test_config_json_format():
+    """Test that Config serializes to expected JSON format"""
+    config = Config(
+        source=SourceLang(lang="es"),
+        targets=[TargetLang(lang="en")],
+        mode=WsMode(sample_rate=24000, num_channels=1)
+    )
+
+    # Convert to dict for inspection
+    data = json.loads(config.to_json())
+
+    # Check that mode is serialized as input_stream/output_stream
+    assert "input_stream" in data
+    assert "output_stream" in data
+    assert "mode" not in data  # mode should not be in JSON
+
+    # Check input_stream structure
+    assert data["input_stream"]["source"]["type"] == "ws"
+    assert data["input_stream"]["source"]["sample_rate"] == 24000
+    assert data["input_stream"]["source"]["channels"] == 1
+    assert data["input_stream"]["source"]["format"] == "pcm_s16le"
+
+    # Check pipeline structure
+    assert "pipeline" in data
+    assert data["pipeline"]["transcription"]["source_language"] == "es"
+    assert data["pipeline"]["translations"][0]["target_language"] == "en"
+
+
+def test_config_from_api_json():
+    """Test that Config can be loaded from API-style JSON"""
+    api_json = {
+        "input_stream": {
+            "content_type": "audio",
+            "source": {
+                "type": "ws",
+                "format": "pcm_s16le",
+                "sample_rate": 24000,
+                "channels": 1
+            }
+        },
+        "output_stream": {
+            "content_type": "audio",
+            "target": {
+                "type": "ws",
+                "format": "pcm_s16le",
+                "sample_rate": 24000,
+                "channels": 1
+            }
+        },
+        "pipeline": {
+            "preprocessing": {},
+            "transcription": {
+                "source_language": "es"
+            },
+            "translations": [{
+                "target_language": "en"
+            }],
+            "translation_queue_configs": {},
+            "allowed_message_types": []
+        }
+    }
+
+    # Load from JSON
+    config = Config.from_json(json.dumps(api_json))
+
+    # Check that mode was reconstructed
+    assert isinstance(config.mode, WsMode)
+    assert config.mode.sample_rate == 24000
+    assert config.mode.num_channels == 1
+    assert config.mode.chunk_duration_ms == 320  # Default for WsMode
+
+    # Check languages
+    assert config.source.lang.code == "es"
+    assert config.targets[0].lang.code == "en"
+
+
+def test_config_multiple_round_trips():
+    """Test that Config remains stable after multiple round trips"""
+    config = Config(
+        source=SourceLang(lang="ja"),
+        targets=[TargetLang(lang="ko")],
+        mode=WsMode()
+    )
+
+    # First round trip
+    json1 = config.to_json()
+    config2 = Config.from_json(json1)
+    json2 = config2.to_json()
+
+    # Second round trip
+    config3 = Config.from_json(json2)
+    json3 = config3.to_json()
+
+    # Third round trip
+    config4 = Config.from_json(json3)
+    json4 = config4.to_json()
+
+    # All JSON representations should be identical
+    assert json1 == json2 == json3 == json4
+
+    # Final config should have same properties
+    assert config4.source.lang.code == "ja"
+    assert config4.targets[0].lang.code == "ko"
+    assert isinstance(config4.mode, WsMode)
+
+
+def test_config_preserves_preprocessing_settings():
+    """Test that preprocessing settings are preserved in round trip"""
+    config1 = Config(
+        source=SourceLang(lang="es"),
+        targets=[TargetLang(lang="en")]
+    )
+
+    # Modify preprocessing settings
+    config1.preprocessing.enable_vad = False
+    config1.preprocessing.vad_threshold = 0.7
+    config1.preprocessing.auto_tempo = True
+
+    # Round trip
+    json_str = config1.to_json()
+    config2 = Config.from_json(json_str)
+
+    # Check preprocessing preserved
+    assert config2.preprocessing.enable_vad == False
+    assert config2.preprocessing.vad_threshold == 0.7
+    assert config2.preprocessing.auto_tempo == True
+
+    # Check idempotency
+    json_str2 = config2.to_json()
+    assert json_str == json_str2
