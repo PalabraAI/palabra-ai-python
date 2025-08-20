@@ -31,23 +31,56 @@ from .reporter import generate_text_report, generate_html_report, generate_json_
 class BenchmarkRunner:
     """Run Palabra AI benchmark with progress tracking"""
     
-    def __init__(self, audio_file: str, source_lang: str, target_lang: str, silent: bool = True,
-                 mode: str = "ws", chunk_duration_ms: int = 100):
+    def __init__(self, audio_file: str, source_lang: Optional[str] = None, target_lang: Optional[str] = None, 
+                 silent: bool = True, mode: Optional[str] = None, chunk_duration_ms: Optional[int] = None, 
+                 base_config: Optional[Config] = None):
         self.audio_file = Path(audio_file)
+        self.base_config = base_config
         
-        # Get language objects using existing functionality
-        self.source_lang = Language.get_or_create(source_lang)
-        self.target_lang = Language.get_or_create(target_lang)
-        
-        # Validate languages
-        if not is_valid_source_language(self.source_lang):
-            raise ValueError(f"Language '{source_lang}' is not a valid source language for Palabra API")
-        if not is_valid_target_language(self.target_lang):
-            raise ValueError(f"Language '{target_lang}' is not a valid target language for Palabra API")
+        # If config provided, extract values from it
+        if self.base_config:
+            # Use languages from config
+            if self.base_config.source:
+                self.source_lang = self.base_config.source.lang
+            else:
+                raise ValueError("Config must have a source language defined")
+            
+            if self.base_config.targets and len(self.base_config.targets) > 0:
+                self.target_lang = self.base_config.targets[0].lang
+            else:
+                raise ValueError("Config must have at least one target language defined")
+            
+            # Use mode from config if not overridden
+            if mode is None:
+                # Mode is already in config
+                self.mode = None  # Will use config's mode
+            else:
+                self.mode = mode
+            
+            # Use chunk_duration_ms from config if not overridden  
+            if chunk_duration_ms is None:
+                self.chunk_duration_ms = None  # Will use config's chunk_duration_ms
+            else:
+                self.chunk_duration_ms = chunk_duration_ms
+        else:
+            # No config, require all parameters
+            if not source_lang or not target_lang:
+                raise ValueError("source_lang and target_lang are required when not using config")
+            
+            # Get language objects using existing functionality
+            self.source_lang = Language.get_or_create(source_lang)
+            self.target_lang = Language.get_or_create(target_lang)
+            
+            # Validate languages
+            if not is_valid_source_language(self.source_lang):
+                raise ValueError(f"Language '{source_lang}' is not a valid source language for Palabra API")
+            if not is_valid_target_language(self.target_lang):
+                raise ValueError(f"Language '{target_lang}' is not a valid target language for Palabra API")
+            
+            self.mode = mode or "ws"
+            self.chunk_duration_ms = chunk_duration_ms or 100
         
         self.silent = silent
-        self.mode = mode
-        self.chunk_duration_ms = chunk_duration_ms
         self.progress_bar = None
         self.audio_duration = None
         self.last_timestamp = 0.0
@@ -104,20 +137,67 @@ class BenchmarkRunner:
             reader = FileReader(str(self.audio_file))
             writer = DummyWriter()
             
-            # Create appropriate IoMode based on mode parameter
-            if self.mode == "webrtc":
-                io_mode = WebrtcMode(chunk_duration_ms=self.chunk_duration_ms)
-            else:  # default to ws
-                io_mode = WsMode(chunk_duration_ms=self.chunk_duration_ms)
-            
             # Configure with benchmark mode
-            config = Config(
-                SourceLang(self.source_lang, reader, on_transcription=self._on_transcription),
-                [TargetLang(self.target_lang, writer, on_transcription=self._on_transcription)],
-                silent=self.silent,
-                benchmark=True,
-                mode=io_mode,
-            )
+            if self.base_config:
+                # Use base config as template but create new source/target with readers/writers
+                config = self.base_config
+                
+                # Create new source with reader and callback, preserving transcription settings
+                source_transcription = config.source.transcription if config.source else None
+                config.source = SourceLang(
+                    self.source_lang, 
+                    reader, 
+                    on_transcription=self._on_transcription,
+                    transcription=source_transcription
+                )
+                
+                # Create new target with writer and callback, preserving translation settings
+                if config.targets and len(config.targets) > 0:
+                    target_translation = config.targets[0].translation
+                    config.targets = [TargetLang(
+                        self.target_lang, 
+                        writer, 
+                        on_transcription=self._on_transcription,
+                        translation=target_translation
+                    )]
+                else:
+                    config.targets = [TargetLang(self.target_lang, writer, on_transcription=self._on_transcription)]
+                
+                # Only override mode if explicitly provided via CLI
+                if self.mode is not None:
+                    if self.mode == "webrtc":
+                        config.mode = WebrtcMode(chunk_duration_ms=self.chunk_duration_ms or 10)
+                    else:
+                        config.mode = WsMode(chunk_duration_ms=self.chunk_duration_ms or 100)
+                elif self.chunk_duration_ms is not None:
+                    # If only chunk_duration_ms is overridden, update existing mode
+                    if isinstance(config.mode, WebrtcMode):
+                        config.mode = WebrtcMode(chunk_duration_ms=self.chunk_duration_ms)
+                    else:
+                        config.mode = WsMode(chunk_duration_ms=self.chunk_duration_ms)
+                else:
+                    # For benchmark, ensure WsMode has 100ms chunks (not the default 320ms)
+                    if isinstance(config.mode, WsMode):
+                        config.mode.chunk_duration_ms = 100
+                
+                # Set benchmark-specific settings
+                config.silent = self.silent
+                config.benchmark = True
+            else:
+                # Create appropriate IoMode based on mode parameter
+                if self.mode == "webrtc":
+                    io_mode = WebrtcMode(chunk_duration_ms=self.chunk_duration_ms)
+                else:  # default to ws
+                    io_mode = WsMode(chunk_duration_ms=self.chunk_duration_ms)
+                
+                # Create config from scratch
+                config = Config(
+                    SourceLang(self.source_lang, reader, on_transcription=self._on_transcription),
+                    [TargetLang(self.target_lang, writer, on_transcription=self._on_transcription)],
+                    silent=self.silent,
+                    benchmark=True,
+                    mode=io_mode,
+                )
             
             # Run the processing
             # Note: When running from subprocess, we're in main thread so signal handlers work
@@ -307,24 +387,26 @@ class BenchmarkAnalyzer:
         return saved_files
 
 
-def run_benchmark(audio_file: str, source_lang: str, target_lang: str,
+def run_benchmark(audio_file: str, source_lang: Optional[str] = None, target_lang: Optional[str] = None,
                  silent: bool = True, show_progress: bool = True,
-                 mode: str = "ws", chunk_duration_ms: int = 100) -> BenchmarkAnalyzer:
+                 mode: Optional[str] = None, chunk_duration_ms: Optional[int] = None,
+                 base_config: Optional[Config] = None) -> BenchmarkAnalyzer:
     """
     Convenience function to run benchmark and return analyzer
     
     Args:
         audio_file: Path to audio file
-        source_lang: Source language code
-        target_lang: Target language code
+        source_lang: Source language code (ignored if base_config provided)
+        target_lang: Target language code (ignored if base_config provided)
         silent: Whether to run Palabra in silent mode
         show_progress: Whether to show progress bar
-        mode: Connection mode - "ws" or "webrtc" (default: "ws")
-        chunk_duration_ms: Audio chunk duration in milliseconds (default: 100)
+        mode: Connection mode - "ws" or "webrtc" (ignored if base_config provided)
+        chunk_duration_ms: Audio chunk duration in milliseconds (ignored if base_config provided)
+        base_config: Optional base Config to preload settings from
         
     Returns:
         BenchmarkAnalyzer instance with results
     """
-    runner = BenchmarkRunner(audio_file, source_lang, target_lang, silent, mode, chunk_duration_ms)
+    runner = BenchmarkRunner(audio_file, source_lang, target_lang, silent, mode, chunk_duration_ms, base_config)
     result = runner.run(show_progress)
     return BenchmarkAnalyzer(result)

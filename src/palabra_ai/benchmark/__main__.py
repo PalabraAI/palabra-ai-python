@@ -8,6 +8,8 @@ import sys
 from pathlib import Path
 
 from palabra_ai.util.logger import error
+from palabra_ai.config import Config
+from palabra_ai.util.orjson import from_json
 from .runner import run_benchmark
 
 
@@ -28,15 +30,20 @@ Examples:
   python -m palabra_ai.benchmark audio.mp3 es en --mode webrtc  # Use WebRTC mode
   python -m palabra_ai.benchmark audio.mp3 es en --chunk-duration-ms 50  # 50ms chunks
   python -m palabra_ai.benchmark audio.mp3 es en --mode webrtc --chunk-duration-ms 20
+  python -m palabra_ai.benchmark audio.mp3 --config config.json  # Use JSON config (languages from config)
         """
     )
     
     # Required arguments
     parser.add_argument("audio", help="Path to audio file")
-    parser.add_argument("source_lang", help="Source language code (e.g., es, en, fr)")
-    parser.add_argument("target_lang", help="Target language code (e.g., en, es, fr)")
+    parser.add_argument("source_lang", nargs='?', default=None,
+                       help="Source language code (e.g., es, en, fr) - ignored if --config is provided")
+    parser.add_argument("target_lang", nargs='?', default=None,
+                       help="Target language code (e.g., en, es, fr) - ignored if --config is provided")
     
     # Optional arguments
+    parser.add_argument("--config", type=Path, default=None,
+                       help="Path to JSON config file to preload settings from")
     parser.add_argument("--html", action="store_true",
                        help="Save HTML report to file")
     parser.add_argument("--json", action="store_true",
@@ -60,6 +67,46 @@ Examples:
     
     args = parser.parse_args()
     
+    # Load base config from JSON if provided
+    base_config = None
+    source_lang = None
+    target_lang = None
+    mode = None
+    chunk_duration_ms = None
+    
+    if args.config:
+        config_path = Path(args.config)
+        if not config_path.exists():
+            error(f"Config file not found: {args.config}")
+            sys.exit(1)
+        try:
+            config_data = config_path.read_text()
+            base_config = Config.from_json(config_data)
+            # Extract languages from config for display
+            if base_config.source:
+                source_lang = base_config.source.lang.code
+            if base_config.targets and len(base_config.targets) > 0:
+                target_lang = base_config.targets[0].lang.code
+            # Don't extract mode - let runner use config's mode
+            # Only override if CLI args are provided
+            if args.mode != "ws":  # "ws" is the default, so only override if explicitly changed
+                mode = args.mode
+            if args.chunk_duration_ms != 100:  # 100 is the default
+                chunk_duration_ms = args.chunk_duration_ms
+        except Exception as e:
+            error(f"Failed to load config from {args.config}: {e}")
+            sys.exit(1)
+    else:
+        # No config, use CLI arguments
+        if not args.source_lang or not args.target_lang:
+            error("source_lang and target_lang are required when not using --config")
+            parser.print_help()
+            sys.exit(1)
+        source_lang = args.source_lang
+        target_lang = args.target_lang
+        mode = args.mode
+        chunk_duration_ms = args.chunk_duration_ms
+    
     # Validate audio file exists
     audio_path = Path(args.audio)
     if not audio_path.exists():
@@ -69,17 +116,21 @@ Examples:
     try:
         # Run benchmark
         print(f"Running benchmark on: {args.audio}")
-        print(f"Languages: {args.source_lang} → {args.target_lang}")
+        if source_lang and target_lang:
+            print(f"Languages: {source_lang} → {target_lang}")
+        if base_config:
+            print(f"Using config: {args.config}")
         print("-" * 60)
         
         analyzer = run_benchmark(
             str(audio_path),
-            args.source_lang,
-            args.target_lang,
+            source_lang=source_lang,
+            target_lang=target_lang,
             silent=not args.verbose,
             show_progress=not args.no_progress,
-            mode=args.mode,
-            chunk_duration_ms=args.chunk_duration_ms
+            mode=mode,
+            chunk_duration_ms=chunk_duration_ms,
+            base_config=base_config
         )
         
         # Analyze results

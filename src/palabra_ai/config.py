@@ -474,6 +474,27 @@ class Config(BaseModel):
             targets.append({"lang": target_lang, "translation": raw_target})
         data["targets"] = targets
 
+        # Reconstruct mode from input_stream/output_stream
+        if "input_stream" in data and "mode" not in data:
+            source = data.get("input_stream", {}).get("source", {})
+            source_type = source.get("type")
+            
+            if source_type == "webrtc":
+                # WebrtcMode with default parameters
+                data["mode"] = WebrtcMode()
+            elif source_type == "ws":
+                # WsMode with parameters from JSON
+                # Note: chunk_duration_ms is not in API format, use default
+                data["mode"] = WsMode(
+                    sample_rate=source.get("sample_rate", WS_MODE_SAMPLE_RATE),
+                    num_channels=source.get("channels", WS_MODE_CHANNELS),
+                    # chunk_duration_ms will use default WS_MODE_CHUNK_DURATION_MS
+                )
+            
+            # Remove input/output streams as they are generated from mode
+            data.pop("input_stream", None)
+            data.pop("output_stream", None)
+
         return data
 
     def model_dump(self, by_alias=True, exclude_none=False, **kwargs) -> dict[str, Any]:

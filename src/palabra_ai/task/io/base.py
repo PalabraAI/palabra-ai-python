@@ -200,6 +200,11 @@ class Io(Task):
                 if isinstance(msg, CurrentTaskMessage):
                     debug(f"Received current task: {msg.data}")
                     return
+                # Handle error messages from server
+                from palabra_ai.message import ErrorMessage
+                if isinstance(msg, ErrorMessage):
+                    debug(f"Received error from server: {msg.data}")
+                    msg.raise_()  # This will raise the appropriate exception
                 debug(f"Received unexpected message: {msg}")
                 await aio.sleep(SLEEP_INTERVAL_LONG)
         debug("Timeout waiting for task configuration")

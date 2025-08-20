@@ -243,24 +243,31 @@ class TestSetLogging:
     
     def test_set_logging_debug(self):
         """Test set_logging with debug mode"""
+        from io import StringIO
+        text_io = StringIO()
         with patch('palabra_ai.util.logger._lib') as mock_lib:
-            set_logging(silent=False, debug=True, log_file=None)
+            set_logging(silent=False, debug=True, text_io=text_io, log_file=None)
             
             mock_lib.set_level.assert_called_once_with(False, True)
             mock_lib.cleanup_handlers.assert_called_once()
             mock_lib.setup_console_handler.assert_called_once()
-            mock_lib.setup_file_handler.assert_called_once_with(None)
+            mock_lib.setup_textio_handler.assert_called_once_with(text_io)
+            # setup_file_handler is not called when log_file is None
+            mock_lib.setup_file_handler.assert_not_called()
     
     def test_set_logging_with_file(self):
         """Test set_logging with log file"""
+        from io import StringIO
+        text_io = StringIO()
         log_file = Path("/tmp/test.log")
         
         with patch('palabra_ai.util.logger._lib') as mock_lib:
-            set_logging(silent=True, debug=False, log_file=log_file)
+            set_logging(silent=True, debug=False, text_io=text_io, log_file=log_file)
             
             mock_lib.set_level.assert_called_once_with(True, False)
             mock_lib.cleanup_handlers.assert_called_once()
             mock_lib.setup_console_handler.assert_called_once()
+            mock_lib.setup_textio_handler.assert_called_once_with(text_io)
             mock_lib.setup_file_handler.assert_called_once_with(log_file)
 
 
