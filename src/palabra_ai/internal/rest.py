@@ -12,36 +12,41 @@ from palabra_ai.util.logger import error, warning
 
 
 class SessionCredentials(BaseModel):
-    publisher: list[str] = Field(..., description="publisher token")
+    id: str = Field(..., description="session id")
+    publisher: str = Field(..., description="publisher token")
     subscriber: list[str] = Field(..., description="subscriber token")
-    room_name: str = Field(..., description="livekit room name")
-    stream_url: str = Field(..., description="livekit url")
-    control_url: str = Field(..., description="websocket management api url")
+    webrtc_room_name: str = Field(..., description="livekit room name")
+    webrtc_url: str = Field(..., description="livekit url")
+    ws_url: str = Field(..., description="websocket management api url")
 
     def model_post_init(self, context: Any, /) -> None:
         super().model_post_init(context)
-        if not self.jwt_token or not self.control_url or not self.stream_url:
-            raise ConfigurationError("Missing JWT token, control URL, or stream URL")
+        if not self.jwt_token or not self.ws_url or not self.webrtc_url:
+            raise ConfigurationError("Missing JWT token, ws URL, or webrtc URL")
 
     @property
     def jwt_token(self) -> str:
-        if not len(self.publisher) > 0:
+        if not self.publisher:
             raise ConfigurationError(
                 f"Publisher token is missing or invalid, got: {self.publisher}"
             )
-        return self.publisher[0]
+        return self.publisher
 
     @property
-    def ws_url(self) -> str:
-        if not self.control_url:
-            raise ConfigurationError("Control (ws) URL is missing")
-        return self.control_url
+    def room_name(self) -> str:
+        return self.webrtc_room_name
 
     @property
-    def webrtc_url(self) -> str:
-        if not self.stream_url:
+    def stream_url(self) -> str:
+        if not self.webrtc_url:
             raise ConfigurationError("Stream URL is missing")
-        return self.stream_url
+        return self.webrtc_url
+
+    @property
+    def control_url(self) -> str:
+        if not self.ws_url:
+            raise ConfigurationError("Control (ws) URL is missing")
+        return self.ws_url
 
 
 class PalabraRESTClient:
@@ -58,7 +63,7 @@ class PalabraRESTClient:
         self.timeout = timeout
 
     async def create_session(
-        self, publisher_count: int = 1, subscriber_count: int = 0
+        self, subscriber_count: int = 0
     ) -> SessionCredentials:
         """
         Create a new streaming session
@@ -74,11 +79,11 @@ class PalabraRESTClient:
             )
 
             response = await session.post(
-                url=f"{self.base_url}/session-storage/sessions",
+                url=f"{self.base_url}/session-storage/session",
                 json={
                     "data": {
-                        "publisher_count": publisher_count,
                         "subscriber_count": subscriber_count,
+                        "intent": "api",
                     }
                 },
                 headers={
@@ -112,6 +117,40 @@ class PalabraRESTClient:
         except Exception as e:
             error(f"Error creating session: {e}")
             raise
+        finally:
+            if session:
+                await session.close()
+
+    async def delete_session(self, session_id: str) -> None:
+        """
+        Delete a streaming session
+        """
+        session = None
+        try:
+            # Create SSL context with certifi certificates
+            ssl_context = ssl.create_default_context(cafile=certifi.where())
+            connector = aiohttp.TCPConnector(ssl=ssl_context)
+
+            session = aiohttp.ClientSession(
+                timeout=aiohttp.ClientTimeout(total=5), connector=connector
+            )
+
+            response = await session.delete(
+                url=f"{self.base_url}/session-storage/sessions/{session_id}",
+                headers={
+                    "ClientID": self.client_id,
+                    "ClientSecret": self.client_secret,
+                },
+            )
+
+            response.raise_for_status()
+
+        except asyncio.CancelledError:
+            warning("PalabraRESTClient delete_session cancelled")
+            raise
+        except Exception as e:
+            error(f"Error deleting session {session_id}: {e}")
+            # Don't re-raise the exception to prevent blocking shutdown
         finally:
             if session:
                 await session.close()

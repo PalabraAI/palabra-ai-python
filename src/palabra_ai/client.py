@@ -155,14 +155,21 @@ class PalabraAI:
         success(f"🤖 Connecting to Palabra.ai API with {cfg.mode}...")
         if stopper is None:
             stopper = TaskEvent()
+        
+        # Track if we created the session internally
+        session_created_internally = False
+        rest_client = None
+        
         if self.session_credentials is not None:
             credentials = self.session_credentials
         else:
-            credentials = await PalabraRESTClient(
+            rest_client = PalabraRESTClient(
                 self.client_id,
                 self.client_secret,
                 base_url=self.api_endpoint,
-            ).create_session()
+            )
+            credentials = await rest_client.create_session()
+            session_created_internally = True
 
         manager = None
         try:
@@ -184,5 +191,16 @@ class PalabraAI:
                 raise excs[0] from eg
             raise excs_wo_cancel[0] from eg
         finally:
-            # success("🎉🎉🎉 Translation completed 🎉🎉🎉")
+            # Clean up session if it was created internally
+            if session_created_internally and rest_client and credentials:
+                try:
+                    await asyncio.wait_for(
+                        rest_client.delete_session(credentials.id), timeout=5.0
+                    )
+                    success(f"Successfully deleted session {credentials.id}")
+                except asyncio.TimeoutError:
+                    error(f"Timeout deleting session {credentials.id}")
+                except Exception as e:
+                    error(f"Failed to delete session {credentials.id}: {e}")
+            
             debug(diagnose_hanging_tasks())

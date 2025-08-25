@@ -12,15 +12,21 @@ class TestSessionCredentials:
     def test_init_valid(self):
         """Test valid credentials initialization"""
         creds = SessionCredentials(
-            publisher=["token123"],
+            id="test_session_id",
+            publisher="token123",
             subscriber=["sub_token"],
-            room_name="test_room",
-            stream_url="rtc://example.com",
-            control_url="ws://example.com"
+            webrtc_room_name="test_room",
+            webrtc_url="rtc://example.com",
+            ws_url="ws://example.com"
         )
         
-        assert creds.publisher == ["token123"]
+        assert creds.id == "test_session_id"
+        assert creds.publisher == "token123"
         assert creds.subscriber == ["sub_token"]
+        assert creds.webrtc_room_name == "test_room"
+        assert creds.webrtc_url == "rtc://example.com"
+        assert creds.ws_url == "ws://example.com"
+        # Test backward compatibility properties
         assert creds.room_name == "test_room"
         assert creds.stream_url == "rtc://example.com"
         assert creds.control_url == "ws://example.com"
@@ -29,11 +35,12 @@ class TestSessionCredentials:
         """Test error when JWT token missing"""
         with pytest.raises(ConfigurationError) as exc_info:
             SessionCredentials(
-                publisher=[],
+                id="test_session_id",
+                publisher="",
                 subscriber=["sub_token"],
-                room_name="test_room",
-                stream_url="rtc://example.com",
-                control_url="ws://example.com"
+                webrtc_room_name="test_room",
+                webrtc_url="rtc://example.com",
+                ws_url="ws://example.com"
             )
         assert "Publisher token is missing" in str(exc_info.value)
     
@@ -41,11 +48,12 @@ class TestSessionCredentials:
         """Test error when control URL missing"""
         with pytest.raises(ConfigurationError) as exc_info:
             SessionCredentials(
-                publisher=["token123"],
+                id="test_session_id",
+                publisher="token123",
                 subscriber=["sub_token"],
-                room_name="test_room",
-                stream_url="rtc://example.com",
-                control_url=""
+                webrtc_room_name="test_room",
+                webrtc_url="rtc://example.com",
+                ws_url=""
             )
         assert "Missing JWT token" in str(exc_info.value)
     
@@ -53,39 +61,42 @@ class TestSessionCredentials:
         """Test error when stream URL missing"""
         with pytest.raises(ConfigurationError) as exc_info:
             SessionCredentials(
-                publisher=["token123"],
+                id="test_session_id",
+                publisher="token123",
                 subscriber=["sub_token"],
-                room_name="test_room",
-                stream_url="",
-                control_url="ws://example.com"
+                webrtc_room_name="test_room",
+                webrtc_url="",
+                ws_url="ws://example.com"
             )
         assert "Missing JWT token" in str(exc_info.value)
     
     def test_jwt_token_property(self):
         """Test jwt_token property"""
         creds = SessionCredentials(
-            publisher=["token123", "token456"],
+            id="test_session_id",
+            publisher="token123",
             subscriber=["sub_token"],
-            room_name="test_room",
-            stream_url="rtc://example.com",
-            control_url="ws://example.com"
+            webrtc_room_name="test_room",
+            webrtc_url="rtc://example.com",
+            ws_url="ws://example.com"
         )
         
         assert creds.jwt_token == "token123"
     
     def test_jwt_token_empty_publisher(self):
-        """Test jwt_token with empty publisher list"""
+        """Test jwt_token with empty publisher string"""
         # Use valid initialization then test the property
         creds = SessionCredentials(
-            publisher=["token123"],
+            id="test_session_id",
+            publisher="token123",
             subscriber=["sub_token"],
-            room_name="test_room",
-            stream_url="rtc://example.com",
-            control_url="ws://example.com"
+            webrtc_room_name="test_room",
+            webrtc_url="rtc://example.com",
+            ws_url="ws://example.com"
         )
         
         # Manually set empty publisher to test the property
-        object.__setattr__(creds, 'publisher', [])
+        object.__setattr__(creds, 'publisher', "")
         
         with pytest.raises(ConfigurationError) as exc_info:
             _ = creds.jwt_token
@@ -94,61 +105,65 @@ class TestSessionCredentials:
     def test_ws_url_property(self):
         """Test ws_url property"""
         creds = SessionCredentials(
-            publisher=["token123"],
+            id="test_session_id",
+            publisher="token123",
             subscriber=["sub_token"],
-            room_name="test_room",
-            stream_url="rtc://example.com",
-            control_url="ws://example.com"
+            webrtc_room_name="test_room",
+            webrtc_url="rtc://example.com",
+            ws_url="ws://example.com"
         )
         
         assert creds.ws_url == "ws://example.com"
     
     def test_ws_url_missing(self):
-        """Test ws_url with missing control URL"""
+        """Test ws_url with missing ws URL"""
         # Use valid initialization then test the property
         creds = SessionCredentials(
-            publisher=["token123"],
+            id="test_session_id",
+            publisher="token123",
             subscriber=["sub_token"],
-            room_name="test_room",
-            stream_url="rtc://example.com",
-            control_url="ws://example.com"
+            webrtc_room_name="test_room",
+            webrtc_url="rtc://example.com",
+            ws_url="ws://example.com"
         )
         
-        # Manually set empty control_url to test the property
-        object.__setattr__(creds, 'control_url', "")
+        # Manually set empty ws_url to test the property
+        object.__setattr__(creds, 'ws_url', "")
         
         with pytest.raises(ConfigurationError) as exc_info:
-            _ = creds.ws_url
+            _ = creds.control_url
         assert "Control (ws) URL is missing" in str(exc_info.value)
     
     def test_webrtc_url_property(self):
         """Test webrtc_url property"""
         creds = SessionCredentials(
-            publisher=["token123"],
+            id="test_session_id",
+            publisher="token123",
             subscriber=["sub_token"],
-            room_name="test_room",
-            stream_url="rtc://example.com",
-            control_url="ws://example.com"
+            webrtc_room_name="test_room",
+            webrtc_url="rtc://example.com",
+            ws_url="ws://example.com"
         )
         
         assert creds.webrtc_url == "rtc://example.com"
     
     def test_webrtc_url_missing(self):
-        """Test webrtc_url with missing stream URL"""
+        """Test webrtc_url with missing webrtc URL"""
         # Use valid initialization then test the property
         creds = SessionCredentials(
-            publisher=["token123"],
+            id="test_session_id",
+            publisher="token123",
             subscriber=["sub_token"],
-            room_name="test_room",
-            stream_url="rtc://example.com",
-            control_url="ws://example.com"
+            webrtc_room_name="test_room",
+            webrtc_url="rtc://example.com",
+            ws_url="ws://example.com"
         )
         
-        # Manually set empty stream_url to test the property
-        object.__setattr__(creds, 'stream_url', "")
+        # Manually set empty webrtc_url to test the property
+        object.__setattr__(creds, 'webrtc_url', "")
         
         with pytest.raises(ConfigurationError) as exc_info:
-            _ = creds.webrtc_url
+            _ = creds.stream_url
         assert "Stream URL is missing" in str(exc_info.value)
 
 class TestPalabraRESTClient:
@@ -184,11 +199,12 @@ class TestPalabraRESTClient:
         response_data = {
             "ok": True,
             "data": {
-                "publisher": ["token123"],
+                "id": "test_session_id",
+                "publisher": "token123",
                 "subscriber": ["sub_token"],
-                "room_name": "test_room",
-                "stream_url": "rtc://example.com",
-                "control_url": "ws://example.com"
+                "webrtc_room_name": "test_room",
+                "webrtc_url": "rtc://example.com",
+                "ws_url": "ws://example.com"
             }
         }
         
@@ -207,8 +223,8 @@ class TestPalabraRESTClient:
                 result = await client.create_session()
                 
                 assert isinstance(result, SessionCredentials)
-                assert result.publisher == ["token123"]
-                assert result.room_name == "test_room"
+                assert result.publisher == "token123"
+                assert result.webrtc_room_name == "test_room"
                 
                 # Verify session was closed
                 mock_session.close.assert_called_once()
@@ -221,11 +237,12 @@ class TestPalabraRESTClient:
         response_data = {
             "ok": True,
             "data": {
-                "publisher": ["token123"],
+                "id": "test_session_id",
+                "publisher": "token123",
                 "subscriber": ["sub_token"],
-                "room_name": "test_room",
-                "stream_url": "rtc://example.com",
-                "control_url": "ws://example.com"
+                "webrtc_room_name": "test_room",
+                "webrtc_url": "rtc://example.com",
+                "ws_url": "ws://example.com"
             }
         }
         
@@ -241,12 +258,11 @@ class TestPalabraRESTClient:
             with patch('ssl.create_default_context'), \
                  patch('aiohttp.TCPConnector'):
                 
-                result = await client.create_session(publisher_count=2, subscriber_count=3)
+                result = await client.create_session(subscriber_count=3)
                 
                 # Verify request was made with correct parameters
                 mock_session.post.assert_called_once()
                 call_args = mock_session.post.call_args
-                assert call_args[1]["json"]["data"]["publisher_count"] == 2
                 assert call_args[1]["json"]["data"]["subscriber_count"] == 3
     
     @pytest.mark.asyncio
