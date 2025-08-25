@@ -41,3 +41,7 @@ def to_json(obj: Any, indent: bool = False, sort_keys: bool = True) -> bytes:
 def from_json(data: str | bytes) -> Any:
     """Parse JSON from string or bytes."""
     return orjson.loads(data)
+
+
+def trough_json(obj: Any, indent: bool = False, sort_keys: bool = True) -> dict[str, Any]:
+    return from_json(to_json(obj, indent=indent, sort_keys=sort_keys))

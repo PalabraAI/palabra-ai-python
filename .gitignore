@@ -154,3 +154,6 @@ ehthumbs.db
 
 # uv
 uv.lock
+
+# Temporary files
+tmp/

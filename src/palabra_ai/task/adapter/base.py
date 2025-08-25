@@ -50,7 +50,7 @@ class Writer(Task):
     async def do(self):
         from palabra_ai.util.logger import debug, warning
 
-        while not self.stopper or not self.eof:
+        while not self.stopper and not self.eof:
             try:
                 frame: AudioFrame | None = await asyncio.wait_for(
                     self.q.get(), timeout=SLEEP_INTERVAL_LONG

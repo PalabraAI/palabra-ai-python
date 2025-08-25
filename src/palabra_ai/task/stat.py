@@ -46,9 +46,9 @@ class Stat(Task):
     async def exit(self):
         debug(self.stat)
 
-        moment = time.time()
+        moment = time.perf_counter()
 
-        while time.time() - moment < SLEEP_INTERVAL_LONG:
+        while time.perf_counter() - moment < SLEEP_INTERVAL_LONG:
             try:
                 await asyncio.sleep(SLEEP_INTERVAL_MEDIUM)
             except asyncio.CancelledError:

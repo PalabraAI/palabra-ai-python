@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import io
 from functools import cached_property
 from pathlib import Path
-from typing import Optional
+from typing import TextIO
 from typing import TYPE_CHECKING, Annotated, Any
 
 from environs import Env
@@ -41,6 +42,14 @@ from palabra_ai.constant import (
     VAD_RIGHT_PADDING_DEFAULT,
     VAD_THRESHOLD_DEFAULT,
 )
+from palabra_ai.constant import QUEUE_MAX_TEMPO
+from palabra_ai.constant import QUEUE_MIN_TEMPO
+from palabra_ai.constant import WEBRTC_MODE_CHANNELS
+from palabra_ai.constant import WEBRTC_MODE_CHUNK_DURATION_MS
+from palabra_ai.constant import WEBRTC_MODE_SAMPLE_RATE
+from palabra_ai.constant import WS_MODE_CHANNELS
+from palabra_ai.constant import WS_MODE_CHUNK_DURATION_MS
+from palabra_ai.constant import WS_MODE_SAMPLE_RATE
 from palabra_ai.exc import ConfigurationError
 from palabra_ai.lang import Language, is_valid_source_language, is_valid_target_language
 from palabra_ai.message import Message
@@ -139,9 +148,9 @@ class IoMode(BaseModel):
 
 class WebrtcMode(IoMode):
     name: str = "webrtc"
-    sample_rate: int = 48000
-    num_channels: int = 1
-    chunk_duration_ms: int = 10
+    sample_rate: int = WEBRTC_MODE_SAMPLE_RATE
+    num_channels: int = WEBRTC_MODE_CHANNELS
+    chunk_duration_ms: int = WEBRTC_MODE_CHUNK_DURATION_MS
 
     def model_dump(self, *args, **kwargs) -> dict[str, Any]:
         return {
@@ -162,9 +171,9 @@ class WebrtcMode(IoMode):
 
 class WsMode(IoMode):
     name: str = "ws"
-    sample_rate: int = 24000
-    num_channels: int = 1
-    chunk_duration_ms: int = 320
+    sample_rate: int = WS_MODE_SAMPLE_RATE
+    num_channels: int = WS_MODE_CHANNELS
+    chunk_duration_ms: int = WS_MODE_CHUNK_DURATION_MS
 
     def model_dump(self, *args, **kwargs) -> dict[str, Any]:
         return {
@@ -312,7 +321,9 @@ class Translation(BaseModel):
 class QueueConfig(BaseModel):
     desired_queue_level_ms: int = DESIRED_QUEUE_LEVEL_MS_DEFAULT
     max_queue_level_ms: int = MAX_QUEUE_LEVEL_MS_DEFAULT
-    auto_tempo: bool = False
+    auto_tempo: bool = True
+    min_tempo: float = QUEUE_MIN_TEMPO
+    max_tempo: float = QUEUE_MAX_TEMPO
 
 
 class QueueConfigs(BaseModel):
@@ -385,14 +396,11 @@ class TargetLang(BaseModel):
 
 
 class Config(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
+    model_config = ConfigDict(populate_by_name=True, arbitrary_types_allowed=True)
 
     source: SourceLang | None = Field(default=None)
     # TODO: SIMULTANEOUS TRANSLATION!!!
     targets: list[TargetLang] | None = Field(default=None)
-
-    # input_stream: InputStream = Field(default_factory=InputStream)
-    # output_stream: OutputStream = Field(default_factory=OutputStream)
 
     preprocessing: Preprocessing = Field(default_factory=Preprocessing)
     translation_queue_configs: QueueConfigs = Field(default_factory=QueueConfigs)
@@ -401,6 +409,8 @@ class Config(BaseModel):
     mode: IoMode = Field(default_factory=WsMode, exclude=True)
     silent: bool = Field(default=SILENT, exclude=True)
     log_file: Path | str | None = Field(default=LOG_FILE, exclude=True)
+    benchmark: bool = Field(default=False, exclude=True)
+    internal_logs: TextIO | None = Field(default_factory=io.StringIO, exclude=True)
     debug: bool = Field(default=DEBUG, exclude=True)
     deep_debug: bool = Field(default=DEEP_DEBUG, exclude=True)
     timeout: int = Field(default=TIMEOUT, exclude=True)  # TODO!
@@ -427,7 +437,7 @@ class Config(BaseModel):
             self.log_file = Path(self.log_file).absolute()
             self.log_file.parent.mkdir(exist_ok=True, parents=True)
             self.trace_file = self.log_file.with_suffix(".trace.json")
-        set_logging(self.silent, self.debug, self.log_file)
+        set_logging(self.silent, self.debug, self.internal_logs, self.log_file)
         super().model_post_init(context)
 
     @model_validator(mode="before")
@@ -463,6 +473,27 @@ class Config(BaseModel):
                 )
             targets.append({"lang": target_lang, "translation": raw_target})
         data["targets"] = targets
+
+        # Reconstruct mode from input_stream/output_stream
+        if "input_stream" in data and "mode" not in data:
+            source = data.get("input_stream", {}).get("source", {})
+            source_type = source.get("type")
+            
+            if source_type == "webrtc":
+                # WebrtcMode with default parameters
+                data["mode"] = WebrtcMode()
+            elif source_type == "ws":
+                # WsMode with parameters from JSON
+                # Note: chunk_duration_ms is not in API format, use default
+                data["mode"] = WsMode(
+                    sample_rate=source.get("sample_rate", WS_MODE_SAMPLE_RATE),
+                    num_channels=source.get("channels", WS_MODE_CHANNELS),
+                    # chunk_duration_ms will use default WS_MODE_CHUNK_DURATION_MS
+                )
+            
+            # Remove input/output streams as they are generated from mode
+            data.pop("input_stream", None)
+            data.pop("output_stream", None)
 
         return data
 
