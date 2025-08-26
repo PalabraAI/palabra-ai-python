@@ -121,6 +121,8 @@ class TestIo:
             # Check message was published
             mock_debug.assert_called_once()
             assert "Pushing message" in str(mock_debug.call_args)
+    
+    def test_new_frame(self, mock_config, mock_credentials, mock_reader, mock_writer):
         """Test new_frame method"""
         io = ConcreteIo(
             cfg=mock_config,
@@ -273,3 +275,82 @@ class TestIo:
                     # Check timeout message was logged
                     assert any("Timeout waiting for task configuration" in str(call) 
                               for call in mock_debug.call_args_list)
+    
+    def test_calc_rms_db_static_method(self):
+        """Test calc_rms_db static method"""
+        # Create test audio frame with known values
+        audio_data = np.array([16384, -16384, 0, 32767], dtype=np.int16)
+        audio_frame = MagicMock()
+        audio_frame.data = audio_data.tobytes()
+        
+        rms_db = Io.calc_rms_db(audio_frame)
+        
+        # Should return a reasonable dB value
+        assert isinstance(rms_db, float)
+        assert rms_db > -50  # Should not be too quiet
+        assert rms_db < 10   # Should not be too loud
+    
+    def test_calc_rms_db_silent_audio(self):
+        """Test calc_rms_db with silent audio"""
+        # Create silent audio frame
+        audio_data = np.zeros(1024, dtype=np.int16)
+        audio_frame = MagicMock()
+        audio_frame.data = audio_data.tobytes()
+        
+        rms_db = Io.calc_rms_db(audio_frame)
+        
+        # Silent audio should return -infinity
+        assert rms_db == -np.inf
+    
+    @pytest.mark.asyncio
+    async def test_in_msg_sender(self, mock_config, mock_credentials, mock_reader, mock_writer):
+        """Test in_msg_sender method"""
+        io = ConcreteIo(
+            cfg=mock_config,
+            credentials=mock_credentials,
+            reader=mock_reader,
+            writer=mock_writer
+        )
+        
+        io.send_message = AsyncMock()
+        
+        # Create a message to send
+        test_msg = EndTaskMessage()
+        
+        # Start the sender task
+        sender_task = asyncio.create_task(io.in_msg_sender())
+        
+        # Give it time to start
+        await asyncio.sleep(0.01)
+        
+        # Publish a message
+        io.in_msg_foq.publish(test_msg)
+        
+        # Give it time to process
+        await asyncio.sleep(0.01)
+        
+        # Stop the sender by publishing None
+        io.in_msg_foq.publish(None)
+        
+        # Wait for completion
+        await asyncio.wait_for(sender_task, timeout=1.0)
+        
+        # Check that send_message was called
+        assert io.send_message.call_count >= 1
+    
+    @pytest.mark.asyncio
+    async def test_wait_after_push(self, mock_config, mock_credentials, mock_reader, mock_writer):
+        """Test wait_after_push method"""
+        io = ConcreteIo(
+            cfg=mock_config,
+            credentials=mock_credentials,
+            reader=mock_reader,
+            writer=mock_writer
+        )
+        
+        with patch('asyncio.sleep') as mock_sleep:
+            # Simulate 5ms processing time
+            await io.wait_after_push(0.005)
+            
+            # Should sleep for chunk_duration - delta = 20ms - 5ms = 15ms = 0.015s
+            mock_sleep.assert_called_once_with(0.015)
