@@ -88,6 +88,9 @@ class Manager(Task):
         self.reader.cfg = self.cfg
         self.writer.cfg = self.cfg
 
+        # Preprocess audio if needed (before boot/start_system to avoid timeouts)
+        self.reader.do_preprocess()
+
         # if hasattr(self.writer, "set_track_settings"):
         #     self.writer.set_track_settings(self.track_settings)
         # if hasattr(self.reader, "set_track_settings"):

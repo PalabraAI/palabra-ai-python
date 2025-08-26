@@ -5,8 +5,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Union
 import orjson
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
 
-from palabra_ai.enum import Channel, Direction
-from palabra_ai.enum import Kind
+from palabra_ai.enum import Channel, Direction, Kind
 from palabra_ai.exc import ApiError, ApiValidationError, TaskNotFoundError
 from palabra_ai.lang import Language
 from palabra_ai.util.logger import debug
@@ -52,6 +51,7 @@ class Dbg:
     @classmethod
     def now_ts(cls):
         return get_utc_ts()
+
 
 @dataclass
 class KnownRaw:
@@ -360,7 +360,11 @@ class ErrorMessage(Message):
                         if isinstance(err, dict):
                             loc = err.get("loc", [])
                             msg = err.get("msg", "validation error")
-                            loc_str = " -> ".join(str(l) for l in loc) if loc else "unknown"
+                            loc_str = (
+                                " -> ".join(str(_loc) for _loc in loc)
+                                if loc
+                                else "unknown"
+                            )
                             error_msgs.append(f"{loc_str}: {msg}")
                     error_str = "; ".join(error_msgs)
                 else:

@@ -69,7 +69,7 @@ class Logger(Task):
 
     async def cancel_subtasks(self):
         debug("Cancelling Logger subtasks...")
-        +self.stopper # noqa
+        +self.stopper  # noqa
         tasks_to_wait = []
         if self._in_task and self._out_task:
             tasks_to_wait.extend([self._in_task, self._out_task])
@@ -93,18 +93,18 @@ class Logger(Task):
 
     async def exit(self) -> LogData:
         debug("Finalizing Logger...")
-        
+
         # First create LogData BEFORE cancelling tasks
         try:
             self.cfg.internal_logs.seek(0)
             logs = self.cfg.internal_logs.readlines()
             debug(f"Collected {len(logs)} internal log lines")
-            
+
             try:
                 sysinfo = get_system_info()
             except BaseException as e:
                 sysinfo = {"error": str(e)}
-            
+
             log_data = LogData(
                 version=getattr(palabra_ai, "__version__", "n/a"),
                 sysinfo=sysinfo,
@@ -116,11 +116,13 @@ class Logger(Task):
                 debug=self.cfg.debug,
                 logs=logs,
             )
-            
+
             # CRITICAL: Save result immediately
             self.result = log_data
-            debug(f"Logger: Saved LogData with {len(self._messages)} messages to self.result")
-            
+            debug(
+                f"Logger: Saved LogData with {len(self._messages)} messages to self.result"
+            )
+
             # Save to file if needed
             if self.cfg.trace_file:
                 try:
@@ -129,7 +131,7 @@ class Logger(Task):
                     debug(f"Saved trace to {self.cfg.trace_file}")
                 except Exception as e:
                     error(f"Failed to save trace file: {e}")
-        
+
         except Exception as e:
             error(f"Failed to create LogData: {e}")
             # Create minimal LogData with what we have
@@ -142,19 +144,19 @@ class Logger(Task):
                 log_file="",
                 trace_file="",
                 debug=False,
-                logs=[]
+                logs=[],
             )
             self.result = log_data
-        
+
         # Now cancel tasks
         try:
             cancel_task = asyncio.create_task(self.cancel_subtasks())
             await asyncio.wait_for(cancel_task, timeout=2.0)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             debug("Logger subtasks cancellation timeout")
         except Exception as e:
             debug(f"Error cancelling logger subtasks: {e}")
-        
+
         # Unsubscribe from queues
         try:
             self.io.in_msg_foq.unsubscribe(self)
@@ -164,8 +166,10 @@ class Logger(Task):
             debug("Unsubscribed from IO queues")
         except Exception as e:
             debug(f"Error unsubscribing: {e}")
-        
-        debug(f"Logger.exit() completed, returning LogData with {len(log_data.messages)} messages")
+
+        debug(
+            f"Logger.exit() completed, returning LogData with {len(log_data.messages)} messages"
+        )
         return log_data
 
     async def _exit(self):

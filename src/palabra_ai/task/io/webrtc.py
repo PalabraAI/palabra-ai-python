@@ -10,8 +10,7 @@ from palabra_ai.audio import AudioFrame
 from palabra_ai.constant import (
     SLEEP_INTERVAL_SHORT,
 )
-from palabra_ai.enum import Channel, Direction
-from palabra_ai.enum import Kind
+from palabra_ai.enum import Channel, Direction, Kind
 from palabra_ai.message import (
     Dbg,
     EosMessage,
@@ -73,11 +72,11 @@ class WebrtcIo(Io):
             while True:
                 for tpub in self.peer.track_publications.values():
                     if all(
-                            [
-                                str(tpub.name).lower().startswith(name),
-                                tpub.kind == rtc.TrackKind.KIND_AUDIO,
-                                tpub.track is not None,
-                            ]
+                        [
+                            str(tpub.name).lower().startswith(name),
+                            tpub.kind == rtc.TrackKind.KIND_AUDIO,
+                            tpub.track is not None,
+                        ]
                     ):
                         debug(f"Found translation track: {tpub.name}")
                         return tpub
@@ -114,7 +113,13 @@ class WebrtcIo(Io):
             debug(f"Closed audio stream for {lang!r}")
 
     def on_data_received(self, data: rtc.DataPacket):
-        _dbg = Dbg(Kind.MESSAGE, Channel.WEBRTC, Direction.OUT, idx=next(self._idx), num=next(self._out_msg_num))
+        _dbg = Dbg(
+            Kind.MESSAGE,
+            Channel.WEBRTC,
+            Direction.OUT,
+            idx=next(self._idx),
+            num=next(self._out_msg_num),
+        )
         debug(f"Received packet: {data}"[:100])
         msg = Message.decode(data.data)
         msg._dbg = _dbg

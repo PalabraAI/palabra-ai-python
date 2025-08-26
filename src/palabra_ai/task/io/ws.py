@@ -1,14 +1,11 @@
+import asyncio as aio
 from dataclasses import KW_ONLY, dataclass, field
 
-import asyncio as aio
-
-import numpy as np
 from websockets.asyncio.client import ClientConnection
 from websockets.asyncio.client import connect as ws_connect
 
 from palabra_ai.audio import AudioFrame
-from palabra_ai.enum import Channel, Direction
-from palabra_ai.enum import Kind
+from palabra_ai.enum import Channel, Direction, Kind
 from palabra_ai.message import Dbg
 from palabra_ai.task.io.base import Io
 from palabra_ai.util.logger import debug, trace
@@ -78,7 +75,7 @@ class WsIo(Io):
                         Direction.OUT,
                         ts=ts,
                         idx=next(self._idx),
-                        num=next(self._out_audio_num)
+                        num=next(self._out_audio_num),
                     )
                     msg = Message.decode(raw_msg)
                     msg._dbg = _dbg
