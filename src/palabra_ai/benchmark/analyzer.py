@@ -183,6 +183,9 @@ def analyze_latency(messages: List[Dict[str, Any]]) -> Dict[str, Any]:
     # Track translation events for TTS correlation
     translation_events = []  # List of (timestamp, transcription_id, chunk_index)
     
+    # Track pipeline timings for accurate TTS calculation
+    pipeline_timings_by_id = {}  # Dict of transcription_id -> timings dict
+    
     for msg in messages:
         if msg.get("dir") != "out":
             continue
@@ -261,28 +264,58 @@ def analyze_latency(messages: List[Dict[str, Any]]) -> Dict[str, Any]:
                         # Track translation events for TTS correlation
                         if msg_type == "translated_transcription":
                             translation_events.append((msg_ts, trans_id, nearest_chunk.index))
+        
+        elif msg_type == "pipeline_timings":
+            # Process pipeline timings for accurate TTS calculation
+            trans_id = data.get("transcription_id")
+            timings = data.get("timings", {})
+            if trans_id and timings:
+                # Store timings for later TTS calculation
+                pipeline_timings_by_id[trans_id] = timings
     
-    # Process TTS audio (OUT audio chunks after translation)
+    # Process TTS audio using pipeline_timings or fallback to RMS detection
     tts_measurements = []
     
     for trans_ts, trans_id, in_chunk_idx in translation_events:
-        # Find first OUT audio chunk with sound after this translation
-        for out_chunk in out_audio_chunks:
-            if out_chunk.timestamp > trans_ts and out_chunk.rms_db > RMS_THRESHOLD_DB:
-                # Get corresponding IN chunk
-                if in_chunk_idx in in_chunks_by_index:
-                    in_chunk = in_chunks_by_index[in_chunk_idx]
-                    tts_latency = out_chunk.timestamp - in_chunk.timestamp
-                    
-                    measurement = LatencyMeasurement(
-                        event_type="tts_audio",
-                        transcription_id=trans_id,
-                        latency_sec=tts_latency,
-                        chunk_index=in_chunk_idx,
-                        segment_start_sec=in_chunk.audio_time_sec
-                    )
-                    tts_measurements.append(measurement)
-                    break  # Only first sound chunk per translation
+        if trans_id in pipeline_timings_by_id:
+            # Use accurate server-provided TTS timing
+            timings = pipeline_timings_by_id[trans_id]
+            tts_time = timings.get("tts", 0)
+            
+            if tts_time > 0 and in_chunk_idx in in_chunks_by_index:
+                in_chunk = in_chunks_by_index[in_chunk_idx]
+                # Total latency = time to translation + TTS generation time
+                # trans_ts - in_chunk.timestamp gives us translation latency
+                # Adding tts_time gives us total latency to TTS output
+                translation_latency = trans_ts - in_chunk.timestamp
+                tts_latency = translation_latency + tts_time
+                
+                measurement = LatencyMeasurement(
+                    event_type="tts_audio",
+                    transcription_id=trans_id,
+                    latency_sec=tts_latency,
+                    chunk_index=in_chunk_idx,
+                    segment_start_sec=in_chunk.audio_time_sec
+                )
+                tts_measurements.append(measurement)
+        else:
+            # Fallback: Use RMS-based detection for backward compatibility
+            for out_chunk in out_audio_chunks:
+                if out_chunk.timestamp > trans_ts and out_chunk.rms_db > RMS_THRESHOLD_DB:
+                    # Get corresponding IN chunk
+                    if in_chunk_idx in in_chunks_by_index:
+                        in_chunk = in_chunks_by_index[in_chunk_idx]
+                        tts_latency = out_chunk.timestamp - in_chunk.timestamp
+                        
+                        measurement = LatencyMeasurement(
+                            event_type="tts_audio",
+                            transcription_id=trans_id,
+                            latency_sec=tts_latency,
+                            chunk_index=in_chunk_idx,
+                            segment_start_sec=in_chunk.audio_time_sec
+                        )
+                        tts_measurements.append(measurement)
+                        break  # Only first sound chunk per translation
     
     # Combine all measurements
     all_measurements = latency_measurements + tts_measurements
