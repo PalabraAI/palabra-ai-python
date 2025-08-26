@@ -14,7 +14,9 @@ from palabra_ai.exc import ApiError, ApiValidationError, TaskNotFoundError
 
 def test_dbg_creation():
     """Test Dbg dataclass creation"""
-    dbg = Dbg(ch=Channel.WS, dir=Direction.IN)
+    from palabra_ai.enum import Kind
+    dbg = Dbg(kind=Kind.AUDIO, ch=Channel.WS, dir=Direction.IN)
+    assert dbg.kind == Kind.AUDIO
     assert dbg.ch == Channel.WS
     assert dbg.dir == Direction.IN
     assert isinstance(dbg.ts, float)
@@ -23,6 +25,7 @@ def test_dbg_creation():
 def test_dbg_empty():
     """Test Dbg.empty() method"""
     dbg = Dbg.empty()
+    assert dbg.kind is None
     assert dbg.ch is None
     assert dbg.dir is None
     assert isinstance(dbg.ts, float)

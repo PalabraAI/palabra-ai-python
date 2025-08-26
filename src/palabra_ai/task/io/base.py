@@ -1,8 +1,10 @@
 import abc
 import time
-from asyncio import get_running_loop, sleep
+import asyncio as aio
 from collections.abc import Callable
 from dataclasses import KW_ONLY, dataclass, field
+from itertools import count
+from typing import Iterator
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -10,6 +12,7 @@ import numpy as np
 from palabra_ai.audio import AudioFrame
 from palabra_ai.constant import BOOT_TIMEOUT, BYTES_PER_SAMPLE, SLEEP_INTERVAL_LONG
 from palabra_ai.enum import Channel, Direction
+from palabra_ai.enum import Kind
 from palabra_ai.message import (
     CurrentTaskMessage,
     Dbg,
@@ -36,7 +39,16 @@ class Io(Task):
     _: KW_ONLY
     in_msg_foq: FanoutQueue["Message"] = field(default_factory=FanoutQueue, init=False)
     out_msg_foq: FanoutQueue["Message"] = field(default_factory=FanoutQueue, init=False)
+    bench_audio_foq: FanoutQueue[AudioFrame] = field(default_factory=FanoutQueue, init=False)
     _buffer_callback: Callable | None = field(default=None, init=False)
+    _idx: Iterator[int] = field(default_factory=count, init=False)
+    _in_msg_num: Iterator[int] = field(default_factory=count, init=False)
+    _out_msg_num: Iterator[int] = field(default_factory=count, init=False)
+    _in_audio_num: Iterator[int] = field(default_factory=count, init=False)
+    _out_audio_num: Iterator[int] = field(default_factory=count, init=False)
+    _start_time: float | None = field(default=None, init=False)
+    _sent_count: int = field(default=0, init=False)
+    _pending: list = field(default_factory=list, init=False)
 
     @property
     @abc.abstractmethod
@@ -54,10 +66,17 @@ class Io(Task):
         """Send a message through the transport."""
         ...
 
+    @staticmethod
+    def calc_rms_db(audio_frame: AudioFrame) -> float:
+        audio_data = np.frombuffer(audio_frame.data, dtype=np.int16)
+        rms = np.sqrt(np.mean(audio_data.astype(np.float32) ** 2)) / 32768.0
+        return float(20 * np.log10(rms) if rms > 0 else -np.inf)
+
+
     async def push_in_msg(self, msg: "Message") -> None:
         """Push an incoming message with debug tracking."""
-        dbg = Dbg(self.channel, Direction.IN)
-        msg._dbg = dbg
+        _dbg = Dbg(Kind.MESSAGE, self.channel, Direction.IN, num=next(self._in_msg_num), idx=next(self._idx))
+        msg._dbg = _dbg
         debug(f"Pushing message: {msg!r}")
         self.in_msg_foq.publish(msg)
 
@@ -75,6 +94,8 @@ class Io(Task):
     async def do(self):
         """Main processing loop - read audio chunks and push them."""
         await self.reader.ready
+        MAX_BURST = 20
+        
         while not self.stopper and not self.eof:
             chunk = await self.reader.read(self.cfg.mode.chunk_bytes)
 
@@ -86,14 +107,46 @@ class Io(Task):
 
             if not chunk:
                 continue
-            start_time = time.time()
-            await self.push(chunk)
-            stop_time = time.time()
+            
+            # Initialize on first chunk
+            if self._start_time is None:
+                self._start_time = time.perf_counter()
+            
+            # Check if we're behind schedule
+            now = time.perf_counter()
+            elapsed_ms = (now - self._start_time) * 1000
+            should_have_sent = int(elapsed_ms / self.cfg.mode.chunk_duration_ms)
+            behind = should_have_sent - self._sent_count
+            
+            # If behind by more than 1 chunk - enable burst mode
+            if behind > 1:
+                self._pending.append(chunk)
+                burst_count = min(len(self._pending), min(behind - 1, MAX_BURST))
+                
+                if burst_count > 0:
+                    debug(f"BURST: Behind by {behind}, sending {burst_count} extra chunks")
+                    for _ in range(burst_count):
+                        await self.push(self._pending.pop(0))
+                        self._sent_count += 1
+            
+            # Send current chunk (or from queue if any)
+            if self._pending:
+                chunk_to_send = self._pending.pop(0)
+            else:
+                chunk_to_send = chunk
+                
+            start_time = time.perf_counter()
+            await self.push(chunk_to_send)
+            stop_time = time.perf_counter()
+            self._sent_count += 1
+            
+            # Wait until next chunk time
             await self.wait_after_push(stop_time - start_time)
+
 
     async def wait_after_push(self, delta: float):
         """Hook for subclasses to add post-chunk processing."""
-        await sleep(self.cfg.mode.chunk_duration_ms / 1000 - delta)
+        await aio.sleep(self.cfg.mode.chunk_duration_ms / 1000 - delta)
 
     def new_frame(self) -> "AudioFrame":
         return AudioFrame.create(*self.cfg.mode.for_audio_frame)
@@ -106,7 +159,7 @@ class Io(Task):
         audio_data = np.frombuffer(audio_frame.data, dtype=np.int16)
 
         for i in range(0, total_samples, samples_per_channel):
-            if get_running_loop().is_closed():
+            if aio.get_running_loop().is_closed():
                 break
             frame_chunk = audio_bytes[
                 i * BYTES_PER_SAMPLE : (i + samples_per_channel) * BYTES_PER_SAMPLE
@@ -121,7 +174,14 @@ class Io(Task):
 
             np.copyto(audio_data, padded_chunk)
 
+            if self.cfg.benchmark:
+                _dbg = Dbg(Kind.AUDIO, self.channel, Direction.IN, idx=next(self._idx), num=next(self._in_audio_num), chunk_duration_ms=self.cfg.mode.chunk_duration_ms)
+                _dbg.rms = await aio.to_thread(self.calc_rms_db, audio_frame)
+                audio_frame._dbg = _dbg
+                self.bench_audio_foq.publish(audio_frame)
+
             await self.send_frame(audio_frame)
+
 
     async def _exit(self):
         await self.writer.q.put(None)
@@ -129,18 +189,23 @@ class Io(Task):
 
     async def set_task(self):
         debug("Setting task configuration...")
-        await sleep(SLEEP_INTERVAL_LONG)
+        await aio.sleep(SLEEP_INTERVAL_LONG)
         async with self.out_msg_foq.receiver(self, self.stopper) as msgs_out:
             await self.push_in_msg(SetTaskMessage.from_config(self.cfg))
-            start_ts = time.time()
-            await sleep(SLEEP_INTERVAL_LONG)
-            while start_ts + BOOT_TIMEOUT > time.time():
+            start_time = time.perf_counter()
+            await aio.sleep(SLEEP_INTERVAL_LONG)
+            while start_time + BOOT_TIMEOUT > time.perf_counter():
                 await self.push_in_msg(GetTaskMessage())
                 msg = await anext(msgs_out)
                 if isinstance(msg, CurrentTaskMessage):
                     debug(f"Received current task: {msg.data}")
                     return
+                # Handle error messages from server
+                from palabra_ai.message import ErrorMessage
+                if isinstance(msg, ErrorMessage):
+                    debug(f"Received error from server: {msg.data}")
+                    msg.raise_()  # This will raise the appropriate exception
                 debug(f"Received unexpected message: {msg}")
-                await sleep(SLEEP_INTERVAL_LONG)
+                await aio.sleep(SLEEP_INTERVAL_LONG)
         debug("Timeout waiting for task configuration")
         raise TimeoutError("Timeout waiting for task configuration")

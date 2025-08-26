@@ -65,6 +65,7 @@ class Task(abc.ABC):
     eof: TaskEvent = field(default_factory=TaskEvent, init=False)
     stopper: TaskEvent = field(default_factory=TaskEvent)
     _state: list[str] = field(default_factory=list, init=False, repr=False)
+    result: any = field(default=None, init=False, repr=False)
 
     def __call__(self, tg: asyncio.TaskGroup) -> "Task":
         self.root_tg = tg

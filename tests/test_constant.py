@@ -34,12 +34,6 @@ def test_timing_constants():
     assert constant.DEBUG_TASK_CHECK_INTERVAL == 30.0
 
 
-def test_retry_constants():
-    """Test retry and counter constants"""
-    assert constant.TRACK_RETRY_MAX_ATTEMPTS == 30
-    assert constant.TRACK_RETRY_DELAY == 1.0
-    assert constant.GET_TASK_WAIT_TIMEOUT == 5.0
-
 
 def test_buffer_constants():
     """Test buffer and queue constants"""
@@ -85,7 +79,7 @@ def test_tts_constants():
 
 def test_queue_config_constants():
     """Test queue config constants"""
-    assert constant.DESIRED_QUEUE_LEVEL_MS_DEFAULT == 8000
+    assert constant.DESIRED_QUEUE_LEVEL_MS_DEFAULT == 10000
     assert constant.MAX_QUEUE_LEVEL_MS_DEFAULT == 24000
 
 

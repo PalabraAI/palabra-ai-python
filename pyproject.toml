@@ -14,6 +14,7 @@ dependencies = [
     "av>=13.0.0",
     "certifi>=2023.0.0",
     "environs>=14.1",
+    "jinja2>=3.1.0",
     "librosa>=0.10.2",
     "livekit>=0.17.5,<2",
     "loguru>=0.7.3",
@@ -22,7 +23,9 @@ dependencies = [
     "pydantic>=2,<3",
     "pyloudnorm>=0.1.1",
     "sounddevice>=0.5.1,<1",
+    "tqdm>=4.66.0",
     "uvloop>=0.17",
+    "wat>=0.6.0",
     "websockets>=13,<16",
 ]
 license = "MIT"
@@ -59,6 +62,7 @@ dev = [
     "pre-commit>=3.5.0",
     "rich>=14.0.0",
     "dictdiffer>=0.9.0",
+    "wat-inspector>=0.4.3",
 ]
 
 [tool.pytest.ini_options]
@@ -90,7 +94,8 @@ addopts = [
     "--ignore=src/palabra_ai/experimental",
     "--ignore=src/palabra_ai/debug",
     "--ignore=src/palabra_ai/examples",
-    "--ignore=src/palabra_ai/scripts"
+    "--ignore=src/palabra_ai/scripts",
+    "--ignore=src/palabra_ai/benchmark"
 ]
 doctest_optionflags = ["NORMALIZE_WHITESPACE", "IGNORE_EXCEPTION_DETAIL"]
 
@@ -102,7 +107,8 @@ omit = [
     "*/experimental/*",
     "*/debug/*",
     "*/examples/*",
-    "*/scripts/*"
+    "*/scripts/*",
+    "*/benchmark/*"
 ]
 
 [tool.coverage.report]
@@ -129,6 +135,7 @@ exclude = [
     "*/debug/*",
     "*/examples/*",
     "*/scripts/*",
+    "*/benchmark/*",
     ".git",
     "__pycache__",
     "build",

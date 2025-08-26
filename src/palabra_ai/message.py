@@ -1,4 +1,3 @@
-import time
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, ClassVar, Union
@@ -7,10 +6,12 @@ import orjson
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
 
 from palabra_ai.enum import Channel, Direction
+from palabra_ai.enum import Kind
 from palabra_ai.exc import ApiError, ApiValidationError, TaskNotFoundError
 from palabra_ai.lang import Language
 from palabra_ai.util.logger import debug
 from palabra_ai.util.orjson import from_json
+from palabra_ai.util.timing import get_utc_ts
 
 if TYPE_CHECKING:
     from palabra_ai.config import Config
@@ -26,15 +27,31 @@ class KnownRawType(StrEnum):
 
 @dataclass
 class Dbg:
+    kind: Kind | None
     ch: Channel | None
     dir: Direction | None
-    ts: float = field(default_factory=time.time)
+    ts: float = field(default_factory=get_utc_ts)
+    idx: int | None = field(default=None)
+    num: int | None = field(default=None)
+    chunk_duration_ms: float | None = field(default=None)
+    relative_audio_time_ms: float | None = field(default=None)
+    rms: float | None = field(default=None)
+
+    def __post_init__(self):
+        self.calc_relative_audio_time_ms()
+
+    def calc_relative_audio_time_ms(self) -> float | None:
+        if self.kind == Kind.AUDIO and self.num is not None and self.chunk_duration_ms:
+            self.relative_audio_time_ms = self.chunk_duration_ms * self.num
 
     @classmethod
     def empty(cls):
         """Create an empty debug object"""
-        return cls(ch=None, dir=None, ts=time.time())
+        return cls(kind=None, ch=None, dir=None, ts=get_utc_ts())
 
+    @classmethod
+    def now_ts(cls):
+        return get_utc_ts()
 
 @dataclass
 class KnownRaw:
@@ -335,7 +352,20 @@ class ErrorMessage(Message):
         obj._known_raw = known_raw
         match known_raw.data:
             case {"data": {"code": "VALIDATION_ERROR", "desc": desc}}:
-                obj._exc = ApiValidationError(str(desc))
+                # Format validation errors properly
+                if isinstance(desc, list):
+                    # Pydantic-style validation errors (list of dicts)
+                    error_msgs = []
+                    for err in desc:
+                        if isinstance(err, dict):
+                            loc = err.get("loc", [])
+                            msg = err.get("msg", "validation error")
+                            loc_str = " -> ".join(str(l) for l in loc) if loc else "unknown"
+                            error_msgs.append(f"{loc_str}: {msg}")
+                    error_str = "; ".join(error_msgs)
+                else:
+                    error_str = str(desc)
+                obj._exc = ApiValidationError(error_str)
                 obj.data = known_raw.data
             case {"data": {"code": "NOT_FOUND", "desc": desc}}:
                 obj._exc = TaskNotFoundError(str(desc))

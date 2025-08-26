@@ -3,6 +3,7 @@ from dataclasses import dataclass, field
 
 # from logging import CRITICAL, DEBUG, ERROR, INFO, WARNING
 from pathlib import Path
+from typing import TextIO
 
 from loguru import logger
 
@@ -84,6 +85,18 @@ class Library:
             )
             self.handlers.append(h_id)
 
+    def setup_textio_handler(self, text_io: TextIO):
+        h_id = logger.add(
+            text_io,
+            level=DEBUG,  # File gets all debug messages
+            filter=self.create_file_filter(),
+            enqueue=True,
+            catch=True,
+            backtrace=True,
+            diagnose=True,
+        )
+        self.handlers.append(h_id)
+
     def setup_file_handler(self, log_file: Path):
         """Setup file logging handler."""
         if not log_file:
@@ -105,12 +118,14 @@ class Library:
 _lib = Library()
 
 
-def set_logging(silent: bool, debug: bool, log_file: Path = None):
+def set_logging(silent: bool, debug: bool, text_io: TextIO, log_file: Path | None = None):
     """Configure logging for the library."""
     _lib.set_level(silent, debug)
     _lib.cleanup_handlers()
     _lib.setup_console_handler()
-    _lib.setup_file_handler(log_file)
+    _lib.setup_textio_handler(text_io)
+    if log_file:
+        _lib.setup_file_handler(log_file)
 
 
 # Direct exports from logger
