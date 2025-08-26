@@ -118,7 +118,9 @@ class Library:
 _lib = Library()
 
 
-def set_logging(silent: bool, debug: bool, text_io: TextIO, log_file: Path | None = None):
+def set_logging(
+    silent: bool, debug: bool, text_io: TextIO, log_file: Path | None = None
+):
     """Configure logging for the library."""
     _lib.set_level(silent, debug)
     _lib.cleanup_handlers()

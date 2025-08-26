@@ -11,8 +11,7 @@ from aioshutdown import SIGHUP, SIGINT, SIGTERM
 from palabra_ai.config import CLIENT_ID, CLIENT_SECRET, DEEP_DEBUG, Config
 from palabra_ai.debug.hang_coroutines import diagnose_hanging_tasks
 from palabra_ai.exc import ConfigurationError, unwrap_exceptions
-from palabra_ai.internal.rest import PalabraRESTClient
-from palabra_ai.internal.rest import SessionCredentials
+from palabra_ai.internal.rest import PalabraRESTClient, SessionCredentials
 from palabra_ai.model import RunResult
 from palabra_ai.task.base import TaskEvent
 from palabra_ai.task.manager import Manager
@@ -32,7 +31,13 @@ class PalabraAI:
         if not self.client_secret:
             raise ConfigurationError("PALABRA_CLIENT_SECRET is not set")
 
-    def run(self, cfg: Config, stopper: TaskEvent | None = None, no_raise = False, without_signal_handlers = False) -> asyncio.Task | RunResult | None:
+    def run(
+        self,
+        cfg: Config,
+        stopper: TaskEvent | None = None,
+        no_raise=False,
+        without_signal_handlers=False,
+    ) -> asyncio.Task | RunResult | None:
         async def _run() -> RunResult | None:
             async def _run_with_result(manager: Manager) -> RunResult:
                 log_data = None
@@ -56,16 +61,24 @@ class PalabraAI:
                         if not manager.logger._task.done():
                             debug("Waiting for logger to complete...")
                             try:
-                                await asyncio.wait_for(manager.logger._task, timeout=5.0)
-                            except (asyncio.CancelledError, asyncio.TimeoutError):
-                                debug("Logger task timeout or cancelled, checking result anyway")
+                                await asyncio.wait_for(
+                                    manager.logger._task, timeout=5.0
+                                )
+                            except (TimeoutError, asyncio.CancelledError):
+                                debug(
+                                    "Logger task timeout or cancelled, checking result anyway"
+                                )
 
                         # Try to get the result
                         log_data = manager.logger.result
                         if not log_data:
-                            debug("Logger.result is None, trying to call exit() directly")
+                            debug(
+                                "Logger.result is None, trying to call exit() directly"
+                            )
                             try:
-                                log_data = await asyncio.wait_for(manager.logger.exit(), timeout=2.0)
+                                log_data = await asyncio.wait_for(
+                                    manager.logger.exit(), timeout=2.0
+                                )
                             except Exception as e:
                                 debug(f"Failed to get log_data from logger.exit(): {e}")
                 except Exception as e:
@@ -73,7 +86,9 @@ class PalabraAI:
 
                 # Return result with whatever we managed to get
                 if no_raise or ok:
-                    return RunResult(ok=ok, exc=exc if not ok else None, log_data=log_data)
+                    return RunResult(
+                        ok=ok, exc=exc if not ok else None, log_data=log_data
+                    )
                 elif exc:
                     # Save log_data before raising exception
                     raise exc
@@ -155,11 +170,11 @@ class PalabraAI:
         success(f"🤖 Connecting to Palabra.ai API with {cfg.mode}...")
         if stopper is None:
             stopper = TaskEvent()
-        
+
         # Track if we created the session internally
         session_created_internally = False
         rest_client = None
-        
+
         if self.session_credentials is not None:
             credentials = self.session_credentials
         else:
@@ -198,9 +213,9 @@ class PalabraAI:
                         rest_client.delete_session(credentials.id), timeout=5.0
                     )
                     success(f"Successfully deleted session {credentials.id}")
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     error(f"Timeout deleting session {credentials.id}")
                 except Exception as e:
                     error(f"Failed to delete session {credentials.id}: {e}")
-            
+
             debug(diagnose_hanging_tasks())

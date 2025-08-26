@@ -3,8 +3,7 @@ from __future__ import annotations
 import io
 from functools import cached_property
 from pathlib import Path
-from typing import TextIO
-from typing import TYPE_CHECKING, Annotated, Any
+from typing import TYPE_CHECKING, Annotated, Any, TextIO
 
 from environs import Env
 from pydantic import (
@@ -34,6 +33,8 @@ from palabra_ai.constant import (
     MIN_TRANSCRIPTION_LEN_DEFAULT,
     MIN_TRANSCRIPTION_TIME_DEFAULT,
     PHRASE_CHANCE_DEFAULT,
+    QUEUE_MAX_TEMPO,
+    QUEUE_MIN_TEMPO,
     SEGMENT_CONFIRMATION_SILENCE_THRESHOLD_DEFAULT,
     SEGMENTS_AFTER_RESTART_DEFAULT,
     SPEECH_TEMPO_ADJUSTMENT_FACTOR_DEFAULT,
@@ -41,15 +42,13 @@ from palabra_ai.constant import (
     VAD_LEFT_PADDING_DEFAULT,
     VAD_RIGHT_PADDING_DEFAULT,
     VAD_THRESHOLD_DEFAULT,
+    WEBRTC_MODE_CHANNELS,
+    WEBRTC_MODE_CHUNK_DURATION_MS,
+    WEBRTC_MODE_SAMPLE_RATE,
+    WS_MODE_CHANNELS,
+    WS_MODE_CHUNK_DURATION_MS,
+    WS_MODE_SAMPLE_RATE,
 )
-from palabra_ai.constant import QUEUE_MAX_TEMPO
-from palabra_ai.constant import QUEUE_MIN_TEMPO
-from palabra_ai.constant import WEBRTC_MODE_CHANNELS
-from palabra_ai.constant import WEBRTC_MODE_CHUNK_DURATION_MS
-from palabra_ai.constant import WEBRTC_MODE_SAMPLE_RATE
-from palabra_ai.constant import WS_MODE_CHANNELS
-from palabra_ai.constant import WS_MODE_CHUNK_DURATION_MS
-from palabra_ai.constant import WS_MODE_SAMPLE_RATE
 from palabra_ai.exc import ConfigurationError
 from palabra_ai.lang import Language, is_valid_source_language, is_valid_target_language
 from palabra_ai.message import Message
@@ -108,11 +107,15 @@ LanguageField = Annotated[
 ]
 
 SourceLanguageField = Annotated[
-    Language, BeforeValidator(validate_source_language), PlainSerializer(serialize_language)
+    Language,
+    BeforeValidator(validate_source_language),
+    PlainSerializer(serialize_language),
 ]
 
 TargetLanguageField = Annotated[
-    Language, BeforeValidator(validate_target_language), PlainSerializer(serialize_language)
+    Language,
+    BeforeValidator(validate_target_language),
+    PlainSerializer(serialize_language),
 ]
 
 
@@ -478,7 +481,7 @@ class Config(BaseModel):
         if "input_stream" in data and "mode" not in data:
             source = data.get("input_stream", {}).get("source", {})
             source_type = source.get("type")
-            
+
             if source_type == "webrtc":
                 # WebrtcMode with default parameters
                 data["mode"] = WebrtcMode()
@@ -490,7 +493,7 @@ class Config(BaseModel):
                     num_channels=source.get("channels", WS_MODE_CHANNELS),
                     # chunk_duration_ms will use default WS_MODE_CHUNK_DURATION_MS
                 )
-            
+
             # Remove input/output streams as they are generated from mode
             data.pop("input_stream", None)
             data.pop("output_stream", None)

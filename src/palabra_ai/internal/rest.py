@@ -62,9 +62,7 @@ class PalabraRESTClient:
         self.base_url = base_url
         self.timeout = timeout
 
-    async def create_session(
-        self, subscriber_count: int = 0
-    ) -> SessionCredentials:
+    async def create_session(self, subscriber_count: int = 0) -> SessionCredentials:
         """
         Create a new streaming session
         """

@@ -5,8 +5,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Union
 import orjson
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
 
-from palabra_ai.enum import Channel, Direction
-from palabra_ai.enum import Kind
+from palabra_ai.enum import Channel, Direction, Kind
 from palabra_ai.exc import ApiError, ApiValidationError, TaskNotFoundError
 from palabra_ai.lang import Language
 from palabra_ai.util.logger import debug
@@ -52,6 +51,7 @@ class Dbg:
     @classmethod
     def now_ts(cls):
         return get_utc_ts()
+
 
 @dataclass
 class KnownRaw:
@@ -360,16 +360,19 @@ class ErrorMessage(Message):
                         if isinstance(err, dict):
                             loc = err.get("loc", [])
                             msg = err.get("msg", "validation error")
-                            loc_str = " -> ".join(str(l) for l in loc) if loc else "unknown"
+                            loc_str = (
+                                " -> ".join(str(l) for l in loc) if loc else "unknown"
+                            )
                             error_msgs.append(f"{loc_str}: {msg}")
                     error_str = "; ".join(error_msgs)
                 elif isinstance(desc, str) and desc.startswith("ValidationError"):
                     # Server returns string representation of ValidationError
                     # Extract errors from the string like "ValidationError(model='...', errors=[...])"
-                    import re
                     import ast
+                    import re
+
                     error_msgs = []
-                    
+
                     # Try to extract the errors list from the string
                     match = re.search(r"errors=(\[.*?\])", desc)
                     if match:
@@ -377,31 +380,50 @@ class ErrorMessage(Message):
                             # Parse the errors list
                             errors_str = match.group(1)
                             # Replace enum representations to make it parseable
-                            errors_str = re.sub(r"<[^>]+>", lambda m: f"'{m.group()}'", errors_str)
+                            errors_str = re.sub(
+                                r"<[^>]+>", lambda m: f"'{m.group()}'", errors_str
+                            )
                             errors = ast.literal_eval(errors_str)
-                            
+
                             for err in errors:
                                 if isinstance(err, dict):
                                     loc = err.get("loc", [])
                                     msg = err.get("msg", "validation error")
                                     # Clean up the message
                                     if "permitted:" in msg:
-                                        msg = msg.replace("value is not a valid enumeration member; ", "")
-                                    loc_str = " -> ".join(str(l) for l in loc) if loc else "unknown"
+                                        msg = msg.replace(
+                                            "value is not a valid enumeration member; ",
+                                            "",
+                                        )
+                                    loc_str = (
+                                        " -> ".join(str(l) for l in loc)
+                                        if loc
+                                        else "unknown"
+                                    )
                                     error_msgs.append(f"{loc_str}: {msg}")
                         except Exception:
                             # If parsing fails, use a simpler extraction
                             # Extract basic info from the string
                             if "'denoise'" in desc:
-                                error_msgs.append("pipeline -> transcription -> denoise: must be 'none', 'alpha', or 'beta'")
+                                error_msgs.append(
+                                    "pipeline -> transcription -> denoise: must be 'none', 'alpha', or 'beta'"
+                                )
                             if "'priority'" in desc:
-                                error_msgs.append("pipeline -> transcription -> priority: must be 'speed', 'normal', or 'quality'")
+                                error_msgs.append(
+                                    "pipeline -> transcription -> priority: must be 'speed', 'normal', or 'quality'"
+                                )
                             if not error_msgs:
                                 # Fallback to showing the raw desc but cleaned up
-                                error_str = desc.replace("ValidationError(", "").replace(")", "")
+                                error_str = desc.replace(
+                                    "ValidationError(", ""
+                                ).replace(")", "")
                                 error_msgs.append(error_str)
-                    
-                    error_str = "Config validation error:\n  " + "\n  ".join(error_msgs) if error_msgs else str(desc)
+
+                    error_str = (
+                        "Config validation error:\n  " + "\n  ".join(error_msgs)
+                        if error_msgs
+                        else str(desc)
+                    )
                 else:
                     error_str = str(desc)
                 obj._exc = ApiValidationError(error_str)

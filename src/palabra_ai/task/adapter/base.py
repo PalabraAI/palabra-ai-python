@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 from palabra_ai.audio import AudioBuffer
 from palabra_ai.constant import SLEEP_INTERVAL_DEFAULT, SLEEP_INTERVAL_LONG
 from palabra_ai.task.base import Task, TaskEvent
-from palabra_ai.util.logger import trace
+from palabra_ai.util.logger import debug, trace
 
 if TYPE_CHECKING:
     from palabra_ai.audio import AudioFrame
@@ -33,6 +33,10 @@ class Reader(Task):
     async def do(self):
         while not self.stopper and not self.eof:
             await asyncio.sleep(SLEEP_INTERVAL_DEFAULT)
+
+    def do_preprocess(self):
+        """Override in subclasses that need preprocessing."""
+        debug(f"{self.__class__.__name__}: no preprocessing needed")
 
     @abc.abstractmethod
     async def read(self, size: int) -> bytes | None:

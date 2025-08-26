@@ -1,13 +1,6 @@
 from __future__ import annotations
-from __future__ import annotations
 
-from typing import Optional
-from typing import Optional
-
-from pydantic import BaseModel
-from pydantic import BaseModel
-from pydantic import ConfigDict
-from pydantic import Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class LogData(BaseModel):
@@ -25,5 +18,5 @@ class LogData(BaseModel):
 class RunResult(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
     ok: bool
-    exc: Optional[BaseException] = None
-    log_data: Optional[LogData] = Field(default=None, repr=False)
+    exc: BaseException | None = None
+    log_data: LogData | None = Field(default=None, repr=False)
