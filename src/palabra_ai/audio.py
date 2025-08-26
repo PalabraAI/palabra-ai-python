@@ -17,7 +17,7 @@ from palabra_ai.util.orjson import from_json, to_json
 class AudioFrame:
     """Lightweight AudioFrame replacement with __slots__ for performance"""
 
-    __slots__ = ("data", "sample_rate", "num_channels", "samples_per_channel", "_dbg")
+    __slots__ = ("data", "sample_rate", "num_channels", "samples_per_channel", "_dbg", "original_msg_data")
 
     def __init__(
         self,
@@ -25,6 +25,7 @@ class AudioFrame:
         sample_rate: int,
         num_channels: int,
         samples_per_channel: int,
+        original_msg_data: Optional[dict] = None,
     ):
         if isinstance(data, bytes):
             # Convert bytes to numpy array
@@ -34,6 +35,7 @@ class AudioFrame:
 
         self.sample_rate = sample_rate
         self.num_channels = num_channels
+        self.original_msg_data = original_msg_data
 
         if samples_per_channel is None:
             self.samples_per_channel = len(self.data) // num_channels
@@ -133,6 +135,7 @@ class AudioFrame:
                 sample_rate=sample_rate,
                 num_channels=num_channels,
                 samples_per_channel=samples_per_channel,
+                original_msg_data=msg.get("data"),
             )
         except Exception as e:
             error(f"Failed to decode audio data: {e}")
@@ -165,15 +168,22 @@ class AudioFrame:
         )
 
     def to_bench(self):
-        return {
+        result = {
             "message_type": "__$bench_audio_frame",
-            "data": {
+            "__dbg": {
                 "size": len(self.data),
                 "sample_rate": self.sample_rate,
                 "num_channels": self.num_channels,
                 "samples_per_channel": self.samples_per_channel,
             },
+            "data": self.original_msg_data or {}
         }
+        
+        # Replace base64 audio data with "..." to avoid log pollution
+        if "data" in result["data"] and isinstance(result["data"]["data"], str):
+            result["data"]["data"] = "..."
+        
+        return result
 
 
 @dataclass
