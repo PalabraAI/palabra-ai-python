@@ -361,7 +361,9 @@ class ErrorMessage(Message):
                             loc = err.get("loc", [])
                             msg = err.get("msg", "validation error")
                             loc_str = (
-                                " -> ".join(str(l) for l in loc) if loc else "unknown"
+                                " -> ".join(str(_loc) for _loc in loc)
+                                if loc
+                                else "unknown"
                             )
                             error_msgs.append(f"{loc_str}: {msg}")
                     error_str = "; ".join(error_msgs)
