@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 import aiohttp
 from palabra_ai.internal.rest import SessionCredentials, PalabraRESTClient
-from palabra_ai.exc import ConfigurationError
+from palabra_ai.exc import ConfigurationError, InvalidCredentialsError
 
 class TestSessionCredentials:
     """Test SessionCredentials model"""
@@ -373,4 +373,28 @@ class TestPalabraRESTClient:
                 with pytest.raises(aiohttp.ClientResponseError):
                     await client.create_session()
                 
+                mock_session.close.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_create_session_invalid_credentials(self):
+        """Test 404 response raises InvalidCredentialsError"""
+        client = PalabraRESTClient("invalid_client_id", "invalid_client_secret")
+        
+        with patch('aiohttp.ClientSession') as mock_session_class:
+            mock_session = AsyncMock()
+            mock_session_class.return_value = mock_session
+            
+            mock_response = AsyncMock()
+            mock_response.status = 404
+            mock_session.post.return_value = mock_response
+            
+            with patch('ssl.create_default_context'), \
+                 patch('aiohttp.TCPConnector'):
+                
+                with pytest.raises(InvalidCredentialsError) as exc_info:
+                    await client.create_session()
+                
+                assert "Invalid API credentials" in str(exc_info.value)
+                assert "PALABRA_CLIENT_ID" in str(exc_info.value)
+                assert "PALABRA_CLIENT_SECRET" in str(exc_info.value)
                 mock_session.close.assert_called_once()

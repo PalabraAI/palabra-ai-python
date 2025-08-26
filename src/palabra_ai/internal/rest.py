@@ -7,7 +7,7 @@ import aiohttp
 import certifi
 from pydantic import BaseModel, Field
 
-from palabra_ai.exc import ConfigurationError
+from palabra_ai.exc import ConfigurationError, InvalidCredentialsError
 from palabra_ai.util.logger import error, warning
 
 
@@ -90,6 +90,12 @@ class PalabraRESTClient:
                 },
             )
 
+            # Check for invalid credentials (404 typically means invalid client_id/client_secret)
+            if response.status == 404:
+                raise InvalidCredentialsError(
+                    "Invalid API credentials. Please check your PALABRA_CLIENT_ID and PALABRA_CLIENT_SECRET."
+                )
+            
             response.raise_for_status()
             body = await response.json()
             assert body["ok"] is True, "Request has failed"
