@@ -10,12 +10,8 @@ from palabra_ai.lang import Language
 from palabra_ai.exc import ApiValidationError
 
 
-def test_benchmark_runner_with_base_config(monkeypatch):
+def test_benchmark_runner_with_base_config():
     """Test BenchmarkRunner with base_config parameter"""
-    # Set environment variables for PalabraAI
-    monkeypatch.setenv("PALABRA_CLIENT_ID", "test_client_id")
-    monkeypatch.setenv("PALABRA_CLIENT_SECRET", "test_client_secret")
-    
     # Create a mock base config with source and target languages
     base_config = Config(
         source=SourceLang(lang="es"),
@@ -30,9 +26,12 @@ def test_benchmark_runner_with_base_config(monkeypatch):
         f.write(b"dummy audio data")
     
     try:
-        # Mock librosa to avoid actual audio loading
-        with patch('palabra_ai.benchmark.runner.librosa.load') as mock_load:
+        # Mock librosa and PalabraAI to avoid actual audio loading and client creation
+        with patch('palabra_ai.benchmark.runner.librosa.load') as mock_load, \
+             patch('palabra_ai.benchmark.runner.PalabraAI') as mock_palabra:
+            
             mock_load.return_value = ([0.0] * 1000, 16000)  # 1000 samples at 16kHz
+            mock_palabra.return_value = Mock()  # Mock PalabraAI instance
             
             runner = BenchmarkRunner(
                 audio_file=audio_file,
@@ -53,21 +52,20 @@ def test_benchmark_runner_with_base_config(monkeypatch):
         Path(audio_file).unlink()
 
 
-def test_benchmark_runner_without_base_config(monkeypatch):
+def test_benchmark_runner_without_base_config():
     """Test BenchmarkRunner without base_config (backward compatibility)"""
-    # Set environment variables for PalabraAI
-    monkeypatch.setenv("PALABRA_CLIENT_ID", "test_client_id")
-    monkeypatch.setenv("PALABRA_CLIENT_SECRET", "test_client_secret")
-    
     # Create temp audio file
     with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
         audio_file = f.name
         f.write(b"dummy audio data")
     
     try:
-        # Mock librosa to avoid actual audio loading
-        with patch('palabra_ai.benchmark.runner.librosa.load') as mock_load:
+        # Mock librosa and PalabraAI to avoid actual audio loading and client creation
+        with patch('palabra_ai.benchmark.runner.librosa.load') as mock_load, \
+             patch('palabra_ai.benchmark.runner.PalabraAI') as mock_palabra:
+            
             mock_load.return_value = ([0.0] * 1000, 16000)
+            mock_palabra.return_value = Mock()  # Mock PalabraAI instance
             
             runner = BenchmarkRunner(
                 audio_file=audio_file,
