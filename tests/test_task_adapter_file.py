@@ -20,8 +20,9 @@ class TestFileReader:
         
         reader = FileReader(path=test_file)
         assert reader.path == test_file
-        assert reader._pcm_data is None
         assert reader._position == 0
+        assert reader._preprocessed == False
+        assert reader._buffer is not None
     
     def test_init_with_string_path(self, tmp_path):
         """Test initialization with string path"""
@@ -38,60 +39,76 @@ class TestFileReader:
         
         assert "File not found" in str(exc_info.value)
     
-    @pytest.mark.asyncio
+    @pytest.mark.asyncio 
     async def test_boot_success(self, tmp_path):
-        """Test successful boot"""
+        """Test boot does nothing - preprocessing happens in do_preprocess"""
         test_file = tmp_path / "test.wav"
         test_file.write_bytes(b"dummy audio data")
         
         reader = FileReader(path=test_file)
-        reader.cfg = MagicMock()
-        reader.cfg.mode.sample_rate = 16000
         
-        mock_pcm_data = b"converted pcm data"
-        
-        with patch('palabra_ai.task.adapter.file.read_from_disk', new_callable=AsyncMock) as mock_read:
-            with patch('palabra_ai.task.adapter.file.convert_any_to_pcm16') as mock_convert:
-                with patch('palabra_ai.task.adapter.file.debug') as mock_debug:
-                    mock_read.return_value = b"dummy audio data"
-                    mock_convert.return_value = mock_pcm_data
-                    
-                    await reader.boot()
-                    
-                    mock_read.assert_called_once_with(test_file)
-                    mock_convert.assert_called_once_with(b"dummy audio data", sample_rate=16000)
-                    assert reader._pcm_data == mock_pcm_data
-                    assert mock_debug.call_count >= 3
+        with patch('palabra_ai.task.adapter.file.debug') as mock_debug:
+            await reader.boot()
+            mock_debug.assert_called_once_with("FileReader boot: audio ready for reading")
     
-    @pytest.mark.asyncio
-    async def test_boot_conversion_error(self, tmp_path):
-        """Test boot with conversion error"""
+    def test_do_preprocess_with_preprocessing(self, tmp_path):
+        """Test do_preprocess with preprocessing=True"""
         test_file = tmp_path / "test.wav"
         test_file.write_bytes(b"dummy audio data")
         
-        reader = FileReader(path=test_file)
+        reader = FileReader(path=test_file, preprocess=True)
         reader.cfg = MagicMock()
         reader.cfg.mode.sample_rate = 16000
         
-        with patch('palabra_ai.task.adapter.file.read_from_disk', new_callable=AsyncMock) as mock_read:
-            with patch('palabra_ai.task.adapter.file.convert_any_to_pcm16') as mock_convert:
-                with patch('palabra_ai.task.adapter.file.error') as mock_error:
-                    mock_read.return_value = b"dummy audio data"
-                    mock_convert.side_effect = RuntimeError("Conversion failed")
-                    
-                    with pytest.raises(RuntimeError):
-                        await reader.boot()
-                    
-                    mock_error.assert_called_once()
+        with patch.object(reader, '_preprocess_audio') as mock_preprocess:
+            with patch('palabra_ai.task.adapter.file.debug') as mock_debug:
+                reader.do_preprocess()
+                
+                mock_preprocess.assert_called_once()
+                assert mock_debug.call_count >= 2
+    
+    def test_do_preprocess_streaming_mode(self, tmp_path):
+        """Test do_preprocess with preprocessing=False (streaming)"""
+        test_file = tmp_path / "test.wav"
+        test_file.write_bytes(b"dummy audio data")
+        
+        reader = FileReader(path=test_file, preprocess=False)
+        reader.cfg = MagicMock()
+        reader.cfg.mode.sample_rate = 16000
+        
+        with patch('palabra_ai.task.adapter.file.av.open') as mock_open:
+            with patch('palabra_ai.task.adapter.file.create_audio_resampler') as mock_resampler:
+                # Setup mocks
+                mock_container = MagicMock()
+                mock_stream = MagicMock()
+                mock_stream.type = "audio"
+                mock_stream.duration = 1000
+                mock_stream.time_base = 0.001
+                mock_stream.codec.name = "mp3"
+                mock_stream.sample_rate = 44100
+                mock_stream.channels = 2
+                mock_stream.codec_context.thread_type = MagicMock()
+                
+                mock_open.return_value = mock_container
+                mock_container.streams = [mock_stream]
+                mock_container.decode.return_value = iter([])
+                
+                reader.do_preprocess()
+                
+                assert reader._container is not None
+                assert reader._target_rate == 16000
+                mock_resampler.assert_called_once_with(16000)
     
     @pytest.mark.asyncio
-    async def test_read_normal(self, tmp_path):
-        """Test normal read operation"""
-        test_file = tmp_path / "test.wav"
+    async def test_read_preprocessed_mode(self, tmp_path):
+        """Test read in preprocessed mode"""
+        test_file = tmp_path / "test.wav" 
         test_file.write_bytes(b"dummy")
         
         reader = FileReader(path=test_file)
-        reader._pcm_data = b"test audio data"
+        reader._preprocessed = True
+        reader._buffer.append(b"test ")
+        reader._buffer.append(b"audio data")
         reader.ready = TaskEvent()
         +reader.ready
         
@@ -106,14 +123,32 @@ class TestFileReader:
         assert reader._position == 10
     
     @pytest.mark.asyncio
+    async def test_read_streaming_mode(self, tmp_path):
+        """Test read in streaming mode"""
+        test_file = tmp_path / "test.wav"
+        test_file.write_bytes(b"dummy")
+        
+        reader = FileReader(path=test_file)
+        reader._preprocessed = False
+        reader._buffer.append(b"stream data")
+        reader.ready = TaskEvent()
+        +reader.ready
+        
+        with patch.object(reader, '_ensure_buffer_has_data', new_callable=AsyncMock) as mock_ensure:
+            chunk = await reader.read(6)
+            assert chunk == b"stream"
+            assert reader._position == 6
+            mock_ensure.assert_called_once_with(6)
+    
+    @pytest.mark.asyncio
     async def test_read_at_eof(self, tmp_path):
         """Test read at EOF"""
         test_file = tmp_path / "test.wav"
         test_file.write_bytes(b"dummy")
         
         reader = FileReader(path=test_file)
-        reader._pcm_data = b"test"
-        reader._position = 4  # At end
+        reader._preprocessed = True
+        # Empty buffer = EOF
         reader.ready = TaskEvent()
         +reader.ready
         reader.eof = TaskEvent()
@@ -124,54 +159,25 @@ class TestFileReader:
             assert reader.eof.is_set()
             mock_debug.assert_called_once()
     
-    @pytest.mark.asyncio
-    async def test_read_partial(self, tmp_path):
-        """Test reading partial data at end"""
+    @pytest.mark.asyncio 
+    async def test_exit_with_stats(self, tmp_path):
+        """Test exit logs processing stats"""
         test_file = tmp_path / "test.wav"
         test_file.write_bytes(b"dummy")
         
         reader = FileReader(path=test_file)
-        reader._pcm_data = b"test data"
-        reader._position = 5  # At "data"
-        reader.ready = TaskEvent()
-        +reader.ready
-        
-        chunk = await reader.read(10)
-        assert chunk == b"data"
-        assert reader._position == 9
-    
-    @pytest.mark.asyncio
-    async def test_exit_with_eof(self, tmp_path):
-        """Test exit when EOF reached"""
-        test_file = tmp_path / "test.wav"
-        test_file.write_bytes(b"dummy")
-        
-        reader = FileReader(path=test_file)
-        reader.eof = TaskEvent()
-        +reader.eof
-        reader._position = 100
+        reader._position = 16000 * 2 * 5  # 5 seconds at 16kHz, 16-bit
+        reader._target_rate = 16000
+        reader._total_duration = 10.0  # 10 seconds total
+        reader._container = MagicMock()
         
         with patch('palabra_ai.task.adapter.file.debug') as mock_debug:
             await reader.exit()
             
-            # Should log EOF reached
-            assert any("reached EOF" in str(call) for call in mock_debug.call_args_list)
-    
-    @pytest.mark.asyncio
-    async def test_exit_without_eof(self, tmp_path):
-        """Test exit when EOF not reached"""
-        test_file = tmp_path / "test.wav"
-        test_file.write_bytes(b"dummy")
-        
-        reader = FileReader(path=test_file)
-        reader.eof = TaskEvent()
-        reader._position = 50
-        
-        with patch('palabra_ai.task.adapter.file.debug') as mock_debug:
-            await reader.exit()
-            
-            # Should log stopped without EOF
-            assert any("without reaching EOF" in str(call) for call in mock_debug.call_args_list)
+            # Should log processing stats
+            debug_calls = [str(call) for call in mock_debug.call_args_list]
+            assert any("processed" in call and "5.0s" in call for call in debug_calls)
+            assert any("50.0%" in call for call in debug_calls)
 
 
 class TestFileWriter:

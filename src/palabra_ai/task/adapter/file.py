@@ -178,6 +178,7 @@ class FileReader(Reader):
     async def boot(self):
         # Nothing to do - preprocess() already handled everything
         debug("FileReader boot: audio ready for reading")
+        +self.ready # noqa
 
     async def exit(self):
         seconds_processed = self._position / (self._target_rate * BYTES_PER_SAMPLE)

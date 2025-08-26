@@ -116,40 +116,37 @@ def test_resample_pcm_different_rates(mock_resample):
     assert len(result_array) == 2
 
 
-@patch('palabra_ai.internal.audio.av')
+@patch('palabra_ai.internal.audio.open_audio_container')
+@patch('palabra_ai.internal.audio.create_pcm_output_container')
+@patch('palabra_ai.internal.audio.process_audio_frames')
+@patch('palabra_ai.internal.audio.flush_filters_and_encoder')
 @patch('palabra_ai.internal.audio.time.perf_counter')
-def test_convert_any_to_pcm16_simple(mock_time, mock_av):
+def test_convert_any_to_pcm16_simple(mock_time, mock_flush, mock_process, 
+                                     mock_create_output, mock_open_container):
     """Test convert_any_to_pcm16 without normalization"""
     mock_time.side_effect = [0.0, 0.1]  # Start and end time
     
-    # Mock AV components
+    # Mock components
     mock_input_container = MagicMock()
     mock_output_container = MagicMock()
-    mock_stream = MagicMock()
-    mock_frame = MagicMock()
-    mock_resampled_frame = MagicMock()
-    mock_packet = MagicMock()
+    mock_output_stream = MagicMock()
+    mock_output_buffer = MagicMock()
     
     # Setup mocks
-    mock_av.open.side_effect = [mock_input_container, mock_output_container]
-    mock_output_container.add_stream.return_value = mock_stream
-    mock_av.AudioResampler.return_value.resample.return_value = [mock_resampled_frame]
-    mock_input_container.decode.return_value = [mock_frame]
-    mock_stream.encode.return_value = [mock_packet]
-    
-    # Mock output buffer
-    mock_output_buffer = MagicMock()
+    mock_open_container.return_value = (mock_input_container, MagicMock())
+    mock_create_output.return_value = (mock_output_container, mock_output_stream)
+    mock_process.return_value = 100  # Mock dts value
     mock_output_buffer.read.return_value = b"converted audio"
-    mock_av.open.side_effect = [mock_input_container, mock_output_container]
     
-    with patch('palabra_ai.internal.audio.BytesIO') as mock_bytesio:
-        mock_bytesio.return_value = mock_output_buffer
-        
-        result = convert_any_to_pcm16(b"input audio", 16000, "mono", normalize=False)
-        
-        assert result == b"converted audio"
-        mock_stream.encode.assert_called()
-        mock_output_container.mux.assert_called()
+    with patch('palabra_ai.internal.audio.BytesIO', return_value=mock_output_buffer):
+        with patch('palabra_ai.internal.audio.av.AudioResampler'):
+            result = convert_any_to_pcm16(b"input audio", 16000, "mono", normalize=False)
+            
+            assert result == b"converted audio"
+            mock_open_container.assert_called_once()
+            mock_create_output.assert_called_once()
+            mock_process.assert_called_once()
+            mock_flush.assert_called_once()
 
 
 def test_pull_until_blocked():
