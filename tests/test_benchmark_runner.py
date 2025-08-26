@@ -26,9 +26,12 @@ def test_benchmark_runner_with_base_config():
         f.write(b"dummy audio data")
     
     try:
-        # Mock librosa to avoid actual audio loading
-        with patch('palabra_ai.benchmark.runner.librosa.load') as mock_load:
+        # Mock librosa and PalabraAI to avoid actual audio loading and client creation
+        with patch('palabra_ai.benchmark.runner.librosa.load') as mock_load, \
+             patch('palabra_ai.benchmark.runner.PalabraAI') as mock_palabra:
+            
             mock_load.return_value = ([0.0] * 1000, 16000)  # 1000 samples at 16kHz
+            mock_palabra.return_value = Mock()  # Mock PalabraAI instance
             
             runner = BenchmarkRunner(
                 audio_file=audio_file,
@@ -57,9 +60,12 @@ def test_benchmark_runner_without_base_config():
         f.write(b"dummy audio data")
     
     try:
-        # Mock librosa to avoid actual audio loading
-        with patch('palabra_ai.benchmark.runner.librosa.load') as mock_load:
+        # Mock librosa and PalabraAI to avoid actual audio loading and client creation
+        with patch('palabra_ai.benchmark.runner.librosa.load') as mock_load, \
+             patch('palabra_ai.benchmark.runner.PalabraAI') as mock_palabra:
+            
             mock_load.return_value = ([0.0] * 1000, 16000)
+            mock_palabra.return_value = Mock()  # Mock PalabraAI instance
             
             runner = BenchmarkRunner(
                 audio_file=audio_file,
@@ -210,9 +216,12 @@ def test_validation_error_parsing():
     assert isinstance(error_msg._exc, ApiValidationError)
     
     error_str = str(error_msg._exc)
-    assert "Config validation error" in error_str
-    assert "denoise: must be 'none', 'alpha', or 'beta'" in error_str or "denoise" in error_str
-    assert "priority: must be 'speed', 'normal', or 'quality'" in error_str or "priority" in error_str
+    # Our simplified approach just returns the string as-is
+    assert "ValidationError" in error_str
+    assert "denoise" in error_str
+    assert "priority" in error_str
+    assert "'none', 'alpha', 'beta'" in error_str
+    assert "'speed', 'normal', 'quality'" in error_str
 
 
 def test_config_with_correct_enum_values():
