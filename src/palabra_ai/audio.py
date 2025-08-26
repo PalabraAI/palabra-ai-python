@@ -17,7 +17,14 @@ from palabra_ai.util.orjson import from_json, to_json
 class AudioFrame:
     """Lightweight AudioFrame replacement with __slots__ for performance"""
 
-    __slots__ = ("data", "sample_rate", "num_channels", "samples_per_channel", "_dbg", "original_msg_data")
+    __slots__ = (
+        "data",
+        "sample_rate",
+        "num_channels",
+        "samples_per_channel",
+        "_dbg",
+        "original_msg_data",
+    )
 
     def __init__(
         self,
@@ -25,7 +32,7 @@ class AudioFrame:
         sample_rate: int,
         num_channels: int,
         samples_per_channel: int,
-        original_msg_data: Optional[dict] = None,
+        original_msg_data: dict | None = None,
     ):
         if isinstance(data, bytes):
             # Convert bytes to numpy array
@@ -176,13 +183,13 @@ class AudioFrame:
                 "num_channels": self.num_channels,
                 "samples_per_channel": self.samples_per_channel,
             },
-            "data": self.original_msg_data or {}
+            "data": self.original_msg_data or {},
         }
-        
+
         # Replace base64 audio data with "..." to avoid log pollution
         if "data" in result["data"] and isinstance(result["data"]["data"], str):
             result["data"]["data"] = "..."
-        
+
         return result
 
 
