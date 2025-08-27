@@ -29,10 +29,12 @@ class FanoutQueue(Generic[T]):
         if isinstance(subscriber, str):
             return subscriber
         elif isinstance(subscriber, object):
-            # Use the object's id if it's not a string
+            # Include queue instance ID to avoid collisions between different queues
+            queue_id = id(self)
+            subscriber_id = id(subscriber)
             if name := getattr(subscriber, "name", None):
-                return f"{name}_{id(subscriber)}"
-            return f"{type(subscriber)}_{id(subscriber)}"
+                return f"{name}_{subscriber_id}_{queue_id}"
+            return f"{type(subscriber)}_{subscriber_id}_{queue_id}"
         else:
             raise TypeError(
                 f"Subscriber must be a string or an object, got: {type(subscriber)}"
@@ -132,10 +134,10 @@ class FanoutQueue(Generic[T]):
                         break
                     # Otherwise continue waiting
 
-        debug(f"Starting subscriber {subscriber_id}")
+        debug(f"Starting subscriber {subscriber_id} for queue {type(self).__name__}")
 
         # Subscribe
-        _ = self.subscribe(subscriber_id, maxsize=0)
+        _ = self.subscribe(subscriber, maxsize=0)
         subscription = self.subscribers[subscriber_id]
         generator = message_generator(subscription)
 

@@ -200,9 +200,12 @@ class Io(Task):
         return await super()._exit()
 
     async def set_task(self):
+        debug(f"set_task() STARTED for {self.name} id={id(self)}")
         debug("Setting task configuration...")
         await aio.sleep(SLEEP_INTERVAL_LONG)
+        debug(f"set_task() creating receiver for {self.name} id={id(self)}")
         async with self.out_msg_foq.receiver(self, self.stopper) as msgs_out:
+            debug(f"set_task() receiver created for {self.name}")
             await self.push_in_msg(SetTaskMessage.from_config(self.cfg))
             start_time = time.perf_counter()
             await aio.sleep(SLEEP_INTERVAL_LONG)
@@ -210,14 +213,19 @@ class Io(Task):
                 await self.push_in_msg(GetTaskMessage())
                 msg = await anext(msgs_out)
                 if isinstance(msg, CurrentTaskMessage):
-                    debug(f"Received current task: {msg.data}")
+                    debug(f"set_task() SUCCESS: Received current task: {msg.data}")
                     return
                 # Handle error messages from server
                 from palabra_ai.message import ErrorMessage
 
                 if isinstance(msg, ErrorMessage):
                     debug(f"Received error from server: {msg.data}")
-                    msg.raise_()  # This will raise the appropriate exception
+                    # Don't immediately fail on NOT_FOUND - it may be temporary
+                    if msg.data.get("data", {}).get("code") == "NOT_FOUND":
+                        debug("Got NOT_FOUND error, will retry...")
+                    else:
+                        # For other errors, raise immediately
+                        msg.raise_()
                 debug(f"Received unexpected message: {msg}")
                 await aio.sleep(SLEEP_INTERVAL_LONG)
         debug("Timeout waiting for task configuration")

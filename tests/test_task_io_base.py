@@ -7,7 +7,7 @@ from palabra_ai.task.io.base import Io
 from palabra_ai.audio import AudioFrame
 from palabra_ai.enum import Channel, Direction
 from palabra_ai.message import (
-    Message, EndTaskMessage, SetTaskMessage, GetTaskMessage, CurrentTaskMessage
+    Message, EndTaskMessage, SetTaskMessage, GetTaskMessage, CurrentTaskMessage, ErrorMessage
 )
 from palabra_ai.constant import BYTES_PER_SAMPLE, SLEEP_INTERVAL_LONG
 from palabra_ai.util.fanout_queue import FanoutQueue
@@ -244,6 +244,96 @@ class TestIo:
                 # Check debug messages
                 assert any("Setting task configuration" in str(call) for call in mock_debug.call_args_list)
                 assert any("Received current task" in str(call) for call in mock_debug.call_args_list)
+    
+    @pytest.mark.asyncio
+    async def test_set_task_not_found_error_retry(self, mock_config, mock_credentials, mock_reader, mock_writer):
+        """Test set_task handles NOT_FOUND errors and retries"""
+        io = ConcreteIo(
+            cfg=mock_config,
+            credentials=mock_credentials,
+            reader=mock_reader,
+            writer=mock_writer
+        )
+        
+        io.push_in_msg = AsyncMock()
+        
+        # Mock subscription to return NOT_FOUND error then success
+        async def mock_receiver():
+            # First return NOT_FOUND error
+            error_msg = ErrorMessage(
+                message_type="error",
+                timestamp=0.0,
+                raw={"data": {"code": "NOT_FOUND", "desc": "No active task found"}},
+                data={"data": {"code": "NOT_FOUND", "desc": "No active task found"}}
+            )
+            yield error_msg
+            
+            # Then return success
+            yield CurrentTaskMessage(timestamp=0.0, data={"task": "test"})
+        
+        with patch.object(io.out_msg_foq, 'receiver') as mock_receiver_ctx:
+            mock_receiver_ctx.return_value.__aenter__.return_value = mock_receiver()
+            
+            with patch('palabra_ai.task.io.base.debug') as mock_debug:
+                await io.set_task()
+                
+                # Verify NOT_FOUND was logged but didn't cause immediate failure
+                debug_calls = [str(call) for call in mock_debug.call_args_list]
+                assert any("Got NOT_FOUND error, will retry" in call for call in debug_calls)
+                assert any("set_task() SUCCESS" in call for call in debug_calls)
+    
+    @pytest.mark.asyncio
+    async def test_set_task_other_error_immediate_failure(self, mock_config, mock_credentials, mock_reader, mock_writer):
+        """Test set_task raises immediately for non-NOT_FOUND errors"""
+        io = ConcreteIo(
+            cfg=mock_config,
+            credentials=mock_credentials,
+            reader=mock_reader,
+            writer=mock_writer
+        )
+        
+        io.push_in_msg = AsyncMock()
+        
+        # Mock subscription to return other error
+        async def mock_receiver():
+            error_msg = MagicMock(spec=ErrorMessage)
+            error_msg.data = {"data": {"code": "SERVER_ERROR", "desc": "Internal server error"}}
+            error_msg.raise_ = MagicMock(side_effect=RuntimeError("Server error"))
+            yield error_msg
+        
+        with patch.object(io.out_msg_foq, 'receiver') as mock_receiver_ctx:
+            mock_receiver_ctx.return_value.__aenter__.return_value = mock_receiver()
+            
+            with pytest.raises(RuntimeError, match="Server error"):
+                await io.set_task()
+    
+    @pytest.mark.asyncio
+    async def test_set_task_debug_logging(self, mock_config, mock_credentials, mock_reader, mock_writer):
+        """Test set_task produces expected debug messages"""
+        io = ConcreteIo(
+            cfg=mock_config,
+            credentials=mock_credentials,
+            reader=mock_reader,
+            writer=mock_writer
+        )
+        
+        io.push_in_msg = AsyncMock()
+        
+        # Mock subscription to return success immediately
+        async def mock_receiver():
+            yield CurrentTaskMessage(timestamp=0.0, data={"task": "test"})
+        
+        with patch.object(io.out_msg_foq, 'receiver') as mock_receiver_ctx:
+            mock_receiver_ctx.return_value.__aenter__.return_value = mock_receiver()
+            
+            with patch('palabra_ai.task.io.base.debug') as mock_debug:
+                await io.set_task()
+                
+                # Check for new debug messages
+                debug_calls = [str(call) for call in mock_debug.call_args_list]
+                assert any("set_task() STARTED" in call for call in debug_calls)
+                assert any("set_task() creating receiver" in call for call in debug_calls)
+                assert any("set_task() receiver created" in call for call in debug_calls)
     
     @pytest.mark.asyncio
     async def test_set_task_timeout(self, mock_config, mock_credentials, mock_reader, mock_writer):
