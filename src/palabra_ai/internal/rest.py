@@ -8,6 +8,7 @@ import certifi
 from pydantic import BaseModel, Field
 
 from palabra_ai.exc import ConfigurationError, InvalidCredentialsError
+from palabra_ai.util.logger import debug
 from palabra_ai.util.logger import error, warning
 
 
@@ -100,7 +101,9 @@ class PalabraRESTClient:
             body = await response.json()
             assert body["ok"] is True, "Request has failed"
 
-            return SessionCredentials.model_validate(body["data"])
+            result = SessionCredentials.model_validate(body["data"])
+            debug(f"Session {result.id} created")
+            return result
 
         except asyncio.CancelledError:
             warning("PalabraRESTClient create_session cancelled")
@@ -148,6 +151,7 @@ class PalabraRESTClient:
             )
 
             response.raise_for_status()
+            debug(f"Session {session_id} deleted")
 
         except asyncio.CancelledError:
             warning("PalabraRESTClient delete_session cancelled")
