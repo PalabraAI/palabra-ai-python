@@ -418,6 +418,7 @@ class Config(BaseModel):
     deep_debug: bool = Field(default=DEEP_DEBUG, exclude=True)
     timeout: int = Field(default=TIMEOUT, exclude=True)  # TODO!
     trace_file: Path | str | None = Field(default=None, exclude=True)
+    drop_empty_frames: bool = Field(default=False, exclude=True)
 
     def __init__(
         self,

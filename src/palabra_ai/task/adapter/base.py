@@ -93,12 +93,12 @@ class BufferedWriter(Writer):
 
     _: KW_ONLY
     ab: AudioBuffer | None = field(default=None, init=False)
-    drop_empty_frames: bool = field(default=False)
 
     async def boot(self):
         self.ab = AudioBuffer(
             sample_rate=self.cfg.mode.sample_rate,
             num_channels=self.cfg.mode.num_channels,
+            drop_empty_frames=self.cfg.drop_empty_frames,
         )
 
     async def write(self, frame: AudioFrame):
