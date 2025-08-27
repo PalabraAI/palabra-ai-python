@@ -182,3 +182,5 @@ class WebrtcIo(Io):
             await shutdown(
                 self.room.local_participant.unpublish_track(self.in_track.sid)
             )
+        if self.room:
+            await shutdown(self.room.disconnect())
