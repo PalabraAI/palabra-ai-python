@@ -18,7 +18,7 @@ from palabra_ai.message import (
 )
 from palabra_ai.task.io.base import Io
 from palabra_ai.util.aio import shutdown
-from palabra_ai.util.logger import debug
+from palabra_ai.util.logger import debug, error
 
 PALABRA_PEER_PREFIX = "palabra_translator_"
 PALABRA_TRACK_PREFIX = "translation_"
@@ -141,15 +141,23 @@ class WebrtcIo(Io):
         return await self.in_audio_source.capture_frame(frame.to_rtc())
 
     async def boot(self):
+        debug(f"WebrtcIo.boot() STARTED for {self.name} id={id(self)}")
         await self.room.connect(
             self.credentials.webrtc_url, self.credentials.jwt_token, self.room_options
         )
         self.room.on("data_received", self.on_data_received)
         lang = self.cfg.targets[0].lang  # TODO: many langs
         self.peer = await self.peer_appears()
+        debug(f"WebrtcIo.boot() creating in_msg_sender task for {self.name}")
         self.sub_tg.create_task(self.in_msg_sender(), name="Io:in_msg_sender")
 
-        await self.set_task()
+        debug(f"WebrtcIo.boot() calling set_task() for {self.name}")
+        try:
+            await self.set_task()
+            debug(f"WebrtcIo.boot() set_task() completed for {self.name}")
+        except Exception as e:
+            error(f"WebrtcIo.boot() set_task() FAILED: {e}", exc_info=True)
+            raise
 
         self.in_track_name = self.in_track_name or f"{uuid.uuid4()}_{lang.code}"
         # noinspection PyTypeChecker

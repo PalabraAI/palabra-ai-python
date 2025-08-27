@@ -26,20 +26,29 @@ class TestFanoutQueue:
         obj = MagicMock()
         obj.name = "test_object"
         subscriber_id = self.queue._get_id(obj)
+        # Should include name, object id, and queue id
         assert subscriber_id.startswith("test_object_")
+        assert str(id(obj)) in subscriber_id
+        assert str(id(self.queue)) in subscriber_id
     
     def test_get_id_object_without_name(self):
         """Test _get_id with object without name attribute"""
         obj = MagicMock()
         del obj.name  # Remove name attribute
         subscriber_id = self.queue._get_id(obj)
+        # Should include type name, object id, and queue id
         assert "MagicMock" in subscriber_id
+        assert str(id(obj)) in subscriber_id
+        assert str(id(self.queue)) in subscriber_id
     
     def test_get_id_integer(self):
         """Test _get_id with integer (which is an object in Python)"""
         # In Python, integers are objects, so this should work
         subscriber_id = self.queue._get_id(123)
-        assert "<class 'int'>_" in subscriber_id  # Should contain type name and id
+        # Should contain type name, object id, and queue id
+        assert "<class 'int'>_" in subscriber_id
+        assert str(id(123)) in subscriber_id
+        assert str(id(self.queue)) in subscriber_id
     
     def test_is_subscribed(self):
         """Test is_subscribed method"""
@@ -257,3 +266,29 @@ class TestFanoutQueue:
         
         # Check subscriber was cleaned up
         assert "test_subscriber" not in self.queue.subscribers
+    
+    def test_queue_collision_prevention(self):
+        """Test that multiple queues with same subscriber don't collide"""
+        queue1 = FanoutQueue()
+        queue2 = FanoutQueue()
+        
+        # Same object subscribed to both queues
+        obj = MagicMock()
+        obj.name = "test_obj"
+        
+        # Subscribe to both queues
+        sub1 = queue1.subscribe(obj)
+        sub2 = queue2.subscribe(obj)
+        
+        # Should create different subscriber IDs due to queue ID inclusion
+        assert sub1.id_ != sub2.id_
+        assert str(id(queue1)) in sub1.id_
+        assert str(id(queue2)) in sub2.id_
+        
+        # Publish to each queue
+        queue1.publish("msg1")
+        queue2.publish("msg2")
+        
+        # Each should receive only its own message
+        assert sub1.q.get_nowait() == "msg1"
+        assert sub2.q.get_nowait() == "msg2"
