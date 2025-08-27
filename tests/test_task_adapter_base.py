@@ -49,9 +49,8 @@ class ConcreteBufferedWriter(BufferedWriter):
     """Concrete implementation of BufferedWriter for testing"""
     
     def __init__(self, *args, **kwargs):
-        # Get cfg and drop_empty_frames before calling super
+        # Get cfg before calling super
         cfg = kwargs.pop('cfg', None)
-        drop_empty_frames = kwargs.get('drop_empty_frames', False)
         
         # Initialize fields manually instead of calling super().__init__()
         self.cfg = cfg
@@ -71,7 +70,6 @@ class ConcreteBufferedWriter(BufferedWriter):
         self._sub_tasks = []
         # BufferedWriter specific fields
         self.ab = None
-        self.drop_empty_frames = drop_empty_frames
     
     async def boot(self):
         """Mock boot implementation"""
@@ -79,6 +77,7 @@ class ConcreteBufferedWriter(BufferedWriter):
         self.ab = AudioBuffer(
             sample_rate=self.cfg.mode.sample_rate,
             num_channels=self.cfg.mode.num_channels,
+            drop_empty_frames=self.cfg.drop_empty_frames,
         )
     
     async def write(self, frame):
@@ -132,6 +131,7 @@ def mock_config():
     config.mode = MagicMock()
     config.mode.sample_rate = 16000
     config.mode.num_channels = 1
+    config.drop_empty_frames = False
     return config
 
 
@@ -293,13 +293,13 @@ class TestBufferedWriter:
         writer = ConcreteBufferedWriter(cfg=mock_config)
         
         assert writer.ab is None
-        assert writer.drop_empty_frames is False
     
     def test_init_with_drop_empty(self, mock_config):
-        """Test BufferedWriter with drop_empty_frames"""
-        writer = ConcreteBufferedWriter(cfg=mock_config, drop_empty_frames=True)
+        """Test BufferedWriter with drop_empty_frames via config"""
+        mock_config.drop_empty_frames = True
+        writer = ConcreteBufferedWriter(cfg=mock_config)
         
-        assert writer.drop_empty_frames is True
+        assert writer.cfg.drop_empty_frames is True
     
     @pytest.mark.asyncio
     async def test_boot(self, mock_config):
