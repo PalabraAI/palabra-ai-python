@@ -23,6 +23,7 @@ class Library:
     name: str = "palabra_ai"
     level: int = field(default=INFO)
     handlers: list = field(default_factory=list)
+    _original_console_filter: callable = field(default=None, init=False)
 
     def __call__(self, level: int):
         self.level = level
@@ -74,8 +75,11 @@ class Library:
         if 0 in logger._core.handlers:
             # Modify existing default handler
             handler = logger._core.handlers[0]
-            original_filter = handler._filter
-            handler._filter = self.create_console_filter(original_filter)
+            # Save original filter on first call to prevent recursion
+            if self._original_console_filter is None:
+                self._original_console_filter = handler._filter
+            # Always use the saved original filter to avoid recursion
+            handler._filter = self.create_console_filter(self._original_console_filter)
         else:
             # No default handler, create our own
             h_id = logger.add(
