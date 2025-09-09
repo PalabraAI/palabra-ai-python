@@ -133,8 +133,8 @@ pip install palabra-ai
 
 1. Set up your API credentials:
    ```bash
-   export PALABRA_API_KEY=your_key_here
-   export PALABRA_API_SECRET=your_secret_here
+   export PALABRA_CLIENT_KEY=your_key_here
+   export PALABRA_CLIENT_SECRET=your_secret_here
    ```
 
 2. Try the [Quick Start](../README.md#quick-start) example

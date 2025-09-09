@@ -82,8 +82,8 @@ palabra.run(cfg)
 
 ⚙️ **Set your API credentials as environment variables:**
 ```bash
-export PALABRA_API_KEY=your_api_key
-export PALABRA_API_SECRET=your_api_secret
+export PALABRA_CLIENT_KEY=your_api_key
+export PALABRA_CLIENT_SECRET=your_api_secret
 ```
 
 ## Examples 💡
