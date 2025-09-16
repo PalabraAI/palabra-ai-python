@@ -146,7 +146,7 @@ class RunAsPipe:
 
     def _cleanup(self):
         """Clean up process"""
-        if self._closed:
+        if getattr(self, "_closed", False):
             return
 
         self._closed = True

@@ -52,24 +52,31 @@ def test_run_without_loop():
 
     client = PalabraAI(client_id="test", client_secret="test")
 
-    with patch('asyncio.get_running_loop') as mock_get_loop:
-        mock_get_loop.side_effect = RuntimeError("No running loop")
+    # Mock the async context manager directly to avoid coroutine creation
+    with patch.object(client, 'process') as mock_process:
+        mock_manager = MagicMock()
+        mock_manager.logger = None
+        mock_async_context = AsyncMock()
+        mock_async_context.__aenter__.return_value = mock_manager
+        mock_async_context.__aexit__.return_value = None
+        mock_process.return_value = mock_async_context
 
-        with patch('aioshutdown.SIGTERM'), \
-             patch('aioshutdown.SIGHUP'), \
-             patch('aioshutdown.SIGINT'):
+        with patch('asyncio.get_running_loop') as mock_get_loop:
+            mock_get_loop.side_effect = RuntimeError("No running loop")
 
-            # Mock the shutdown loop
-            with patch('palabra_ai.client.SIGTERM') as mock_sigterm:
-                mock_context = Mock()
-                mock_context.run_until_complete = Mock()
-                mock_sigterm.__or__ = Mock(return_value=Mock(__enter__=Mock(return_value=mock_context), __exit__=Mock()))
+            with patch('asyncio.new_event_loop') as mock_new_loop, \
+                 patch('asyncio.set_event_loop') as mock_set_loop:
 
-                # This would normally run the event loop
-                try:
+                mock_loop = MagicMock()
+                mock_loop.run_until_complete = MagicMock(return_value=MagicMock(ok=True))
+                mock_loop.close = MagicMock()
+                mock_new_loop.return_value = mock_loop
+
+                with patch('palabra_ai.client.SIGTERM'), \
+                     patch('palabra_ai.client.SIGHUP'), \
+                     patch('palabra_ai.client.SIGINT'):
+
                     client.run(config)
-                except:
-                    pass  # We're just testing the setup
 
 def test_run_with_uvloop():
     """Test run method with uvloop available"""
@@ -265,9 +272,9 @@ async def test_process_with_credentials_creation():
             mock_manager_class.return_value = MagicMock(return_value=mock_manager)
 
             with patch('asyncio.TaskGroup') as mock_tg_class:
-                mock_tg = AsyncMock()
-                mock_tg.__aenter__.return_value = mock_tg
-                mock_tg.__aexit__.return_value = None
+                mock_tg = MagicMock()
+                mock_tg.__aenter__ = AsyncMock(return_value=mock_tg)
+                mock_tg.__aexit__ = AsyncMock(return_value=None)
                 mock_tg_class.return_value = mock_tg
 
                 async with client.process(config) as manager:
@@ -435,10 +442,13 @@ def test_run_without_signal_handlers():
             mock_new_loop.return_value = mock_loop
 
             with patch.object(client, 'process') as mock_process:
-                mock_manager = AsyncMock()
-                mock_manager.task = AsyncMock()
+                mock_manager = MagicMock()
+                mock_manager.task = MagicMock()
                 mock_manager.logger = None
-                mock_process.return_value.__aenter__.return_value = mock_manager
+                mock_async_context = AsyncMock()
+                mock_async_context.__aenter__.return_value = mock_manager
+                mock_async_context.__aexit__.return_value = None
+                mock_process.return_value = mock_async_context
 
                 result = client.run(config, without_signal_handlers=True)
 

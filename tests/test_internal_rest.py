@@ -213,7 +213,7 @@ class TestPalabraRESTClient:
             mock_session_class.return_value = mock_session
 
             mock_response = AsyncMock()
-            mock_response.raise_for_status.return_value = None
+            mock_response.raise_for_status = MagicMock()
             mock_response.json.return_value = response_data
             mock_session.post.return_value = mock_response
 
@@ -251,7 +251,7 @@ class TestPalabraRESTClient:
             mock_session_class.return_value = mock_session
 
             mock_response = AsyncMock()
-            mock_response.raise_for_status.return_value = None
+            mock_response.raise_for_status = MagicMock()
             mock_response.json.return_value = response_data
             mock_session.post.return_value = mock_response
 
@@ -323,7 +323,7 @@ class TestPalabraRESTClient:
             mock_session_class.return_value = mock_session
 
             mock_response = AsyncMock()
-            mock_response.raise_for_status.return_value = None
+            mock_response.raise_for_status = MagicMock()
             mock_response.json.return_value = response_data
             mock_session.post.return_value = mock_response
 
