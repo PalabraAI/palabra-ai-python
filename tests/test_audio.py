@@ -290,32 +290,24 @@ def test_audio_buffer_init():
 
     assert buffer.sample_rate == 16000
     assert buffer.num_channels == 1
-    assert buffer.drop_empty_frames is False
-    assert isinstance(buffer.b, io.BytesIO)
-
-def test_audio_buffer_init_with_drop_empty():
-    """Test AudioBuffer with drop_empty_frames"""
-    buffer = AudioBuffer(sample_rate=16000, num_channels=1, drop_empty_frames=True)
-
-    assert buffer.drop_empty_frames is True
 
 def test_audio_buffer_to_wav_bytes_empty():
     """Test to_wav_bytes with empty buffer"""
     buffer = AudioBuffer(sample_rate=16000, num_channels=1)
 
-    with patch('palabra_ai.util.logger.warning') as mock_warning:
-        wav_bytes = buffer.to_wav_bytes()
+    wav_bytes = buffer.to_wav_bytes()
 
-        assert wav_bytes == b""
-        mock_warning.assert_called_once_with("Buffer is empty, returning empty WAV data")
+    # Should return proper WAV file format with zero data
+    assert wav_bytes.startswith(b'RIFF')
+    assert b'WAVEfmt' in wav_bytes
 
 def test_audio_buffer_to_wav_bytes_with_data():
     """Test to_wav_bytes with data in buffer"""
     buffer = AudioBuffer(sample_rate=16000, num_channels=1)
 
-    # Write some data to buffer
-    data = b"\x01\x00\x02\x00\x03\x00\x04\x00"
-    buffer.b.write(data)
+    # Write some data directly to the audio array
+    import numpy as np
+    buffer.audio_array[0:4] = np.array([1, 2, 3, 4], dtype=np.int16)
 
     wav_bytes = buffer.to_wav_bytes()
 
@@ -333,45 +325,47 @@ async def test_audio_buffer_write():
 
     await buffer.write(frame)
 
-    assert buffer.b.getvalue() == b"\x01\x00\x02\x00\x03\x00\x04\x00"
+    # Check that data was written to the audio array
+    assert buffer.audio_array[0] == 1
+    assert buffer.audio_array[1] == 2
+    assert buffer.audio_array[2] == 3
+    assert buffer.audio_array[3] == 4
 
 @pytest.mark.asyncio
-async def test_audio_buffer_write_drop_empty():
-    """Test writing empty frame with drop_empty_frames=True"""
-    buffer = AudioBuffer(sample_rate=16000, num_channels=1, drop_empty_frames=True)
+async def test_audio_buffer_write_timing():
+    """Test writing AudioFrame with timing info"""
+    buffer = AudioBuffer(sample_rate=16000, num_channels=1)
+    buffer.set_start_time(1000.0)  # Set start time
 
-    # Create frame with all zeros
-    data = np.zeros(4, dtype=np.int16)
-    frame = AudioFrame(data=data, sample_rate=16000, num_channels=1, samples_per_channel=4)
+    data = np.array([1, 2, 3, 4], dtype=np.int16)
+    frame = AudioFrame(data=data, sample_rate=16000, num_channels=1, samples_per_channel=4, perf_ts=1000.5)
 
     await buffer.write(frame)
 
-    # Buffer should be empty
-    assert buffer.b.getvalue() == b""
+    # Data should be written at calculated position based on timing
+    # Check that some data was written (exact position depends on timing calculation)
+    assert np.any(buffer.audio_array != 0)
 
 @pytest.mark.asyncio
-async def test_audio_buffer_write_non_empty_with_drop():
-    """Test writing non-empty frame with drop_empty_frames=True"""
-    buffer = AudioBuffer(sample_rate=16000, num_channels=1, drop_empty_frames=True)
+async def test_audio_buffer_write_positioning():
+    """Test writing frame data with proper positioning"""
+    buffer = AudioBuffer(sample_rate=16000, num_channels=1)
 
     data = np.array([1, 0, 0, 0], dtype=np.int16)
     frame = AudioFrame(data=data, sample_rate=16000, num_channels=1, samples_per_channel=4)
 
     await buffer.write(frame)
 
-    # Buffer should contain data
-    assert buffer.b.getvalue() == b"\x01\x00\x00\x00\x00\x00\x00\x00"
+    # Check that data was written to the audio array
+    assert buffer.audio_array[0] == 1
+    assert buffer.audio_array[1] == 0
+    assert buffer.audio_array[2] == 0
+    assert buffer.audio_array[3] == 0
 
-def test_audio_buffer_replace_buffer():
-    """Test replacing buffer"""
-    buffer = AudioBuffer(sample_rate=16000, num_channels=1)
+def test_audio_buffer_duration():
+    """Test buffer duration calculations"""
+    buffer = AudioBuffer(sample_rate=16000, num_channels=1, original_duration=30.0)
 
-    # Write initial data
-    buffer.b.write(b"initial")
-
-    # Replace with new buffer
-    new_buffer = io.BytesIO(b"replaced")
-    buffer.replace_buffer(new_buffer)
-
-    assert buffer.b is new_buffer
-    assert buffer.b.getvalue() == b"replaced"
+    # Should have created array for 30s + 60s buffer = 90s total
+    expected_samples = int(90 * 16000)  # 90 seconds at 16kHz
+    assert len(buffer.audio_array) == expected_samples

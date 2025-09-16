@@ -19,7 +19,8 @@ def test_dbg_creation():
     assert dbg.kind == Kind.AUDIO
     assert dbg.ch == Channel.WS
     assert dbg.dir == Direction.IN
-    assert isinstance(dbg.ts, float)
+    assert isinstance(dbg.perf_ts, float)
+    assert isinstance(dbg.utc_ts, float)
 
 
 def test_dbg_empty():
@@ -28,7 +29,8 @@ def test_dbg_empty():
     assert dbg.kind is None
     assert dbg.ch is None
     assert dbg.dir is None
-    assert isinstance(dbg.ts, float)
+    assert isinstance(dbg.perf_ts, float)
+    assert isinstance(dbg.utc_ts, float)
 
 
 def test_known_raw_creation():

@@ -143,7 +143,7 @@ def analyze_latency(messages: List[Dict[str, Any]]) -> Dict[str, Any]:
 
             direction = msg.get("dir")
             chunk_num = msg.get("num")
-            timestamp = msg.get("perf_ts") or msg.get("utc_ts") or msg.get("ts")
+            timestamp = msg.get("perf_ts") or msg.get("utc_ts")
             rms_db = msg.get("rms_db")
 
             if chunk_num is not None and timestamp is not None and timestamp > 0:
@@ -190,7 +190,7 @@ def analyze_latency(messages: List[Dict[str, Any]]) -> Dict[str, Any]:
             continue
 
         msg_type = msg.get("msg", {}).get("message_type")
-        msg_ts = msg.get("perf_ts") or msg.get("utc_ts") or msg.get("ts")
+        msg_ts = msg.get("perf_ts") or msg.get("utc_ts")
         data = msg.get("msg", {}).get("data", {})
 
         if msg_type in ["partial_transcription", "validated_transcription", "translated_transcription"]:
@@ -278,7 +278,7 @@ def analyze_latency(messages: List[Dict[str, Any]]) -> Dict[str, Any]:
             if transcription_id:
                 # Store first OUT audio chunk for each transcription_id
                 if transcription_id not in out_audio_by_transcription_id:
-                    out_audio_ts = msg.get("perf_ts") or msg.get("utc_ts") or msg.get("ts")
+                    out_audio_ts = msg.get("perf_ts") or msg.get("utc_ts")
                     if out_audio_ts:
                         out_audio_by_transcription_id[transcription_id] = out_audio_ts
 
