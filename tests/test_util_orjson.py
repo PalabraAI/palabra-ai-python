@@ -12,7 +12,7 @@ class DictModel:
     def __init__(self, name, value):
         self.name = name
         self.value = value
-    
+
     def dict(self):
         return {"name": self.name, "value": self.value}
 
@@ -20,7 +20,7 @@ class DictModel:
 class CustomObject:
     def __init__(self, data):
         self.data = data
-    
+
     def __str__(self):
         return f"CustomObject({self.data})"
 
@@ -45,7 +45,7 @@ def test_to_json_sort_keys():
     """Test to_json with sorted keys"""
     result = to_json({"b": 2, "a": 1}, sort_keys=True)
     assert result == b'{"a":1,"b":2}'
-    
+
     result = to_json({"b": 2, "a": 1}, sort_keys=False)
     # Order might vary, just check both keys are present
     assert b'"a":1' in result
@@ -102,13 +102,13 @@ def test_default_exception_handling():
     class BadObject:
         def model_dump(self):
             raise ValueError("Cannot dump")
-        
+
         def dict(self):
             raise ValueError("Cannot dict")
-        
+
         def __str__(self):
             return "BadObject"
-    
+
     obj = BadObject()
     # Should fall back to str() after exceptions
     result = _default(obj)
@@ -127,10 +127,10 @@ def test_to_json_with_complex_objects():
             "key": "value"
         }
     }
-    
+
     result = to_json(data)
     parsed = from_json(result)
-    
+
     assert parsed["pydantic"] == {"name": "test", "value": 123}
     assert parsed["dict_model"] == {"name": "test2", "value": 456}
     assert "CustomObject(data)" in parsed["custom"]

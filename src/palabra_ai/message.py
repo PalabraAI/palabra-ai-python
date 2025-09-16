@@ -10,7 +10,7 @@ from palabra_ai.exc import ApiError, ApiValidationError, TaskNotFoundError
 from palabra_ai.lang import Language
 from palabra_ai.util.logger import debug
 from palabra_ai.util.orjson import from_json
-from palabra_ai.util.timing import get_utc_ts
+from palabra_ai.util.timing import get_perf_ts, get_utc_ts
 
 if TYPE_CHECKING:
     from palabra_ai.config import Config
@@ -29,28 +29,29 @@ class Dbg:
     kind: Kind | None
     ch: Channel | None
     dir: Direction | None
-    ts: float = field(default_factory=get_utc_ts)
+    perf_ts: float = field(default_factory=get_perf_ts)
+    utc_ts: float = field(default_factory=get_utc_ts)
     idx: int | None = field(default=None)
     num: int | None = field(default=None)
     chunk_duration_ms: float | None = field(default=None)
-    relative_audio_time_ms: float | None = field(default=None)
-    rms: float | None = field(default=None)
-
-    def __post_init__(self):
-        self.calc_relative_audio_time_ms()
-
-    def calc_relative_audio_time_ms(self) -> float | None:
-        if self.kind == Kind.AUDIO and self.num is not None and self.chunk_duration_ms:
-            self.relative_audio_time_ms = self.chunk_duration_ms * self.num
+    rms_db: float | None = field(default=None)
 
     @classmethod
     def empty(cls):
         """Create an empty debug object"""
-        return cls(kind=None, ch=None, dir=None, ts=get_utc_ts())
+        return cls(kind=None, ch=None, dir=None)
+
+    @property
+    def delta(self) -> float:
+        return get_perf_ts() - self.perf_ts
 
     @classmethod
-    def now_ts(cls):
+    def now_utc_ts(cls):
         return get_utc_ts()
+
+    @classmethod
+    def now_perf_ts(cls):
+        return get_perf_ts()
 
 
 @dataclass
@@ -97,6 +98,12 @@ class Message(BaseModel):
     STR_TRANSCRIPTION_TYPES: ClassVar[set[str]] = {
         mt.value for mt in TRANSCRIPTION_TYPES
     }
+
+    @property
+    def dbg_delta(self) -> str:
+        if self._dbg:
+            return str(self._dbg.delta)
+        return "n/a"
 
     @classmethod
     def get_transcription_message_types(cls) -> set["Message.Type"]:

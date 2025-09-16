@@ -48,16 +48,16 @@ def test_language_equality():
     lang1 = Language.get_or_create("es")
     lang2 = Language.get_or_create("es")
     lang3 = Language.get_or_create("en")
-    
+
     assert lang1 == lang2
     assert lang1 != lang3
     assert lang1 == "es"  # Can compare with string if language exists
-    
+
     # Test error when comparing with unknown string
     with pytest.raises(TypeError) as exc_info:
         lang1 == "unknown_lang"
     assert "Cannot compare Language with unknown language code" in str(exc_info.value)
-    
+
     # Test error when comparing with non-string
     with pytest.raises(TypeError) as exc_info:
         lang1 == 123
@@ -94,7 +94,7 @@ def test_predefined_languages():
         "ja": "🇯🇵",
         "zh": "🇨🇳",
     }
-    
+
     for code, flag in languages.items():
         lang = Language.get_or_create(code)
         assert lang.bcp47 == code
@@ -106,7 +106,7 @@ def test_language_code_normalization():
     # Should handle uppercase
     lang = Language.get_or_create("ES")
     assert lang.code == "es"
-    
+
     # Should handle mixed case
     lang = Language.get_or_create("Es")
     assert lang.code == "es"
@@ -115,21 +115,21 @@ def test_language_code_normalization():
 def test_language_registry():
     """Test LanguageRegistry functionality"""
     registry = LanguageRegistry()
-    
+
     # Create and register a language
     lang = Language("test", registry=registry, flag="🏴")
     assert lang.code == "test"
     assert registry.by_code["test"] == lang
     assert lang in registry.all_languages
-    
+
     # Get by BCP47
     found = registry.get_by_bcp47("test")
     assert found == lang
-    
+
     # Get or create existing
     existing = registry.get_or_create("test")
     assert existing == lang
-    
+
     # Get or create new
     new_lang = registry.get_or_create("new")
     assert new_lang.code == "new"
@@ -139,16 +139,16 @@ def test_language_registry():
 def test_valid_source_language():
     """Test source language validation"""
     from palabra_ai.lang import (
-        is_valid_source_language, 
+        is_valid_source_language,
         AR, BA, AZ, FIL, TH
     )
-    
+
     # Valid source languages
     assert is_valid_source_language(AR) is True  # Arabic can be source
     assert is_valid_source_language(EN) is True  # English can be source
     assert is_valid_source_language(BA) is True  # Bashkir can be source
     assert is_valid_source_language(TH) is True  # Thai can be source
-    
+
     # Invalid source languages
     assert is_valid_source_language(AZ) is False  # Azerbaijani cannot be source
     assert is_valid_source_language(FIL) is False  # Filipino cannot be source
@@ -160,13 +160,13 @@ def test_valid_target_language():
         is_valid_target_language,
         ES, EN_US, ZH_HANS, BA, TH, AZ
     )
-    
+
     # Valid target languages
     assert is_valid_target_language(ES) is True  # Spanish can be target
     assert is_valid_target_language(EN_US) is True  # English US can be target
     assert is_valid_target_language(ZH_HANS) is True  # Chinese Simplified can be target
     assert is_valid_target_language(AZ) is True  # Azerbaijani can be target
-    
+
     # Invalid target languages
     assert is_valid_target_language(BA) is False  # Bashkir cannot be target
     assert is_valid_target_language(TH) is False  # Thai cannot be target
@@ -178,12 +178,12 @@ def test_auto_detectable_language():
         is_auto_detectable_language,
         EN, ES, AR, BA, AZ
     )
-    
+
     # Auto-detectable languages
     assert is_auto_detectable_language(EN) is True
     assert is_auto_detectable_language(ES) is True
     assert is_auto_detectable_language(AR) is True
-    
+
     # Non auto-detectable languages
     assert is_auto_detectable_language(BA) is False  # Bashkir not in auto-detect
     assert is_auto_detectable_language(AZ) is False  # Azerbaijani not in auto-detect

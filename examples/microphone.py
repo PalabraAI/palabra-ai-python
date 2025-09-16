@@ -1,5 +1,4 @@
-from palabra_ai import (PalabraAI, Config, SourceLang, TargetLang,
-                        EN, ES, DeviceManager)
+from palabra_ai import EN, ES, Config, DeviceManager, PalabraAI, SourceLang, TargetLang
 
 if __name__ == "__main__":
     palabra = PalabraAI()

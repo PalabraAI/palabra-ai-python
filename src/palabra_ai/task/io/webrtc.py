@@ -19,6 +19,7 @@ from palabra_ai.message import (
 from palabra_ai.task.io.base import Io
 from palabra_ai.util.aio import shutdown
 from palabra_ai.util.logger import debug, error
+from palabra_ai.util.timing import get_perf_ts
 
 PALABRA_PEER_PREFIX = "palabra_translator_"
 PALABRA_TRACK_PREFIX = "translation_"
@@ -91,16 +92,18 @@ class WebrtcIo(Io):
         try:
             async for frame_ev in stream:
                 frame_ev: rtc.AudioFrameEvent
-                _dbg = Dbg(Kind.AUDIO, Channel.WEBRTC, Direction.OUT)
-                audio_frame = AudioFrame.from_rtc(frame_ev.frame)
-                self.writer.q.put_nowait(AudioFrame.from_rtc(frame_ev.frame))
+                perf_ts = get_perf_ts()
+                audio_frame = AudioFrame.from_rtc(frame_ev.frame, perf_ts=perf_ts)
+                self.writer.q.put_nowait(audio_frame)
                 if self.cfg.benchmark:
-                    _dbg.idx = next(self._idx)
-                    _dbg.num = next(self._out_audio_num)
-                    _dbg.chunk_duration_ms = self.cfg.mode.chunk_duration_ms
-                    _dbg.calc_relative_audio_time_ms()
-                    _dbg.rms = await aio.to_thread(self.calc_rms_db, audio_frame)
-                    audio_frame._dbg = _dbg
+                    audio_frame._dbg = Dbg(
+                        Kind.AUDIO,
+                        Channel.WEBRTC,
+                        Direction.OUT,
+                        idx=next(self._idx),
+                        num=next(self._out_audio_num),
+                        chunk_duration_ms=self.cfg.mode.chunk_duration_ms,
+                    )
                     self.bench_audio_foq.publish(audio_frame)
                 await aio.sleep(0)
                 if self.stopper or self.eof:
@@ -138,6 +141,7 @@ class WebrtcIo(Io):
         await self.room.local_participant.publish_data(msg_data, reliable=True)
 
     async def send_frame(self, frame: AudioFrame) -> None:
+        self.init_global_start_ts()
         return await self.in_audio_source.capture_frame(frame.to_rtc())
 
     async def boot(self):

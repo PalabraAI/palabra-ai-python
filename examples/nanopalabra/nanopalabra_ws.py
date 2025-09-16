@@ -18,9 +18,10 @@ import queue
 import signal
 import threading
 import time
+
+import httpx
 import numpy as np
 import sounddevice as sd
-import httpx
 import websockets
 
 
@@ -63,7 +64,7 @@ class SimpleWebSocket:
                     # Handle TTS audio
                     transcription_data = data.get("data", {})
                     audio_b64 = transcription_data.get("data", "")
-                    
+
                     if audio_b64:
                         try:
                             audio_data = base64.b64decode(audio_b64)
@@ -201,7 +202,12 @@ MINIMAL_SETTINGS = {
     },
     "output_stream": {
         "content_type": "audio",
-        "target": {"type": "ws", "format": "pcm_s16le", "sample_rate": 24000, "channels": 1},
+        "target": {
+            "type": "ws",
+            "format": "pcm_s16le",
+            "sample_rate": 24000,
+            "channels": 1,
+        },
     },
     "pipeline": {
         "preprocessing": {},

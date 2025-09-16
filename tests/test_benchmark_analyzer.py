@@ -57,14 +57,14 @@ def test_calculate_percentiles_multiple_values():
     """Test calculate_percentiles with multiple values"""
     data = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]
     result = calculate_percentiles(data)
-    
+
     assert result["min"] == 1.0
     assert result["max"] == 10.0
     assert result["count"] == 10
     assert result["mean"] == 5.5
     # The implementation uses int(n * percentile) for index calculation
     assert result["p50"] == 6.0  # index 5 -> value 6.0
-    assert result["p25"] == 3.0  # index 2 -> value 3.0  
+    assert result["p25"] == 3.0  # index 2 -> value 3.0
     assert result["p75"] == 8.0  # index 7 -> value 8.0
     assert result["p90"] == 10.0  # index 9 -> value 10.0
     assert result["p95"] == 10.0  # index 9 -> value 10.0

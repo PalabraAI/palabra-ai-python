@@ -8,4 +8,3 @@ lint: format check
 
 test:
 	uv run pytest
-

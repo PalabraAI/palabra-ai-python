@@ -1,5 +1,13 @@
-from palabra_ai import (PalabraAI, Config, SourceLang, TargetLang,
-                        FileReader, FileWriter, EN, ES)
+from palabra_ai import (
+    EN,
+    ES,
+    Config,
+    FileReader,
+    FileWriter,
+    PalabraAI,
+    SourceLang,
+    TargetLang,
+)
 
 if __name__ == "__main__":
     palabra = PalabraAI()
