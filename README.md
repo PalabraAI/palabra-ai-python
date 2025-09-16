@@ -82,8 +82,8 @@ palabra.run(cfg)
 
 ⚙️ **Set your API credentials as environment variables:**
 ```bash
-export PALABRA_API_KEY=your_api_key
-export PALABRA_API_SECRET=your_api_secret
+export PALABRA_CLIENT_ID=your_client_id
+export PALABRA_CLIENT_SECRET=your_client_secret
 ```
 
 ## Examples 💡
@@ -257,7 +257,7 @@ if reader and writer:
     palabra.run(config)
 ```
 
-### Async API ⚡
+### Async Context Manager ⚡
 
 ```python
 import asyncio
@@ -269,9 +269,11 @@ async def translate():
         source=SourceLang(EN, FileReader("input.mp3")),
         targets=[TargetLang(ES, FileWriter("output.wav"))]
     )
-    await palabra.run(config)
+    async with palabra.process(config) as manager:
+        await manager.task
 
-asyncio.run(translate())
+if __name__ == "__main__":
+    asyncio.run(translate())
 ```
 
 ## I/O Adapters & Mixing 🔌
@@ -448,7 +450,7 @@ from palabra_ai import (
 - ✅ GitHub Actions CI/CD
 - ✅ Docker packaging
 - ✅ Python 3.11, 3.12, 3.13 support
-- ✅ PyPI publication (coming soon)
+- ✅ PyPI publication
 - ✅ Documentation site (coming soon)
 - ⏳ Code coverage reporting (setup required)
 

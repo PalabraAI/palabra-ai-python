@@ -1,12 +1,12 @@
 [project]
 name = "palabra-ai"
-version = "0.4.5"
+version = "0.4.6"
 description = "Client library for Palabra AI's real-time speech translation, dubbing, and voice synthesis APIs across 25+ languages."
 readme = "README.md"
 authors = [
     { name = "Andrei Kobyshev", email = "a.kobyshev@palabra.ai" }
 ]
-requires-python = ">=3.11"
+requires-python = ">=3.11,<4.0"
 dependencies = [
     "aiofile>=3.8,<4",
     "aiohttp>=3.9,<4",

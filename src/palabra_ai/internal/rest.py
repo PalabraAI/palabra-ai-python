@@ -8,8 +8,7 @@ import certifi
 from pydantic import BaseModel, Field
 
 from palabra_ai.exc import ConfigurationError, InvalidCredentialsError
-from palabra_ai.util.logger import debug
-from palabra_ai.util.logger import error, warning
+from palabra_ai.util.logger import debug, error, warning
 
 
 class SessionCredentials(BaseModel):
