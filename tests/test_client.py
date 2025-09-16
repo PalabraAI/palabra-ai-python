@@ -356,47 +356,6 @@ async def test_process_with_exception_group():
 
                     assert "Error 1" in str(exc_info.value)
 
-@pytest.mark.skip(reason="CancelledError handling needs investigation")
-@pytest.mark.asyncio
-async def test_process_with_only_cancelled_errors():
-    """Test process handles exception group with only CancelledErrors"""
-    config = Config()
-    config.source = SourceLang(lang="es")
-    config.targets = [TargetLang(lang="en")]
-
-    client = PalabraAI(client_id="test", client_secret="test")
-
-    mock_credentials = MagicMock()
-
-    with patch('palabra_ai.client.PalabraRESTClient') as mock_rest_class:
-        mock_rest = AsyncMock()
-        mock_rest.create_session.return_value = mock_credentials
-        mock_rest_class.return_value = mock_rest
-
-        with patch('palabra_ai.client.Manager') as mock_manager_class:
-            mock_manager = MagicMock()
-            mock_manager_class.return_value = MagicMock(return_value=mock_manager)
-
-            with patch('asyncio.TaskGroup') as mock_tg_class:
-                mock_tg = AsyncMock()
-                mock_tg.__aenter__.return_value = mock_tg
-
-                # Create an exception group with only CancelledErrors
-                exc1 = asyncio.CancelledError()
-                exc2 = asyncio.CancelledError()
-                # CancelledError is special case - just use the first one
-                exc_group = exc1
-
-                # Simulate exception group in TaskGroup
-                mock_tg.__aexit__.side_effect = exc_group
-                mock_tg_class.return_value = mock_tg
-
-                with patch('palabra_ai.client.unwrap_exceptions') as mock_unwrap:
-                    mock_unwrap.return_value = [exc1, exc2]
-
-                    with pytest.raises(asyncio.CancelledError):
-                        async with client.process(config) as manager:
-                            pass
 
 @pytest.mark.asyncio
 async def test_process_finally_block():

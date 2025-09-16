@@ -79,9 +79,12 @@ class ConcreteBufferedWriter(BufferedWriter):
     async def boot(self):
         """Mock boot implementation"""
         from palabra_ai.audio import AudioBuffer
+        estimated_duration = getattr(self.cfg, "estimated_duration", 60.0)
         self.ab = AudioBuffer(
             sample_rate=self.cfg.mode.sample_rate,
             num_channels=self.cfg.mode.num_channels,
+            original_duration=estimated_duration,
+            drop_empty_frames=getattr(self.cfg, "drop_empty_frames", False),
         )
 
     async def write(self, frame):
@@ -342,3 +345,33 @@ class TestBufferedWriter:
 
         assert result == b"wav_data"
         writer.ab.to_wav_bytes.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_boot_with_drop_empty_frames(self):
+        """Test boot method passes drop_empty_frames config to AudioBuffer"""
+        from palabra_ai.config import Config, WsMode
+
+        # Create real config with drop_empty_frames=True
+        config = Config(drop_empty_frames=True, mode=WsMode())
+
+        writer = ConcreteBufferedWriter(cfg=config)
+        await writer.boot()
+
+        # Verify AudioBuffer was created with drop_empty_frames=True
+        assert writer.ab is not None
+        assert writer.ab.drop_empty_frames is True
+
+    @pytest.mark.asyncio
+    async def test_boot_without_drop_empty_frames(self):
+        """Test boot method defaults drop_empty_frames to False"""
+        from palabra_ai.config import Config, WsMode
+
+        # Create real config with drop_empty_frames=False (default)
+        config = Config(drop_empty_frames=False, mode=WsMode())
+
+        writer = ConcreteBufferedWriter(cfg=config)
+        await writer.boot()
+
+        # Verify AudioBuffer was created with drop_empty_frames=False
+        assert writer.ab is not None
+        assert writer.ab.drop_empty_frames is False

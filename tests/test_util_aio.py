@@ -19,25 +19,11 @@ async def test_boot_success():
     result = await boot(quick_task())
     assert result == "done"
 
-@pytest.mark.skip(reason="Temporarily disabled for coverage check")
-@pytest.mark.asyncio
-async def test_boot_timeout():
-    """Test boot with task that times out"""
-    with pytest.raises(asyncio.TimeoutError):
-        await boot(slow_task())
-
 @pytest.mark.asyncio
 async def test_shutdown_success():
     """Test shutdown with task that completes in time"""
     result = await shutdown(quick_task())
     assert result == "done"
-
-@pytest.mark.skip(reason="Temporarily disabled for coverage check")
-@pytest.mark.asyncio
-async def test_shutdown_timeout():
-    """Test shutdown with task that times out"""
-    with pytest.raises(asyncio.TimeoutError):
-        await shutdown(slow_task())
 
 @pytest.mark.asyncio
 async def test_any_event():

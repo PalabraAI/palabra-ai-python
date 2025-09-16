@@ -251,25 +251,6 @@ class TestManager:
 
         assert mock_task.stopper.is_set()
 
-    @pytest.mark.skip(reason="Temporarily disabled for coverage check")
-    @pytest.mark.asyncio
-    async def test_shutdown_task_timeout(self):
-        """Test shutdown_task with timeout"""
-        manager = Manager(cfg=self.mock_config, credentials=self.mock_credentials)
-
-        # Create mock task that times out
-        mock_task = MagicMock()
-        mock_task.name = "test_task"
-        mock_task.stopper = TaskEvent()
-
-        async def hanging_task():
-            await asyncio.sleep(10)
-
-        mock_task._task = asyncio.create_task(hanging_task())
-
-        await manager.shutdown_task(mock_task, timeout=0.1)
-
-        assert mock_task._task.cancelled()
 
     @pytest.mark.asyncio
     async def test_graceful_exit(self):

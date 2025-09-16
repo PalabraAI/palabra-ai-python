@@ -282,6 +282,7 @@ class AudioBuffer:
     sample_rate: int
     num_channels: int
     original_duration: float = field(default=60.0)  # Default 60s buffer
+    drop_empty_frames: bool = field(default=False)
     audio_array: np.ndarray = field(default=None, init=False)
     last_audio_end_position: int = field(default=0, init=False)
     global_start_time: float | None = field(default=None, init=False)
@@ -332,6 +333,10 @@ class AudioBuffer:
             audio_samples = np.frombuffer(frame.data, dtype=np.int16)
         else:
             audio_samples = frame.data
+
+        # Skip empty frames if drop_empty_frames is enabled
+        if self.drop_empty_frames and np.all(audio_samples == 0):
+            return
 
         # Calculate position like file2file
         if self.global_start_time is not None and frame.perf_ts is not None:

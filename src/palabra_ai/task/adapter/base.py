@@ -112,6 +112,7 @@ class BufferedWriter(Writer):
             sample_rate=self.cfg.mode.sample_rate,
             num_channels=self.cfg.mode.num_channels,
             original_duration=estimated_duration,
+            drop_empty_frames=getattr(self.cfg, "drop_empty_frames", False),
         )
 
     async def write(self, frame: AudioFrame):

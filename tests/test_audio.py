@@ -369,3 +369,78 @@ def test_audio_buffer_duration():
     # Should have created array for 30s + 60s buffer = 90s total
     expected_samples = int(90 * 16000)  # 90 seconds at 16kHz
     assert len(buffer.audio_array) == expected_samples
+
+
+def test_audio_buffer_init_with_drop_empty():
+    """Test AudioBuffer with drop_empty_frames enabled"""
+    buffer = AudioBuffer(sample_rate=16000, num_channels=1, drop_empty_frames=True)
+
+    assert buffer.sample_rate == 16000
+    assert buffer.num_channels == 1
+    assert buffer.drop_empty_frames is True
+
+
+@pytest.mark.asyncio
+async def test_audio_buffer_write_drop_empty_frames():
+    """Test writing empty frame with drop_empty_frames=True"""
+    buffer = AudioBuffer(sample_rate=16000, num_channels=1, drop_empty_frames=True)
+
+    # Create frame with all zeros (empty)
+    data = np.zeros(4, dtype=np.int16)
+    frame = AudioFrame(data=data, sample_rate=16000, num_channels=1, samples_per_channel=4)
+
+    await buffer.write(frame)
+
+    # Buffer should remain empty (no data written)
+    assert np.all(buffer.audio_array == 0)
+
+
+@pytest.mark.asyncio
+async def test_audio_buffer_write_keep_empty_frames():
+    """Test writing empty frame with drop_empty_frames=False (default)"""
+    buffer = AudioBuffer(sample_rate=16000, num_channels=1, drop_empty_frames=False)
+
+    # Create frame with all zeros (empty)
+    data = np.zeros(4, dtype=np.int16)
+    frame = AudioFrame(data=data, sample_rate=16000, num_channels=1, samples_per_channel=4)
+
+    await buffer.write(frame)
+
+    # Buffer should contain the zeros (data was written)
+    assert buffer.audio_array[0] == 0
+    assert buffer.audio_array[1] == 0
+    assert buffer.audio_array[2] == 0
+    assert buffer.audio_array[3] == 0
+    assert buffer.last_audio_end_position == 4
+
+
+@pytest.mark.asyncio
+async def test_audio_buffer_write_mixed_frames_with_drop():
+    """Test writing mixed empty and non-empty frames with drop_empty_frames=True"""
+    buffer = AudioBuffer(sample_rate=16000, num_channels=1, drop_empty_frames=True)
+
+    # Write non-empty frame first
+    non_empty_data = np.array([1, 2, 3, 4], dtype=np.int16)
+    non_empty_frame = AudioFrame(data=non_empty_data, sample_rate=16000, num_channels=1, samples_per_channel=4)
+    await buffer.write(non_empty_frame)
+
+    # Write empty frame (should be dropped)
+    empty_data = np.zeros(4, dtype=np.int16)
+    empty_frame = AudioFrame(data=empty_data, sample_rate=16000, num_channels=1, samples_per_channel=4)
+    await buffer.write(empty_frame)
+
+    # Write another non-empty frame
+    non_empty_data2 = np.array([5, 6, 7, 8], dtype=np.int16)
+    non_empty_frame2 = AudioFrame(data=non_empty_data2, sample_rate=16000, num_channels=1, samples_per_channel=4)
+    await buffer.write(non_empty_frame2)
+
+    # Check that only non-empty frames were written
+    assert buffer.audio_array[0] == 1
+    assert buffer.audio_array[1] == 2
+    assert buffer.audio_array[2] == 3
+    assert buffer.audio_array[3] == 4
+    assert buffer.audio_array[4] == 5
+    assert buffer.audio_array[5] == 6
+    assert buffer.audio_array[6] == 7
+    assert buffer.audio_array[7] == 8
+    assert buffer.last_audio_end_position == 8

@@ -285,17 +285,6 @@ class TestPalabraRESTClient:
                 mock_warning.assert_called_once_with("PalabraRESTClient create_session cancelled")
                 mock_session.close.assert_called_once()
 
-    @pytest.mark.skip(reason="Complex SSL error mocking, focus on simpler coverage first")
-    @pytest.mark.asyncio
-    async def test_create_session_ssl_error_macos(self):
-        """Test SSL certificate error on macOS"""
-        pass
-
-    @pytest.mark.skip(reason="Complex SSL error mocking, focus on simpler coverage first")
-    @pytest.mark.asyncio
-    async def test_create_session_ssl_error_other_os(self):
-        """Test SSL certificate error on non-macOS"""
-        pass
 
     @pytest.mark.asyncio
     async def test_create_session_general_error(self):

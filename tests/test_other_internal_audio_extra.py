@@ -9,15 +9,6 @@ from palabra_ai.internal.audio import (
     pull_until_blocked
 )
 
-@pytest.mark.skip(reason="Focus on high-coverage functions first")
-class TestWriteToDisk:
-    """Test write_to_disk function"""
-    pass
-
-@pytest.mark.skip(reason="Focus on high-coverage functions first")
-class TestReadFromDisk:
-    """Test read_from_disk function"""
-    pass
 
 class TestResamplePCM:
     """Test resample_pcm function"""
@@ -76,10 +67,6 @@ class TestResamplePCM:
 
             assert len(result) > 0
 
-@pytest.mark.skip(reason="Complex av library mocking, focus on simpler functions first")
-class TestConvertAnyToPCM16:
-    """Test convert_any_to_pcm16 function"""
-    pass
 
 class TestPullUntilBlocked:
     """Test pull_until_blocked function"""
