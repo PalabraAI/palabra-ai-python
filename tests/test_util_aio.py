@@ -44,14 +44,14 @@ async def test_any_event():
     """Test any_event waits for first event"""
     event1 = asyncio.Event()
     event2 = asyncio.Event()
-    
+
     async def set_event1():
         await asyncio.sleep(0.01)
         event1.set()
-    
+
     # Start task to set event1
     asyncio.create_task(set_event1())
-    
+
     # Should complete when event1 is set
     await any_event(event1, event2)
     assert event1.is_set()
@@ -62,16 +62,16 @@ async def test_all_events():
     """Test all_events waits for all events"""
     event1 = asyncio.Event()
     event2 = asyncio.Event()
-    
+
     async def set_events():
         await asyncio.sleep(0.01)
         event1.set()
         await asyncio.sleep(0.01)
         event2.set()
-    
+
     # Start task to set both events
     asyncio.create_task(set_events())
-    
+
     # Should complete when both events are set
     await all_events(event1, event2)
     assert event1.is_set()
@@ -88,6 +88,6 @@ async def test_warn_if_cancel_cancelled():
     """Test warn_if_cancel with cancelled task"""
     async def cancellable_task():
         raise asyncio.CancelledError()
-    
+
     with pytest.raises(asyncio.CancelledError):
         await warn_if_cancel(cancellable_task(), "Task was cancelled")

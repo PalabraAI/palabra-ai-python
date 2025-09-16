@@ -236,7 +236,6 @@ class TestLibrary:
             assert lib._original_console_filter == original_filter
             # Filter should still be functional (not recursive)
             assert mock_handler._filter is not None
-
     def test_setup_file_handler_no_file(self):
         """Test setup_file_handler with no log file"""
         lib = Library()

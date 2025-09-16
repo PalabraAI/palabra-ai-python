@@ -185,6 +185,15 @@ class Logger(Task):
                     break
 
                 dbg_msg = asdict(getattr(msg, "_dbg", Dbg.empty()))
+
+                # Convert enums to strings for benchmark compatibility
+                if "kind" in dbg_msg and dbg_msg["kind"] is not None:
+                    dbg_msg["kind"] = dbg_msg["kind"].value
+                if "ch" in dbg_msg and dbg_msg["ch"] is not None:
+                    dbg_msg["ch"] = dbg_msg["ch"].value
+                if "dir" in dbg_msg and dbg_msg["dir"] is not None:
+                    dbg_msg["dir"] = dbg_msg["dir"].value
+
                 if hasattr(msg, "model_dump"):
                     dbg_msg["msg"] = msg.model_dump()
                 elif hasattr(msg, "to_bench"):

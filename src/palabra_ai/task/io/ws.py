@@ -1,4 +1,3 @@
-import asyncio as aio
 from dataclasses import KW_ONLY, dataclass, field
 
 from websockets.asyncio.client import ClientConnection
@@ -9,6 +8,7 @@ from palabra_ai.enum import Channel, Direction, Kind
 from palabra_ai.message import Dbg
 from palabra_ai.task.io.base import Io
 from palabra_ai.util.logger import debug, trace
+from palabra_ai.util.timing import get_perf_ts, get_utc_ts
 
 
 @dataclass
@@ -30,7 +30,8 @@ class WsIo(Io):
 
     async def send_frame(self, frame: AudioFrame) -> None:
         raw = frame.to_ws()
-        debug(f"<- {frame}")
+        debug(f"<- {frame} / {frame.dbg_delta=}")
+        self.init_global_start_ts()
         await self.ws.send(raw)
 
     def new_frame(self) -> AudioFrame:
@@ -41,16 +42,18 @@ class WsIo(Io):
 
         try:
             async for raw_msg in self.ws:
+                perf_ts = get_perf_ts()
+                utc_ts = get_utc_ts()
                 if self.stopper or raw_msg is None:
                     debug("Stopping ws_receiver due to stopper or None message")
                     raise EOFError("WebSocket connection closed or stopper triggered")
-                ts = Dbg.now_ts()
                 trace(f"-> {raw_msg[:30]}")
                 audio_frame = AudioFrame.from_ws(
                     raw_msg,
                     sample_rate=self.cfg.mode.sample_rate,
                     num_channels=self.cfg.mode.num_channels,
                     samples_per_channel=self.cfg.mode.samples_per_channel,
+                    perf_ts=perf_ts,
                 )
                 if audio_frame:
                     debug(f"-> {audio_frame!r}")
@@ -59,12 +62,12 @@ class WsIo(Io):
                             Kind.AUDIO,
                             Channel.WS,
                             Direction.OUT,
-                            ts=ts,
                             idx=next(self._idx),
                             num=next(self._out_audio_num),
                             chunk_duration_ms=self.cfg.mode.chunk_duration_ms,
+                            perf_ts=perf_ts,
+                            utc_ts=utc_ts,
                         )
-                        _dbg.rms = await aio.to_thread(self.calc_rms_db, audio_frame)
                         audio_frame._dbg = _dbg
                         self.bench_audio_foq.publish(audio_frame)
                     self.writer.q.put_nowait(audio_frame)
@@ -73,7 +76,6 @@ class WsIo(Io):
                         Kind.MESSAGE,
                         Channel.WS,
                         Direction.OUT,
-                        ts=ts,
                         idx=next(self._idx),
                         num=next(self._out_audio_num),
                     )

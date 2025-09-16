@@ -10,7 +10,7 @@
 
 [//]: # ([![codecov]&#40;https://codecov.io/gh/PalabraAI/palabra-ai-python/graph/badge.svg?token=HRQAJ5VFY7&#41;]&#40;https://codecov.io/gh/PalabraAI/palabra-ai-python&#41;)
 
-🌍 **Python SDK for Palabra AI's real-time speech-to-speech translation API**  
+🌍 **Python SDK for Palabra AI's real-time speech-to-speech translation API**
 🚀 Break down language barriers and enable seamless communication across 25+ languages
 
 ## Overview 📋
@@ -121,7 +121,7 @@ palabra.run(config)
 
 ### Customizable output 📝
 
-📋 **Add a transcription of the source and translated speech.**  
+📋 **Add a transcription of the source and translated speech.**
 ⚙️ **Configure output to provide:**
 - 🔊 Audio only
 - 📝 Transcriptions only
@@ -185,7 +185,7 @@ TargetLang(ES, on_transcription=your_callback_function)
 TargetLang(ES, FileWriter("output.wav"), on_transcription=your_callback_function)
 ```
 
-💡 **The transcription callbacks receive `TranscriptionMessage` objects containing the transcribed text and metadata.**  
+💡 **The transcription callbacks receive `TranscriptionMessage` objects containing the transcribed text and metadata.**
 🔄 **Callbacks can be either synchronous or asynchronous functions.**
 
 ### Integrate with FFmpeg (streaming) 🎬
@@ -342,11 +342,11 @@ config = Config(
 ## Features ✨
 
 ### Real-time translation ⚡
-🎯 Translate audio streams in real-time with minimal latency  
+🎯 Translate audio streams in real-time with minimal latency
 💬 Perfect for live conversations, conferences, and meetings
 
 ### Voice cloning 🗣️
-🎭 Preserve the original speaker's voice characteristics in translations  
+🎭 Preserve the original speaker's voice characteristics in translations
 ⚙️ Enable voice cloning in the configuration
 
 ### Device management 🎮

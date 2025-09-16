@@ -33,14 +33,14 @@ Examples:
   python -m palabra_ai.benchmark audio.mp3 --config config.json  # Use JSON config (languages from config)
         """
     )
-    
+
     # Required arguments
     parser.add_argument("audio", help="Path to audio file")
     parser.add_argument("source_lang", nargs='?', default=None,
                        help="Source language code (e.g., es, en, fr) - ignored if --config is provided")
     parser.add_argument("target_lang", nargs='?', default=None,
                        help="Target language code (e.g., en, es, fr) - ignored if --config is provided")
-    
+
     # Optional arguments
     parser.add_argument("--config", type=Path, default=None,
                        help="Path to JSON config file to preload settings from")
@@ -64,16 +64,16 @@ Examples:
                        help="Connection mode: ws (WebSocket) or webrtc (default: ws)")
     parser.add_argument("--chunk-duration-ms", type=int, default=100,
                        help="Audio chunk duration in milliseconds (default: 100)")
-    
+
     args = parser.parse_args()
-    
+
     # Load base config from JSON if provided
     base_config = None
     source_lang = None
     target_lang = None
     mode = None
     chunk_duration_ms = None
-    
+
     if args.config:
         config_path = Path(args.config)
         if not config_path.exists():
@@ -106,13 +106,13 @@ Examples:
         target_lang = args.target_lang
         mode = args.mode
         chunk_duration_ms = args.chunk_duration_ms
-    
+
     # Validate audio file exists
     audio_path = Path(args.audio)
     if not audio_path.exists():
         error(f"Audio file not found: {args.audio}")
         sys.exit(1)
-    
+
     try:
         # Run benchmark
         print(f"Running benchmark on: {args.audio}")
@@ -121,7 +121,7 @@ Examples:
         if base_config:
             print(f"Using config: {args.config}")
         print("-" * 60)
-        
+
         analyzer = run_benchmark(
             str(audio_path),
             source_lang=source_lang,
@@ -132,14 +132,14 @@ Examples:
             chunk_duration_ms=chunk_duration_ms,
             base_config=base_config
         )
-        
+
         # Analyze results
         print("\nAnalyzing results...")
         analyzer.analyze()
-        
+
         # Print text report to console (always)
         print("\n" + analyzer.get_text_report(args.chunks, args.show_empty))
-        
+
         # Save additional reports if requested
         if args.html or args.json:
             saved_files = analyzer.save_reports(
@@ -148,11 +148,11 @@ Examples:
                 json=args.json,
                 raw_result=args.raw_result
             )
-            
+
             print("\nReports saved:")
             for report_type, path in saved_files.items():
                 print(f"  {report_type.upper()}: {path}")
-        
+
     except KeyboardInterrupt:
         error("\nBenchmark interrupted by user")
         sys.exit(1)

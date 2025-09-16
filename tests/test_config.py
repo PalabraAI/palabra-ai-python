@@ -17,7 +17,7 @@ def test_validate_language():
     # Test with string
     lang = validate_language("es")
     assert lang.code == "es"
-    
+
     # Test with Language object
     lang_obj = Language.get_or_create("en")
     assert validate_language(lang_obj) == lang_obj
@@ -30,7 +30,7 @@ def test_serialize_language():
 def test_io_mode():
     """Test IoMode properties"""
     mode = IoMode(name="test", sample_rate=48000, num_channels=2, chunk_duration_ms=20)
-    
+
     assert mode.samples_per_channel == 960  # 48000 * 0.02
     assert mode.bytes_per_channel == 1920  # 960 * 2
     assert mode.chunk_samples == 1920  # 960 * 2
@@ -45,7 +45,7 @@ def test_webrtc_mode():
     assert mode.sample_rate == 48000
     assert mode.num_channels == 1
     assert mode.chunk_duration_ms == 320
-    
+
     dump = mode.model_dump()
     assert dump["input_stream"]["source"]["type"] == "webrtc"
     assert dump["output_stream"]["target"]["type"] == "webrtc"
@@ -57,7 +57,7 @@ def test_ws_mode():
     assert mode.sample_rate == 24000
     assert mode.num_channels == 1
     assert mode.chunk_duration_ms == 320
-    
+
     dump = mode.model_dump()
     assert dump["input_stream"]["source"]["type"] == "ws"
     assert dump["input_stream"]["source"]["format"] == "pcm_s16le"
@@ -121,13 +121,13 @@ def test_source_lang():
 def test_source_lang_with_callback():
     """Test SourceLang with callback validation"""
     lang = Language.get_or_create("es")
-    
+
     def callback(msg):
         pass
-    
+
     source = SourceLang(lang=lang, on_transcription=callback)
     assert source.on_transcription == callback
-    
+
     # Test with non-callable
     with pytest.raises(ConfigurationError) as exc_info:
         SourceLang(lang=lang, on_transcription="not callable")
@@ -146,19 +146,19 @@ def test_target_lang():
 def test_source_lang_validation():
     """Test SourceLang language validation"""
     from palabra_ai.lang import EN, BA, AZ, FIL
-    
+
     # Valid source languages should work
     source = SourceLang(lang=EN)
     assert source.lang == EN
-    
+
     source = SourceLang(lang=BA)  # Bashkir can be source
     assert source.lang == BA
-    
+
     # Invalid source languages should raise error
     with pytest.raises(ConfigurationError) as exc_info:
         SourceLang(lang=AZ)  # Azerbaijani cannot be source
     assert "not supported as a source language" in str(exc_info.value)
-    
+
     with pytest.raises(ConfigurationError) as exc_info:
         SourceLang(lang=FIL)  # Filipino cannot be source
     assert "not supported as a source language" in str(exc_info.value)
@@ -167,22 +167,22 @@ def test_source_lang_validation():
 def test_target_lang_validation():
     """Test TargetLang language validation"""
     from palabra_ai.lang import ES, AZ, ZH_HANS, BA, TH
-    
+
     # Valid target languages should work
     target = TargetLang(lang=ES)
     assert target.lang == ES
-    
+
     target = TargetLang(lang=AZ)  # Azerbaijani can be target
     assert target.lang == AZ
-    
+
     target = TargetLang(lang=ZH_HANS)  # Chinese Simplified can be target
     assert target.lang == ZH_HANS
-    
+
     # Invalid target languages should raise error
     with pytest.raises(ConfigurationError) as exc_info:
         TargetLang(lang=BA)  # Bashkir cannot be target
     assert "not supported as a target language" in str(exc_info.value)
-    
+
     with pytest.raises(ConfigurationError) as exc_info:
         TargetLang(lang=TH)  # Thai cannot be target
     assert "not supported as a target language" in str(exc_info.value)
@@ -200,7 +200,7 @@ def test_config_with_source_and_targets():
     """Test Config with source and targets"""
     source = SourceLang(lang="es")
     targets = [TargetLang(lang="en"), TargetLang(lang="fr")]
-    
+
     config = Config(source=source, targets=targets)
     assert config.source.lang.code == "es"
     assert len(config.targets) == 2
@@ -211,12 +211,12 @@ def test_config_single_target():
     """Test Config with single target (not a list)"""
     source = SourceLang(lang="es")
     target = TargetLang(lang="en")
-    
+
     config = Config(source=source, targets=target)
     # model_post_init should have been called and converted single target to list
     # But it seems the init process doesn't trigger it properly. Let's test what we get
     assert config.targets == target  # Should be single target initially
-    
+
     # Force the conversion by calling model_post_init manually
     config.model_post_init(None)
     assert isinstance(config.targets, list)
@@ -228,7 +228,7 @@ def test_config_to_dict():
     source = SourceLang(lang="es")
     target = TargetLang(lang="en")
     config = Config(source=source, targets=[target])
-    
+
     data = config.to_dict()
     assert "pipeline" in data
     assert data["pipeline"]["transcription"]["source_language"] == "es"
@@ -262,7 +262,7 @@ def test_config_from_dict():
             "allowed_message_types": []
         }
     }
-    
+
     config = Config.from_dict(data)
     assert config.source.lang.code == "es"
     assert len(config.targets) == 1

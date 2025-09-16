@@ -39,6 +39,7 @@ async def connect_translation_room(webrtc_url: str, publisher: str) -> rtc.Room:
 import asyncio
 import queue
 import threading
+
 import numpy as np
 import sounddevice as sd
 from livekit import rtc
@@ -103,11 +104,6 @@ async def capture_microphone(audio_source: rtc.AudioSource):
 
 
 ### Step 4: Handle Translated Audio Track ###
-import asyncio
-import queue
-import threading
-import numpy as np
-import sounddevice as sd
 from livekit import rtc
 
 
@@ -157,6 +153,7 @@ def play_track(track: rtc.Track, lang: str):
 
 ### Step 5: Start the Translation ###
 import json
+
 from livekit import rtc
 
 
@@ -175,8 +172,6 @@ async def start_translation(room: rtc.Room, translation_settings: dict):
 
 
 ### SUPPORTING CODE ###
-import asyncio
-import json
 import time
 
 # Minimal translation settings
@@ -185,11 +180,7 @@ MINIMAL_SETTINGS = {
     "output_stream": {"content_type": "audio", "target": {"type": "webrtc"}},
     "pipeline": {
         "transcription": {"source_language": "en"},
-        "translations": [
-            {
-                "target_language": "es"
-            }
-        ],
+        "translations": [{"target_language": "es"}],
     },
 }
 

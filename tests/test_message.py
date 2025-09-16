@@ -251,7 +251,7 @@ def test_pipeline_timings_message():
     msg = PipelineTimingsMessage.model_validate(data)
     assert msg.transcription_id == "123"
     assert msg.timings == {"step1": 0.1, "step2": 0.2}
-    
+
     dump = msg.model_dump()
     assert dump == data
 
@@ -283,13 +283,13 @@ def test_transcription_message():
     assert msg.text == "Hola mundo"
     assert len(msg.segments) == 1
     assert msg.segments[0].text == "Hola"
-    
+
     assert "🇪🇸es" in repr(msg)
     assert str(msg) == "Hola mundo"
-    
+
     # Test dedup property
     assert "456" in msg.dedup
-    
+
     # Test model_dump
     dump = msg.model_dump()
     assert dump == data
@@ -325,7 +325,7 @@ def test_current_task_message():
     }
     msg = CurrentTaskMessage.model_validate(data)
     assert msg.data == {"task": "config"}
-    
+
     dump = msg.model_dump()
     assert dump == data
 
