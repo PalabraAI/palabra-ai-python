@@ -102,6 +102,16 @@ def serialize_language(lang: Language) -> str:
     return lang.bcp47
 
 
+def serialize_language_source(lang: Language) -> str:
+    """Serialize language for source (recognition) - uses source_code"""
+    return lang.source_code
+
+
+def serialize_language_target(lang: Language) -> str:
+    """Serialize language for target (translation) - uses target_code"""
+    return lang.target_code
+
+
 LanguageField = Annotated[
     Language, BeforeValidator(validate_language), PlainSerializer(serialize_language)
 ]
@@ -109,13 +119,13 @@ LanguageField = Annotated[
 SourceLanguageField = Annotated[
     Language,
     BeforeValidator(validate_source_language),
-    PlainSerializer(serialize_language),
+    PlainSerializer(serialize_language_source),
 ]
 
 TargetLanguageField = Annotated[
     Language,
     BeforeValidator(validate_target_language),
-    PlainSerializer(serialize_language),
+    PlainSerializer(serialize_language_target),
 ]
 
 
