@@ -74,92 +74,49 @@ def resample_pcm(
 
 def convert_any_to_pcm16(
     audio_data: bytes,
-    sample_rate: int = 16000,
+    sample_rate: int,
     layout: str = "mono",
     normalize: bool = True,
 ) -> bytes:
     before_conversion = time.perf_counter()
     try:
         input_buffer = BytesIO(audio_data)
-        input_container = av.open(input_buffer, metadata_errors="ignore")
+        input_container, _ = open_audio_container(input_buffer)
 
         output_buffer = BytesIO()
-        output_container = av.open(output_buffer, mode="w", format="s16le")
-        audio_stream = output_container.add_stream("pcm_s16le", rate=sample_rate)
-        audio_stream.layout = layout
-        audio_stream.time_base = Fraction(1, sample_rate)
+        output_container, audio_stream = create_pcm_output_container(
+            output_buffer, sample_rate, layout
+        )
 
         filter_graph_buffer, filter_graph_sink = None, None
         if normalize:
-            # create filter graph for `loudnorm` and `speechnorm` filters
-
-            filter_graph = FilterGraph()
-            filter_graph_buffer = filter_graph.add_abuffer(
-                format=audio_stream.format.name,
-                sample_rate=audio_stream.rate,
-                layout=audio_stream.layout,
-                time_base=audio_stream.time_base,
+            _, filter_graph_buffer, filter_graph_sink = (
+                create_normalization_filter_graph(
+                    audio_stream.format.name,
+                    audio_stream.rate,
+                    audio_stream.layout,
+                    audio_stream.time_base,
+                )
             )
-            loudnorm_filter_node = filter_graph.add("loudnorm", "I=-23:LRA=5:TP=-1")
-            speechnorm_filter_node = filter_graph.add("speechnorm", "e=50:r=0.0005:l=1")
-            filter_graph_sink = filter_graph.add("abuffersink")
-            filter_graph_buffer.link_to(loudnorm_filter_node)
-            loudnorm_filter_node.link_to(speechnorm_filter_node)
-            speechnorm_filter_node.link_to(filter_graph_sink)
-            filter_graph.configure()
 
         resampler = av.AudioResampler(
             format=av.AudioFormat("s16"), layout=layout, rate=sample_rate
         )
 
-        dts = 0
-        for frame in input_container.decode(audio=0):
-            if frame is not None:
-                for resampled_frame in resampler.resample(frame):
-                    if filter_graph_buffer and filter_graph_sink:
-                        filter_graph_buffer.push(resampled_frame)
-                        processed_frames = pull_until_blocked(filter_graph_buffer)
-                    else:
-                        processed_frames = [resampled_frame]
+        dts = process_audio_frames(
+            input_container,
+            audio_stream,
+            resampler,
+            filter_graph_buffer,
+            filter_graph_sink,
+        )
 
-                    for processed_frame in processed_frames:
-                        processed_frame.pts = dts
-                        dts += processed_frame.samples
-
-                        for packet in audio_stream.encode(processed_frame):
-                            output_container.mux(packet)
-
-        # flush filters
-        if filter_graph_buffer and filter_graph_sink:
-            try:
-                # signal the end of the stream
-                filter_graph_buffer.push(None)
-                while True:
-                    try:
-                        processed_frame = filter_graph_sink.pull()
-                        processed_frame.pts = dts
-                        dts += processed_frame.samples
-                        for packet in audio_stream.encode(processed_frame):
-                            output_container.mux(packet)
-                    except AvBlockingIOError:
-                        break
-                    except FFmpegError:
-                        raise
-            except AvEOFError:
-                pass  # EOF is expected when flushing
-            except FFmpegError:
-                raise
-
-        # flush encoder
-        try:
-            for packet in audio_stream.encode(None):
-                output_container.mux(packet)
-        except AvEOFError:
-            pass  # EOF is expected when flushing encoder
-        except FFmpegError:
-            raise
+        flush_filters_and_encoder(
+            filter_graph_buffer, filter_graph_sink, audio_stream, dts
+        )
 
         output_container.close()
+        input_container.close()
 
         output_buffer.seek(0)
         return output_buffer.read()
@@ -179,3 +136,130 @@ def pull_until_blocked(graph):
             return frames
         except FFmpegError:
             raise
+
+
+def open_audio_container(path_or_buffer, timeout=None):
+    """Open audio container and return container and first audio stream."""
+    container = av.open(path_or_buffer, timeout=timeout, metadata_errors="ignore")
+    audio_streams = [s for s in container.streams if s.type == "audio"]
+    if not audio_streams:
+        container.close()
+        raise ValueError("No audio streams found")
+    return container, audio_streams[0]
+
+
+def get_audio_stream_info(audio_stream):
+    """Get audio stream information (duration, codec, sample_rate, channels)."""
+    duration = (
+        float(audio_stream.duration * audio_stream.time_base)
+        if audio_stream.duration
+        else 0
+    )
+    return {
+        "duration": duration,
+        "codec": audio_stream.codec.name,
+        "sample_rate": audio_stream.sample_rate,
+        "channels": audio_stream.channels,
+    }
+
+
+def create_normalization_filter_graph(format_name, sample_rate, layout, time_base):
+    """Create filter graph with loudnorm and speechnorm filters."""
+    filter_graph = FilterGraph()
+    filter_buffer = filter_graph.add_abuffer(
+        format=format_name,
+        sample_rate=sample_rate,
+        layout=layout,
+        time_base=time_base,
+    )
+    loudnorm_filter = filter_graph.add("loudnorm", "I=-23:LRA=5:TP=-1")
+    speechnorm_filter = filter_graph.add("speechnorm", "e=50:r=0.0005:l=1")
+    filter_sink = filter_graph.add("abuffersink")
+
+    filter_buffer.link_to(loudnorm_filter)
+    loudnorm_filter.link_to(speechnorm_filter)
+    speechnorm_filter.link_to(filter_sink)
+    filter_graph.configure()
+
+    return filter_graph, filter_buffer, filter_sink
+
+
+def create_pcm_output_container(buffer, sample_rate, layout="mono"):
+    """Create PCM output container and stream."""
+    output_container = av.open(buffer, mode="w", format="s16le")
+    output_stream = output_container.add_stream("pcm_s16le", rate=sample_rate)
+    output_stream.layout = layout
+    output_stream.time_base = Fraction(1, sample_rate)
+    return output_container, output_stream
+
+
+def process_audio_frames(
+    input_container,
+    output_stream,
+    resampler,
+    filter_buffer=None,
+    filter_sink=None,
+    progress_callback=None,
+):
+    """Process all audio frames with optional filters and progress callback."""
+    dts = 0
+
+    for frame in input_container.decode(audio=0):
+        if frame is not None:
+            for resampled_frame in resampler.resample(frame):
+                if filter_buffer and filter_sink:
+                    filter_buffer.push(resampled_frame)
+                    processed_frames = pull_until_blocked(filter_sink)
+                else:
+                    processed_frames = [resampled_frame]
+
+                for processed_frame in processed_frames:
+                    processed_frame.pts = dts
+                    dts += processed_frame.samples
+
+                    for packet in output_stream.encode(processed_frame):
+                        output_stream.container.mux(packet)
+
+                    if progress_callback:
+                        progress_callback(processed_frame.samples)
+
+    return dts
+
+
+def flush_filters_and_encoder(filter_buffer, filter_sink, output_stream, start_dts=0):
+    """Flush filters and encoder, return final dts."""
+    dts = start_dts
+
+    # Flush filters
+    if filter_buffer and filter_sink:
+        try:
+            filter_buffer.push(None)
+            while True:
+                try:
+                    filtered_frame = filter_sink.pull()
+                    filtered_frame.pts = dts
+                    dts += filtered_frame.samples
+
+                    for packet in output_stream.encode(filtered_frame):
+                        output_stream.container.mux(packet)
+
+                except (AvBlockingIOError, AvEOFError):
+                    break
+        except AvEOFError:
+            pass
+
+    # Flush encoder
+    try:
+        for packet in output_stream.encode(None):
+            output_stream.container.mux(packet)
+    except AvEOFError:
+        pass
+
+    return dts
+
+
+def create_audio_resampler(target_rate, audio_format="s16", layout="mono"):
+    """Create audio resampler - used in multiple places."""
+    return av.AudioResampler(
+        format=av.AudioFormat(audio_format), layout=layout, rate=target_rate
+    )

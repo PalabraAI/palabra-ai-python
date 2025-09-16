@@ -2,7 +2,6 @@ import asyncio
 import time
 from dataclasses import KW_ONLY, dataclass
 
-from palabra_ai.base.task import Task
 from palabra_ai.config import (
     DEEP_DEBUG,
 )
@@ -12,6 +11,7 @@ from palabra_ai.constant import (
     SLEEP_INTERVAL_MEDIUM,
 )
 from palabra_ai.debug.hang_coroutines import diagnose_hanging_tasks
+from palabra_ai.task.base import Task
 from palabra_ai.util.logger import debug, info
 
 
@@ -46,9 +46,9 @@ class Stat(Task):
     async def exit(self):
         debug(self.stat)
 
-        moment = time.time()
+        moment = time.perf_counter()
 
-        while time.time() - moment < SLEEP_INTERVAL_LONG:
+        while time.perf_counter() - moment < SLEEP_INTERVAL_LONG:
             try:
                 await asyncio.sleep(SLEEP_INTERVAL_MEDIUM)
             except asyncio.CancelledError:

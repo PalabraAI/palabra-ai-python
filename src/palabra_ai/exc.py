@@ -32,6 +32,9 @@ class ApiValidationError(ApiError):
     ...
 
 
+class TaskNotFoundError(ApiError): ...
+
+
 def unwrap_exceptions(exc):
     """Recursively unwrap all non-ExceptionGroup exceptions into a flat list"""
     if isinstance(exc, ExceptionGroup):

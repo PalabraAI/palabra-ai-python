@@ -61,23 +61,36 @@ class SimpleWebSocket:
                     print("📝 Task confirmed")
                 elif msg_type == "output_audio_data":
                     # Handle TTS audio
-                    audio_data = base64.b64decode(data["data"]["data"])
-                    audio_array = np.frombuffer(audio_data, dtype=np.int16)
-                    try:
-                        self.audio_queue.put_nowait(audio_array)
-                    except queue.Full:
-                        pass
+                    transcription_data = data.get("data", {})
+                    audio_b64 = transcription_data.get("data", "")
+                    
+                    if audio_b64:
+                        try:
+                            audio_data = base64.b64decode(audio_b64)
+                            audio_array = np.frombuffer(audio_data, dtype=np.int16)
+                            try:
+                                self.audio_queue.put_nowait(audio_array)
+                            except queue.Full:
+                                pass
+                        except Exception as e:
+                            print(f"Audio decode error: {e}")
                 elif "transcription" in msg_type:
-                    text = data["data"]["transcription"]["text"]
-                    lang = data["data"]["transcription"]["language"]
-                    part = msg_type == "partial_transcription"
-                    print(
-                        f"\r\033[K{'💬' if part else '✅'} [{lang}] {text}",
-                        end="" if part else "\n",
-                        flush=True,
-                    )
-            except:
-                pass
+                    transcription = data.get("data", {}).get("transcription", {})
+                    text = transcription.get("text", "")
+                    lang = transcription.get("language", "")
+                    if text:
+                        part = msg_type == "partial_transcription"
+                        print(
+                            f"\r\033[K{'💬' if part else '✅'} [{lang}] {text}",
+                            end="" if part else "\n",
+                            flush=True,
+                        )
+            except websockets.exceptions.ConnectionClosed:
+                print("📡 WebSocket connection closed")
+                break
+            except Exception as e:
+                print(f"❌ WebSocket error: {e}")
+                break
 
     async def send(self, message: dict):
         if self.ws:
@@ -188,7 +201,7 @@ MINIMAL_SETTINGS = {
     },
     "output_stream": {
         "content_type": "audio",
-        "target": {"type": "ws", "format": "pcm_s16le"},
+        "target": {"type": "ws", "format": "pcm_s16le", "sample_rate": 24000, "channels": 1},
     },
     "pipeline": {
         "preprocessing": {},

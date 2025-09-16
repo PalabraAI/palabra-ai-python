@@ -9,6 +9,10 @@ from palabra_ai.util.logger import debug
 
 def _default(obj: Any) -> Any:
     try:
+        if isinstance(obj, memoryview):
+            return obj.tobytes().decode("utf-8")
+        if isinstance(obj, bytes | bytearray):
+            return obj.decode("utf-8")
         if hasattr(obj, "model_dump"):
             return obj.model_dump()
         if hasattr(obj, "dict"):
@@ -37,3 +41,9 @@ def to_json(obj: Any, indent: bool = False, sort_keys: bool = True) -> bytes:
 def from_json(data: str | bytes) -> Any:
     """Parse JSON from string or bytes."""
     return orjson.loads(data)
+
+
+def trough_json(
+    obj: Any, indent: bool = False, sort_keys: bool = True
+) -> dict[str, Any]:
+    return from_json(to_json(obj, indent=indent, sort_keys=sort_keys))

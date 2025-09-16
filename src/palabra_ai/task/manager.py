@@ -3,9 +3,6 @@ from __future__ import annotations
 import asyncio
 from dataclasses import KW_ONLY, dataclass, field
 
-from palabra_ai.adapter.dummy import DummyWriter
-from palabra_ai.base.adapter import Reader, Writer
-from palabra_ai.base.task import Task
 from palabra_ai.config import (
     Config,
 )
@@ -18,15 +15,18 @@ from palabra_ai.constant import (
 )
 from palabra_ai.exc import ConfigurationError
 from palabra_ai.internal.rest import SessionCredentials
-from palabra_ai.internal.webrtc import AudioTrackSettings
+from palabra_ai.task.adapter.base import Reader, Writer
+from palabra_ai.task.adapter.dummy import DummyWriter
+from palabra_ai.task.base import Task
+
+# from palabra_ai.internal.webrtc import AudioTrackSettings
+from palabra_ai.task.io.base import Io
+from palabra_ai.task.io.webrtc import WebrtcIo
+from palabra_ai.task.io.ws import WsIo
 from palabra_ai.task.logger import Logger
-from palabra_ai.task.monitor import RtMonitor
-from palabra_ai.task.realtime import Realtime
-from palabra_ai.task.receiver import ReceiverTranslatedAudio
-from palabra_ai.task.sender import SenderSourceAudio
 from palabra_ai.task.stat import Stat
 from palabra_ai.task.transcription import Transcription
-from palabra_ai.util.logger import debug, warning
+from palabra_ai.util.logger import debug, success, warning
 
 
 @dataclass
@@ -38,12 +38,14 @@ class Manager(Task):
     _: KW_ONLY
     reader: Reader = field(init=False)
     writer: Writer = field(init=False)
-    track_settings: AudioTrackSettings = field(default_factory=AudioTrackSettings)
-    rt: Realtime = field(init=False)
-    sender: SenderSourceAudio = field(init=False)
-    receiver: ReceiverTranslatedAudio = field(init=False)
+    # track_settings: AudioTrackSettings = field(default_factory=AudioTrackSettings)
+    # rt: Realtime = field(init=False)
+    io_class: type[Io] | None = field(default=None, init=False)
+    io: Io = field(init=False)
+    # sender: SenderSourceAudio = field(init=False)
+    # receiver: ReceiverTranslatedAudio = field(init=False)
     logger: Logger | None = field(default=None, init=False)
-    rtmon: RtMonitor = field(init=False)
+    # rtmon: IoMon = field(init=False)
     transcription: Transcription = field(init=False)
     stat: Stat = field(init=False)
 
@@ -54,71 +56,98 @@ class Manager(Task):
     _show_banner_loop: asyncio.Task | None = field(default=None, init=False)
 
     def __post_init__(self):
-        self.stat = Stat(self)
+        self.stat = Stat(manager=self, cfg=self.cfg)
 
         if len(self.cfg.targets) != SINGLE_TARGET_SUPPORTED_COUNT:
             raise ConfigurationError(
                 f"Only single target language supported, got {len(self.cfg.targets)}"
             )
 
-        self.reader = reader = self.cfg.source.reader
+        self.reader = self.cfg.source.reader
         target = self.cfg.targets[0]
-        self.writer = writer = target.writer
+        self.writer = target.writer
 
-        if not isinstance(reader, Reader):
+        if not isinstance(self.reader, Reader):
             raise ConfigurationError(
-                f"cfg.source.reader should be an instance of Reader, got {type(reader)}"
+                f"cfg.source.reader should be an instance of Reader, got {type(self.reader)}"
             )
 
-        if not any([isinstance(writer, Writer), callable(target.on_transcription)]):
+        if not any(
+            [isinstance(self.writer, Writer), callable(target.on_transcription)]
+        ):
             raise ConfigurationError(
                 f"You should use at least [writer] or [on_transcription] for TargetLang: "
                 f"{self.cfg.targets[0]}, got neither or mistyped them, "
-                f"writer={type(writer)}, on_transcription={type(target.on_transcription)}"
+                f"writer={type(self.writer)}, on_transcription={type(target.on_transcription)}"
             )
 
         if not self.writer:
             debug(f"🔧 {self.name} using DummyWriter for target {target.lang}")
             self.writer = DummyWriter()
 
-        if hasattr(self.writer, "set_track_settings"):
-            self.writer.set_track_settings(self.track_settings)
-        if hasattr(self.reader, "set_track_settings"):
-            self.reader.set_track_settings(self.track_settings)
+        self.reader.cfg = self.cfg
+        self.writer.cfg = self.cfg
 
-        self.rt = Realtime(self.cfg, self.credentials)
-        if self.cfg.log_file:
-            self.logger = Logger(self.cfg, self.rt)
+        # Preprocess audio if needed (before boot/start_system to avoid timeouts)
+        self.reader.do_preprocess()
 
-        self.transcription = Transcription(self.cfg, self.rt)
+        # if hasattr(self.writer, "set_track_settings"):
+        #     self.writer.set_track_settings(self.track_settings)
+        # if hasattr(self.reader, "set_track_settings"):
+        #     self.reader.set_track_settings(self.track_settings)
 
-        self.receiver = ReceiverTranslatedAudio(
-            self.cfg,
-            self.writer,
-            self.rt,
-            target.lang,
+        if not self.io_class:
+            io_classes = {
+                "webrtc": WebrtcIo,
+                "ws": WsIo,
+                # IoMode.WS: WsIo, IoMode.MIXED: MixedIo
+            }
+            self.io_class = io_classes.get(self.cfg.mode.name)
+            if not self.io_class:
+                raise ConfigurationError(
+                    f"Unsupported IO mode: {self.cfg.mode.name}, "
+                    f"supported modes are: {io_classes}"
+                )
+        self.io = self.io_class(
+            cfg=self.cfg,
+            credentials=self.credentials,
+            reader=self.reader,
+            writer=self.writer,
         )
 
-        self.sender = SenderSourceAudio(
-            self.cfg,
-            self.rt,
-            self.reader,
-            self.cfg.to_dict(),
-            self.track_settings,
-        )
+        # self.rt = Realtime(self.cfg, self.io)
+        self.logger = Logger(self.cfg, self.io)
+        #
+        self.transcription = Transcription(self.cfg, self.io)
+        #
+        # self.receiver = ReceiverTranslatedAudio(
+        #     self.cfg,
+        #     self.writer,
+        #     self.rt,
+        #     target.lang,
+        # )
 
-        self.rtmon = RtMonitor(self.cfg, self.rt)
+        # self.sender = SenderSourceAudio(
+        #     self.cfg,
+        #     self.rt,
+        #     self.reader,
+        #     self.cfg.to_dict(),
+        #     self.track_settings,
+        # )
+
+        # self.rtmon = IoMon(self.cfg, self.rt)
 
         self.tasks.extend(
             [
                 t
                 for t in [
                     self.reader,
-                    self.sender,
-                    self.rt,
-                    self.receiver,
+                    # self.sender,
+                    # self.rt,
+                    self.io,
+                    # self.receiver,
                     self.writer,
-                    self.rtmon,
+                    # self.rtmon,
                     self.transcription,
                     self.logger,
                     self,
@@ -129,26 +158,27 @@ class Manager(Task):
         )
 
     async def start_system(self):
-        if self.logger:
-            self.logger(self.root_tg)
-            await self.logger.ready
+        self.logger(self.root_tg)
+        await self.logger.ready
 
         self.stat(self.root_tg)
         await self.stat.ready
         self._show_banner_loop = self.stat.run_banner()
 
         debug(f"🔧 {self.name} run listening...")
-        self.rtmon(self.sub_tg)
-        self.rt(self.sub_tg)
+        # self.rtmon(self.sub_tg)
+        self.io(self.sub_tg)
+        # self.rt(self.sub_tg)
         self.transcription(self.sub_tg)
         self.writer(self.sub_tg)
-        self.receiver(self.sub_tg)
-        self.sender(self.sub_tg)
-        await self.rt.ready
-        await self.rtmon.ready
+        # self.receiver(self.sub_tg)
+        # self.sender(self.sub_tg)
+        # await self.rt.ready
+        await self.io.ready
+        # await self.rtmon.ready
         await self.writer.ready
-        await self.receiver.ready
-        await self.sender.ready
+        # await self.receiver.ready
+        # await self.sender.ready
         await self.transcription.ready
         debug(f"🔧 {self.name} listening ready!")
 
@@ -169,7 +199,7 @@ class Manager(Task):
             ) from e
 
     async def do(self):
-        warning("🚀🚀🚀 Starting translation process 🚀🚀🚀")
+        success("🚀🚀🚀 Starting translation process 🚀🚀🚀")
         while not self.stopper:
             try:
                 await asyncio.sleep(SLEEP_INTERVAL_DEFAULT)
@@ -185,7 +215,7 @@ class Manager(Task):
                 except asyncio.CancelledError:
                     debug(f"🔚 {self.name}.do() sleep cancelled, exiting...")
                 debug(f"🔚 {self.name}.do() received EOF or stopper, exiting...")
-                warning("🏁 Done! ⏻ Shutting down...")
+                success("🏁 Done! ⏻ Shutting down...")
                 break
         +self.stopper  # noqa
         await self.graceful_exit()
@@ -202,8 +232,7 @@ class Manager(Task):
             debug(f"🔧 {self.name}.exit() exiting...")
             +self.stopper  # noqa
             +self.stat.stopper  # noqa
-            if self.logger:
-                +self.logger.stopper  # noqa
+            +self.logger.stopper  # noqa
             debug(f"🔧 {self.name}.exit() tasks: {[t.name for t in self.tasks]}")
             # DON'T use _abort() - it's internal!
             # Cancel all subtasks properly
@@ -242,7 +271,7 @@ class Manager(Task):
         try:
             await asyncio.gather(
                 self.shutdown_task(self.reader),
-                self.shutdown_task(self.sender),
+                # self.shutdown_task(self.sender),
                 return_exceptions=True,
             )
         except asyncio.CancelledError:
@@ -261,10 +290,8 @@ class Manager(Task):
         debug(f"🔧 {self.name}.graceful_exit() gathering... ")
         try:
             await asyncio.gather(
-                self.shutdown_task(self.receiver),
-                self.shutdown_task(self.rtmon),
                 self.shutdown_task(self.transcription),
-                self.shutdown_task(self.rt),
+                self.shutdown_task(self.io),
                 return_exceptions=True,
             )
         except asyncio.CancelledError:

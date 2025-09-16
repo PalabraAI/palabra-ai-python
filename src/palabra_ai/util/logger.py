@@ -1,9 +1,21 @@
 import sys
 from dataclasses import dataclass, field
-from logging import DEBUG, INFO, WARNING
+
+# from logging import CRITICAL, DEBUG, ERROR, INFO, WARNING
 from pathlib import Path
+from typing import TextIO
 
 from loguru import logger
+
+CRITICAL = 50
+FATAL = CRITICAL
+ERROR = 40
+WARNING = 30
+WARN = WARNING
+SUCCESS = 25  # Custom level for successful operations
+INFO = 20
+DEBUG = 10
+NOTSET = 0
 
 
 @dataclass
@@ -11,6 +23,7 @@ class Library:
     name: str = "palabra_ai"
     level: int = field(default=INFO)
     handlers: list = field(default_factory=list)
+    _original_console_filter: callable = field(default=None, init=False)
 
     def __call__(self, level: int):
         self.level = level
@@ -20,7 +33,7 @@ class Library:
         if debug:
             self(DEBUG)
         elif silent:
-            self(WARNING)
+            self(SUCCESS)
         else:
             self(INFO)
 
@@ -62,8 +75,11 @@ class Library:
         if 0 in logger._core.handlers:
             # Modify existing default handler
             handler = logger._core.handlers[0]
-            original_filter = handler._filter
-            handler._filter = self.create_console_filter(original_filter)
+            # Save original filter on first call to prevent recursion
+            if self._original_console_filter is None:
+                self._original_console_filter = handler._filter
+            # Always use the saved original filter to avoid recursion
+            handler._filter = self.create_console_filter(self._original_console_filter)
         else:
             # No default handler, create our own
             h_id = logger.add(
@@ -72,6 +88,18 @@ class Library:
                 colorize=True,
             )
             self.handlers.append(h_id)
+
+    def setup_textio_handler(self, text_io: TextIO):
+        h_id = logger.add(
+            text_io,
+            level=DEBUG,  # File gets all debug messages
+            filter=self.create_file_filter(),
+            enqueue=True,
+            catch=True,
+            backtrace=True,
+            diagnose=True,
+        )
+        self.handlers.append(h_id)
 
     def setup_file_handler(self, log_file: Path):
         """Setup file logging handler."""
@@ -94,15 +122,20 @@ class Library:
 _lib = Library()
 
 
-def set_logging(silent: bool, debug: bool, log_file: Path = None):
+def set_logging(
+    silent: bool, debug: bool, text_io: TextIO, log_file: Path | None = None
+):
     """Configure logging for the library."""
     _lib.set_level(silent, debug)
     _lib.cleanup_handlers()
     _lib.setup_console_handler()
-    _lib.setup_file_handler(log_file)
+    _lib.setup_textio_handler(text_io)
+    if log_file:
+        _lib.setup_file_handler(log_file)
 
 
 # Direct exports from logger
+success = logger.success
 debug = logger.debug
 info = logger.info
 warning = logger.warning

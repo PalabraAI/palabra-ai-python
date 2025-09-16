@@ -3,14 +3,14 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable
 from dataclasses import KW_ONLY, dataclass, field
-from functools import partial
 
-from palabra_ai.base.message import Message, TranscriptionMessage
-from palabra_ai.base.task import Task
 from palabra_ai.config import Config
 from palabra_ai.constant import SLEEP_INTERVAL_DEFAULT
-from palabra_ai.task.realtime import Realtime
-from palabra_ai.util.capped_set import CappedSet
+from palabra_ai.message import Message, TranscriptionMessage
+from palabra_ai.task.base import Task
+from palabra_ai.task.io.base import Io
+
+# from palabra_ai.task.realtime import Realtime
 from palabra_ai.util.logger import debug, error
 
 
@@ -19,12 +19,11 @@ class Transcription(Task):
     """Processes transcriptions and calls configured callbacks."""
 
     cfg: Config
-    rt: Realtime
+    io: Io
     _: KW_ONLY
     suppress_callback_errors: bool = True
-    _webrtc_queue: asyncio.Queue | None = field(default=None, init=False)
+    _out_q: asyncio.Queue | None = field(default=None, init=False)
     _callbacks: dict[str, Callable] = field(default_factory=dict, init=False)
-    _dedup: CappedSet[str] = field(default_factory=partial(CappedSet, 100), init=False)
 
     def __post_init__(self):
         # Collect callbacks by language
@@ -38,8 +37,8 @@ class Transcription(Task):
                 self._callbacks[target.lang.code] = target.on_transcription
 
     async def boot(self):
-        self._webrtc_queue = self.rt.out_foq.subscribe(self, maxsize=0)
-        await self.rt.ready
+        self._out_q = self.io.out_msg_foq.subscribe(self, maxsize=0).q
+        await self.io.ready
         debug(
             f"Transcription processor started for languages: {list(self._callbacks.keys())}"
         )
@@ -47,31 +46,26 @@ class Transcription(Task):
     async def do(self):
         while not self.stopper:
             try:
-                rt_msg = await asyncio.wait_for(
-                    self._webrtc_queue.get(), timeout=SLEEP_INTERVAL_DEFAULT
+                msg = await asyncio.wait_for(
+                    self._out_q.get(), timeout=SLEEP_INTERVAL_DEFAULT
                 )
-                if rt_msg is None:
+                if msg is None:
                     debug("Received None from WebRTC queue, stopping...")
                     break
             except TimeoutError:
                 continue
-            self._webrtc_queue.task_done()
+            self._out_q.task_done()
             # Process message
-            await self._process_message(rt_msg.msg)
+            await self._process_message(msg)
 
     async def exit(self):
-        self.rt.out_foq.unsubscribe(self)
+        self.io.out_msg_foq.unsubscribe(self)
 
     async def _process_message(self, msg: Message):
         """Process a single message and call appropriate callbacks."""
         try:
             if not isinstance(msg, TranscriptionMessage):
                 return
-
-            _dedup = msg.dedup
-            if _dedup in self._dedup:
-                return
-            self._dedup.add(_dedup)
 
             callback = self._callbacks.get(msg.language.code)
             if not callback:
