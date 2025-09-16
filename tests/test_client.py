@@ -106,9 +106,12 @@ def test_run_with_uvloop():
 
                     # Mock the manager
                     with patch.object(client, 'process') as mock_process:
-                        mock_manager = AsyncMock()
-                        mock_manager.task = AsyncMock()
-                        mock_process.return_value.__aenter__.return_value = mock_manager
+                        mock_manager = MagicMock()
+                        mock_manager.task = MagicMock()
+                        mock_async_context = AsyncMock()
+                        mock_async_context.__aenter__.return_value = mock_manager
+                        mock_async_context.__aexit__.return_value = None
+                        mock_process.return_value = mock_async_context
 
                         client.run(config)
 
@@ -138,9 +141,12 @@ def test_run_without_uvloop():
 
                 # Mock the manager
                 with patch.object(client, 'process') as mock_process:
-                    mock_manager = AsyncMock()
-                    mock_manager.task = AsyncMock()
-                    mock_process.return_value.__aenter__.return_value = mock_manager
+                    mock_manager = MagicMock()
+                    mock_manager.task = MagicMock()
+                    mock_async_context = AsyncMock()
+                    mock_async_context.__aenter__.return_value = mock_manager
+                    mock_async_context.__aexit__.return_value = None
+                    mock_process.return_value = mock_async_context
 
                     # Should not raise error
                     client.run(config)
@@ -211,9 +217,12 @@ def test_run_with_deep_debug():
 
                 # Mock the manager
                 with patch.object(client, 'process') as mock_process:
-                    mock_manager = AsyncMock()
-                    mock_manager.task = AsyncMock()
-                    mock_process.return_value.__aenter__.return_value = mock_manager
+                    mock_manager = MagicMock()
+                    mock_manager.task = MagicMock()
+                    mock_async_context = AsyncMock()
+                    mock_async_context.__aenter__.return_value = mock_manager
+                    mock_async_context.__aexit__.return_value = None
+                    mock_process.return_value = mock_async_context
 
                     result = client.run(config)
 
@@ -466,10 +475,11 @@ def test_run_async_with_manager_task_cancelled():
 
     async def test_coro():
         with patch.object(client, 'process') as mock_process:
-            mock_manager = AsyncMock()
-            async def cancelled_task():
-                raise asyncio.CancelledError()
-            mock_manager.task = asyncio.create_task(cancelled_task())
+            mock_manager = MagicMock()
+            # Create a future that raises CancelledError when awaited
+            mock_task = asyncio.Future()
+            mock_task.set_exception(asyncio.CancelledError())
+            mock_manager.task = mock_task
             mock_manager.logger = MagicMock()
             mock_manager.logger._task = MagicMock()
             mock_manager.logger._task.done.return_value = True
@@ -493,10 +503,11 @@ def test_run_async_with_manager_error():
 
     async def test_coro():
         with patch.object(client, 'process') as mock_process:
-            mock_manager = AsyncMock()
-            async def error_task():
-                raise ValueError("Manager error")
-            mock_manager.task = asyncio.create_task(error_task())
+            mock_manager = MagicMock()
+            # Create a future that raises ValueError when awaited
+            mock_task = asyncio.Future()
+            mock_task.set_exception(ValueError("Manager error"))
+            mock_manager.task = mock_task
             mock_manager.logger = MagicMock()
             mock_manager.logger._task = MagicMock()
             mock_manager.logger._task.done.return_value = False
@@ -523,7 +534,7 @@ def test_run_async_with_logger_timeout():
 
     async def test_coro():
         with patch.object(client, 'process') as mock_process:
-            mock_manager = AsyncMock()
+            mock_manager = MagicMock()
             async def normal_task():
                 return None
             mock_manager.task = asyncio.create_task(normal_task())
@@ -553,10 +564,11 @@ def test_run_async_with_logger_exception():
 
     async def test_coro():
         with patch.object(client, 'process') as mock_process:
-            mock_manager = AsyncMock()
-            async def normal_task():
-                return None
-            mock_manager.task = asyncio.create_task(normal_task())
+            mock_manager = MagicMock()
+            # Create a future that completes normally
+            mock_task = asyncio.Future()
+            mock_task.set_result(None)
+            mock_manager.task = mock_task
             mock_manager.logger = MagicMock()
             mock_manager.logger._task = MagicMock()
             mock_manager.logger._task.done.return_value = True

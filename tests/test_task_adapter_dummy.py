@@ -81,10 +81,11 @@ class TestDummyReader:
             await asyncio.sleep(0.01)
             +reader.stopper
 
-        asyncio.create_task(set_stopper())
+        task = asyncio.create_task(set_stopper())
 
         # Should exit when stopper is set
         await reader.do()
+        await task
 
     @pytest.mark.asyncio
     async def test_do_with_eof(self):
@@ -98,10 +99,11 @@ class TestDummyReader:
             await asyncio.sleep(0.01)
             +reader.eof
 
-        asyncio.create_task(set_eof())
+        task = asyncio.create_task(set_eof())
 
         # Should exit when EOF is set
         await reader.do()
+        await task
 
     @pytest.mark.asyncio
     async def test_exit_with_eof_not_set(self):
@@ -145,6 +147,11 @@ class TestDummyWriter:
         writer.sub_tg = MagicMock()
         mock_task = MagicMock()
         writer.sub_tg.create_task.return_value = mock_task
+
+        # Mock the q_reader method to avoid creating actual coroutine
+        mock_coro = asyncio.Future()
+        mock_coro.set_result(None)
+        writer.q_reader = MagicMock(return_value=mock_coro)
 
         await writer.boot()
 
@@ -231,10 +238,11 @@ class TestDummyWriter:
             await asyncio.sleep(0.01)
             +writer.eof
 
-        asyncio.create_task(set_eof())
+        task = asyncio.create_task(set_eof())
 
         # Should exit when EOF is set
         await writer.do()
+        await task
 
     @pytest.mark.asyncio
     async def test_exit_with_running_task(self):
