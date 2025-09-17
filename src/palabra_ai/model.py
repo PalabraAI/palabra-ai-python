@@ -20,3 +20,4 @@ class RunResult(BaseModel):
     ok: bool
     exc: BaseException | None = None
     log_data: LogData | None = Field(default=None, repr=False)
+    eos: bool = False
