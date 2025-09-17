@@ -444,3 +444,27 @@ class TestIo:
             
             # Should sleep for chunk_duration - delta = 20ms - 5ms = 15ms = 0.015s
             mock_sleep.assert_called_once_with(0.015)
+
+    def test_eos_received_field_default(self, mock_config, mock_credentials, mock_reader, mock_writer):
+        """Test Io eos_received field defaults to False"""
+        io = ConcreteIo(
+            cfg=mock_config,
+            credentials=mock_credentials,
+            reader=mock_reader,
+            writer=mock_writer
+        )
+
+        assert hasattr(io, 'eos_received')
+        assert io.eos_received is False
+
+    def test_eos_received_field_can_be_set(self, mock_config, mock_credentials, mock_reader, mock_writer):
+        """Test Io eos_received field can be set to True"""
+        io = ConcreteIo(
+            cfg=mock_config,
+            credentials=mock_credentials,
+            reader=mock_reader,
+            writer=mock_writer
+        )
+
+        io.eos_received = True
+        assert io.eos_received is True

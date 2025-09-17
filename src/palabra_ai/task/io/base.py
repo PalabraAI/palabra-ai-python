@@ -49,6 +49,7 @@ class Io(Task):
     _start_time: float | None = field(default=None, init=False)
     _sent_count: int = field(default=0, init=False)
     _pending: list = field(default_factory=list, init=False)
+    eos_received: bool = field(default=False, init=False)
 
     @property
     @abc.abstractmethod

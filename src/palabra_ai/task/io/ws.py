@@ -82,10 +82,12 @@ class WsIo(Io):
                     self.out_msg_foq.publish(msg)
                     debug(f"-> {msg!r}")
                     if isinstance(msg, EosMessage):
+                        self.eos_received = True
                         raise EOFError(f"End of stream received: {msg}")
 
         except EOFError as e:
             +self.eof  # noqa
+            self.eos_received = True
             debug(f"EOF!!! {e}")
         finally:
             self.writer.q.put_nowait(None)
