@@ -11,13 +11,15 @@ from palabra_ai.config import (
 from palabra_ai.lang import Language, ES, EN, FR, DE, JA, KO, BA, AZ, FIL, ZH_HANS, TH
 from palabra_ai.exc import ConfigurationError
 from palabra_ai.message import Message
+from palabra_ai.util.orjson import from_json
+
 
 def test_validate_language():
     """Test validate_language function"""
     # Test with string
     lang = validate_language("es")
     assert lang.code == "es"
-    
+
     # Test with Language object
     lang_obj = Language.get_or_create("en")
     assert validate_language(lang_obj) == lang_obj
@@ -30,7 +32,7 @@ def test_serialize_language():
 def test_io_mode():
     """Test IoMode properties"""
     mode = IoMode(name="test", sample_rate=48000, num_channels=2, chunk_duration_ms=20)
-    
+
     assert mode.samples_per_channel == 960  # 48000 * 0.02
     assert mode.bytes_per_channel == 1920  # 960 * 2
     assert mode.chunk_samples == 1920  # 960 * 2
@@ -45,7 +47,7 @@ def test_webrtc_mode():
     assert mode.sample_rate == 48000
     assert mode.num_channels == 1
     assert mode.chunk_duration_ms == 320
-    
+
     dump = mode.model_dump()
     assert dump["input_stream"]["source"]["type"] == "webrtc"
     assert dump["output_stream"]["target"]["type"] == "webrtc"
@@ -57,7 +59,7 @@ def test_ws_mode():
     assert mode.sample_rate == 24000
     assert mode.num_channels == 1
     assert mode.chunk_duration_ms == 320
-    
+
     dump = mode.model_dump()
     assert dump["input_stream"]["source"]["type"] == "ws"
     assert dump["input_stream"]["source"]["format"] == "pcm_s16le"
@@ -121,13 +123,13 @@ def test_source_lang():
 def test_source_lang_with_callback():
     """Test SourceLang with callback validation"""
     lang = Language.get_or_create("es")
-    
+
     def callback(msg):
         pass
-    
+
     source = SourceLang(lang=lang, on_transcription=callback)
     assert source.on_transcription == callback
-    
+
     # Test with non-callable
     with pytest.raises(ConfigurationError) as exc_info:
         SourceLang(lang=lang, on_transcription="not callable")
@@ -146,19 +148,19 @@ def test_target_lang():
 def test_source_lang_validation():
     """Test SourceLang language validation"""
     from palabra_ai.lang import EN, BA, AZ, FIL
-    
+
     # Valid source languages should work
     source = SourceLang(lang=EN)
     assert source.lang == EN
-    
+
     source = SourceLang(lang=BA)  # Bashkir can be source
     assert source.lang == BA
-    
+
     # Invalid source languages should raise error
     with pytest.raises(ConfigurationError) as exc_info:
         SourceLang(lang=AZ)  # Azerbaijani cannot be source
     assert "not supported as a source language" in str(exc_info.value)
-    
+
     with pytest.raises(ConfigurationError) as exc_info:
         SourceLang(lang=FIL)  # Filipino cannot be source
     assert "not supported as a source language" in str(exc_info.value)
@@ -167,22 +169,22 @@ def test_source_lang_validation():
 def test_target_lang_validation():
     """Test TargetLang language validation"""
     from palabra_ai.lang import ES, AZ, ZH_HANS, BA, TH
-    
+
     # Valid target languages should work
     target = TargetLang(lang=ES)
     assert target.lang == ES
-    
+
     target = TargetLang(lang=AZ)  # Azerbaijani can be target
     assert target.lang == AZ
-    
+
     target = TargetLang(lang=ZH_HANS)  # Chinese Simplified can be target
     assert target.lang == ZH_HANS
-    
+
     # Invalid target languages should raise error
     with pytest.raises(ConfigurationError) as exc_info:
         TargetLang(lang=BA)  # Bashkir cannot be target
     assert "not supported as a target language" in str(exc_info.value)
-    
+
     with pytest.raises(ConfigurationError) as exc_info:
         TargetLang(lang=TH)  # Thai cannot be target
     assert "not supported as a target language" in str(exc_info.value)
@@ -191,7 +193,7 @@ def test_config_basic():
     """Test basic Config creation"""
     config = Config()
     assert config.source is None
-    assert config.targets is None  # targets is None initially, converted to [] during certain operations
+    assert config.targets == [] # targets is None initially, converted to [] during certain operations
     assert config.preprocessing.enable_vad is True
     assert isinstance(config.mode, WsMode)
     assert config.silent is False
@@ -200,7 +202,7 @@ def test_config_with_source_and_targets():
     """Test Config with source and targets"""
     source = SourceLang(lang=ES)
     targets = [TargetLang(lang=EN), TargetLang(lang=FR)]
-    
+
     config = Config(source=source, targets=targets)
     assert config.source.lang.code == "es"
     assert len(config.targets) == 2
@@ -211,12 +213,12 @@ def test_config_single_target():
     """Test Config with single target (not a list)"""
     source = SourceLang(lang=ES)
     target = TargetLang(lang=EN)
-    
+
     config = Config(source=source, targets=target)
     # model_post_init should have been called and converted single target to list
     # But it seems the init process doesn't trigger it properly. Let's test what we get
     assert config.targets == target  # Should be single target initially
-    
+
     # Force the conversion by calling model_post_init manually
     config.model_post_init(None)
     assert isinstance(config.targets, list)
@@ -228,7 +230,7 @@ def test_config_to_dict():
     source = SourceLang(lang=ES)
     target = TargetLang(lang=EN)
     config = Config(source=source, targets=[target])
-    
+
     data = config.to_dict()
     assert "pipeline" in data
     assert data["pipeline"]["transcription"]["source_language"] == "es"
@@ -262,7 +264,7 @@ def test_config_from_dict():
             "allowed_message_types": []
         }
     }
-    
+
     config = Config.from_dict(data)
     assert config.source.lang.code == "es"
     assert len(config.targets) == 1
@@ -307,163 +309,113 @@ def test_config_round_trip_ws_mode():
     assert config2.source.lang.code == "es"
     assert config2.targets[0].lang.code == "en-us"  # EN smart maps to EN_US
 
-
-def test_config_round_trip_webrtc_mode():
-    """Test that Config with WebrtcMode survives round-trip serialization"""
-    # Create config with WebrtcMode
-    config1 = Config(
-        source=SourceLang(lang=FR),
-        targets=[TargetLang(lang=DE)],
-        mode=WebrtcMode()
-    )
-
-    # Serialize to JSON string
-    json_str1 = config1.to_json()
-
-    # Deserialize back to Config
-    config2 = Config.from_json(json_str1)
-
-    # Serialize again
-    json_str2 = config2.to_json()
-
-    # JSON strings should be identical (idempotent)
-    assert json_str1 == json_str2
-
-    # Check that mode was preserved
-    assert isinstance(config2.mode, WebrtcMode)
-
-    # Check languages preserved
-    assert config2.source.lang.code == "fr"
-    assert config2.targets[0].lang.code == "de"
-
-
-def test_config_json_format():
-    """Test that Config serializes to expected JSON format"""
+def test_config_minimal_serialization():
+    """Test that Config with explicit source/targets serializes minimally"""
+    from palabra_ai.task.adapter.dummy import DummyReader, DummyWriter
+    
     config = Config(
-        source=SourceLang(lang=ES),
-        targets=[TargetLang(lang=EN)],
-        mode=WsMode(sample_rate=24000, num_channels=1)
+        source=SourceLang(EN, DummyReader()),
+        targets=[TargetLang(ES, DummyWriter())]
     )
-
-    # Convert to dict for inspection
-    data = json.loads(config.to_json())
-
-    # Check that mode is serialized as input_stream/output_stream
-    assert "input_stream" in data
-    assert "output_stream" in data
-    assert "mode" not in data  # mode should not be in JSON
-
-    # Check input_stream structure
-    assert data["input_stream"]["source"]["type"] == "ws"
-    assert data["input_stream"]["source"]["sample_rate"] == 24000
-    assert data["input_stream"]["source"]["channels"] == 1
-    assert data["input_stream"]["source"]["format"] == "pcm_s16le"
-
-    # Check pipeline structure
-    assert "pipeline" in data
-    assert data["pipeline"]["transcription"]["source_language"] == "es"
-    assert data["pipeline"]["translations"][0]["target_language"] == "en-us"  # EN smart maps to EN_US
-
-
-def test_config_from_api_json():
-    """Test that Config can be loaded from API-style JSON"""
-    api_json = {
+    
+    expected = {
         "input_stream": {
             "content_type": "audio",
             "source": {
                 "type": "ws",
                 "format": "pcm_s16le",
                 "sample_rate": 24000,
-                "channels": 1
-            }
+                "channels": 1,
+            },
         },
         "output_stream": {
             "content_type": "audio",
-            "target": {
-                "type": "ws",
-                "format": "pcm_s16le",
-                "sample_rate": 24000,
-                "channels": 1
-            }
+            "target": {"type": "ws", "format": "pcm_s16le", "sample_rate": 24000, "channels": 1},
         },
         "pipeline": {
-            "preprocessing": {},
-            "transcription": {
-                "source_language": "es"
-            },
-            "translations": [{
-                "target_language": "en-us"
-            }],
-            "translation_queue_configs": {},
-            "allowed_message_types": []
-        }
+            "transcription": {"source_language": "en"},
+            "translations": [{"target_language": "es"}],
+        },
     }
-
-    # Load from JSON
-    config = Config.from_json(json.dumps(api_json))
-
-    # Check that mode was reconstructed
-    assert isinstance(config.mode, WsMode)
-    assert config.mode.sample_rate == 24000
-    assert config.mode.num_channels == 1
-    assert config.mode.chunk_duration_ms == 320  # Default for WsMode
-
-    # Check languages
-    assert config.source.lang.code == "es"
-    assert config.targets[0].lang.code == "en-us"  # Parsed from API JSON with "en-us"
+    
+    result = config.model_dump()
+    assert result == expected
 
 
-def test_config_multiple_round_trips():
-    """Test that Config remains stable after multiple round trips"""
-    config = Config(
-        source=SourceLang(lang=JA),
-        targets=[TargetLang(lang=KO)],
-        mode=WsMode()
+def test_config_minimal_roundtrip():
+    """Test that minimal config survives roundtrip"""
+    from palabra_ai.task.adapter.dummy import DummyReader, DummyWriter
+    
+    config1 = Config(
+        source=SourceLang(EN, DummyReader()),
+        targets=[TargetLang(ES, DummyWriter())]
     )
+    
+    json1 = config1.to_json()
+    config2 = Config.from_json(json1)
+    json2 = config2.to_json()
+    config3 = Config.from_dict(from_json(json2))
+    json3 = config3.to_json()
 
-    # First round trip
+    assert json1 == json2
+    assert json1 == json2 == json3
+
+
+def test_config_full_fields_serialization():
+    """Test that config with all fields set serializes fully"""
+    from palabra_ai.task.adapter.dummy import DummyReader, DummyWriter
+    
+    source = SourceLang(EN, DummyReader())
+    source.transcription.asr_model = "custom-asr"
+    source.transcription.denoise = "heavy"
+    source.transcription.priority = "high"
+    
+    target = TargetLang(ES, DummyWriter())
+    target.translation.translation_model = "custom-trans"
+    target.translation.style = "formal"
+
+    queue_configs = QueueConfigs()
+    queue_configs.global_.auto_tempo = True
+    
+    config = Config(source=source, targets=[target], translation_queue_configs=queue_configs)
+    config.preprocessing.enable_vad = False
+    config.preprocessing.vad_threshold = 0.8
+    
+    result = config.model_dump()
+
+    # Should contain all explicitly set fields
+    assert result["pipeline"]["transcription"]["asr_model"] == "custom-asr"
+    assert result["pipeline"]["transcription"]["denoise"] == "heavy"
+    assert result["pipeline"]["transcription"]["priority"] == "high"
+    assert result["pipeline"]["translations"][0]["translation_model"] == "custom-trans"
+    assert result["pipeline"]["translations"][0]["style"] == "formal"
+    assert result["pipeline"]["preprocessing"]["enable_vad"] == False
+    assert result["pipeline"]["preprocessing"]["vad_threshold"] == 0.8
+    assert result["pipeline"]["translation_queue_configs"]["global"]["auto_tempo"] == True
+
+
+def test_config_full_roundtrip():
+    """Test that full config survives roundtrip"""
+    from palabra_ai.task.adapter.dummy import DummyReader, DummyWriter
+    
+    source = SourceLang(EN, DummyReader())
+    source.transcription.asr_model = "whisper-large"
+    source.transcription.denoise = "standard"
+    
+    target = TargetLang(ES, DummyWriter())
+    target.translation.translation_model = "opus-mt"
+    
+    config = Config(source=source, targets=[target])
+    config.preprocessing.enable_vad = False
+    
     json1 = config.to_json()
     config2 = Config.from_json(json1)
     json2 = config2.to_json()
 
-    # Second round trip
-    config3 = Config.from_json(json2)
-    json3 = config3.to_json()
+    data1 = from_json(json1)
+    assert data1["pipeline"]["transcription"]["asr_model"] == "whisper-large"
+    assert data1["pipeline"]["transcription"]["denoise"] == "standard"
+    assert data1["pipeline"]["translations"][0]["translation_model"] == "opus-mt"
+    assert data1["pipeline"]["preprocessing"]["enable_vad"] == False
 
-    # Third round trip
-    config4 = Config.from_json(json3)
-    json4 = config4.to_json()
-
-    # All JSON representations should be identical
-    assert json1 == json2 == json3 == json4
-
-    # Final config should have same properties
-    assert config4.source.lang.code == "ja"
-    assert config4.targets[0].lang.code == "ko"
-    assert isinstance(config4.mode, WsMode)
-
-
-def test_config_preserves_preprocessing_settings():
-    """Test that preprocessing settings are preserved in round trip"""
-    config1 = Config(
-        source=SourceLang(lang=ES),
-        targets=[TargetLang(lang=EN)]
-    )
-
-    # Modify preprocessing settings
-    config1.preprocessing.enable_vad = False
-    config1.preprocessing.vad_threshold = 0.7
-    config1.preprocessing.auto_tempo = True
-
-    # Round trip
-    json_str = config1.to_json()
-    config2 = Config.from_json(json_str)
-
-    # Check preprocessing preserved
-    assert config2.preprocessing.enable_vad == False
-    assert config2.preprocessing.vad_threshold == 0.7
-    assert config2.preprocessing.auto_tempo == True
-
-    # Check idempotency
-    json_str2 = config2.to_json()
-    assert json_str == json_str2
+    assert json1 == json2

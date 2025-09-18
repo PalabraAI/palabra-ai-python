@@ -435,22 +435,29 @@ class Config(BaseModel):
         targets: list[TargetLang] | TargetLang | None = None,
         **kwargs,
     ):
+        # Call parent __init__ with flag to indicate we're calling from __init__
         super().__init__(__from_init=True, **kwargs)
-        if not self.source:
+
+        # Set source and targets if provided
+        if source is not None:
             self.source = source
-        if not self.targets:
+        if targets is not None:
             self.targets = targets
 
     def model_post_init(self, context: Any, /) -> None:
+        # Handle targets normalization
         if self.targets is None:
             self.targets = []
         elif isinstance(self.targets, TargetLang):
             self.targets = [self.targets]
+
+        # Handle logging setup
         if self.log_file:
             self.log_file = Path(self.log_file).absolute()
             self.log_file.parent.mkdir(exist_ok=True, parents=True)
             self.trace_file = self.log_file.with_suffix(".trace.json")
         set_logging(self.silent, self.debug, self.internal_logs, self.log_file)
+
         super().model_post_init(context)
 
     @model_validator(mode="before")
@@ -510,40 +517,77 @@ class Config(BaseModel):
 
         return data
 
-    def model_dump(self, by_alias=True, exclude_none=False, **kwargs) -> dict[str, Any]:
-        # Get base dump
+    def _mark_nested_changes(self, obj):
+        """Recursively mark fields with nested changes as set"""
+        if not isinstance(obj, BaseModel):
+            return
+
+        for field_name in obj.__class__.model_fields:
+            field_value = getattr(obj, field_name, None)
+            if isinstance(field_value, BaseModel):
+                self._mark_nested_changes(field_value)
+                if field_value.model_fields_set:
+                    current_fields = set(obj.model_fields_set)
+                    current_fields.add(field_name)
+                    object.__setattr__(obj, "__pydantic_fields_set__", current_fields)
+            elif isinstance(field_value, list):
+                # Handle lists of BaseModel objects (like targets)
+                for item in field_value:
+                    if isinstance(item, BaseModel):
+                        self._mark_nested_changes(item)
+
+    def model_dump(
+        self, by_alias=True, exclude_none=False, exclude_unset=True, **kwargs
+    ) -> dict[str, Any]:
+        # For exclude_unset=True, mark all fields with nested changes
+        if exclude_unset:
+            self._mark_nested_changes(self)
+
+        # exclude_unset=True by default for minimal serialization
         data = super().model_dump(
-            by_alias=by_alias, exclude_none=exclude_none, **kwargs
+            by_alias=by_alias,
+            exclude_none=exclude_none,
+            exclude_unset=exclude_unset,
+            **kwargs,
         )
 
         # Extract source and targets
-        source = data.pop("source")
-        targets = data.pop("targets")
+        source = data.pop("source", None)
+        targets = data.pop("targets", None) or []
 
-        # Build transcription with source_language
-        transcription = source["transcription"].copy()
-        transcription["source_language"] = source["lang"]
+        # Build transcription section
+        transcription = {}
+        if source:
+            transcription["source_language"] = source["lang"]
+            if "transcription" in source:
+                transcription.update(source["transcription"])
 
-        # Build translations with target_language
+        # Build translations section
         translations = []
         for target in targets:
-            translation = target["translation"].copy()
-            translation["target_language"] = target["lang"]
+            translation = {"target_language": target["lang"]}
+            if "translation" in target:
+                translation.update(target["translation"])
             translations.append(translation)
 
-        # Build pipeline structure
+        # Build pipeline - basic structure
         pipeline = {
-            "preprocessing": data.pop("preprocessing"),
             "transcription": transcription,
             "translations": translations,
-            "translation_queue_configs": data.pop("translation_queue_configs"),
-            "allowed_message_types": data.pop("allowed_message_types"),
         }
 
-        # data.pop("input_stream", None)
-        # data.pop("output_stream", None)
+        # Add other fields ONLY if they exist in data
+        # (with exclude_unset=True only explicitly set fields will be there)
+        for field in [
+            "preprocessing",
+            "translation_queue_configs",
+            "allowed_message_types",
+        ]:
+            if field in data:
+                pipeline[field] = data.pop(field)
 
-        result = {**data, **{"pipeline": pipeline}, **self.mode.model_dump()}
+        # Combine with mode.model_dump()
+        result = {**data, "pipeline": pipeline, **self.mode.model_dump()}
 
         return result
 
