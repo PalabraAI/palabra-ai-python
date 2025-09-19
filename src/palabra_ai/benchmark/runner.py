@@ -16,7 +16,6 @@ except ImportError:
     pass  # uvloop not available, use default event loop
 
 from palabra_ai import PalabraAI, Config, SourceLang, TargetLang
-from palabra_ai.config import WsMode, WebrtcMode
 from palabra_ai.lang import Language, is_valid_source_language, is_valid_target_language
 from palabra_ai.task.adapter.file import FileReader
 from palabra_ai.task.adapter.dummy import DummyWriter
@@ -163,30 +162,34 @@ class BenchmarkRunner:
                 
                 # Only override mode if explicitly provided via CLI
                 if self.mode is not None:
-                    if self.mode == "webrtc":
-                        config.mode = WebrtcMode(chunk_duration_ms=self.chunk_duration_ms or 10)
-                    else:
-                        config.mode = WsMode(chunk_duration_ms=self.chunk_duration_ms or 100)
+                    from palabra_ai.config import IoMode
+                    config.mode = IoMode.from_string(
+                        self.mode,
+                        chunk_duration_ms=self.chunk_duration_ms or (10 if self.mode == "webrtc" else 100)
+                    )
                 elif self.chunk_duration_ms is not None:
                     # If only chunk_duration_ms is overridden, update existing mode
-                    if isinstance(config.mode, WebrtcMode):
-                        config.mode = WebrtcMode(chunk_duration_ms=self.chunk_duration_ms)
-                    else:
-                        config.mode = WsMode(chunk_duration_ms=self.chunk_duration_ms)
+                    from palabra_ai.config import IoMode
+                    config.mode = IoMode.from_string(
+                        config.mode.mode_type,
+                        chunk_duration_ms=self.chunk_duration_ms
+                    )
                 else:
                     # For benchmark, ensure WsMode has 100ms chunks (not the default 320ms)
-                    if isinstance(config.mode, WsMode):
-                        config.mode.chunk_duration_ms = 100
+                    if config.mode.mode_type == "ws":
+                        from palabra_ai.config import IoMode
+                        config.mode = IoMode.from_string("ws", chunk_duration_ms=100)
                 
                 # Set benchmark-specific settings
                 config.silent = self.silent
                 config.benchmark = True
             else:
                 # Create appropriate IoMode based on mode parameter
-                if self.mode == "webrtc":
-                    io_mode = WebrtcMode(chunk_duration_ms=self.chunk_duration_ms)
-                else:  # default to ws
-                    io_mode = WsMode(chunk_duration_ms=self.chunk_duration_ms)
+                from palabra_ai.config import IoMode
+                io_mode = IoMode.from_string(
+                    self.mode or "ws",  # default to ws
+                    chunk_duration_ms=self.chunk_duration_ms
+                )
                 
                 # Create config from scratch
                 config = Config(

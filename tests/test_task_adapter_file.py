@@ -75,29 +75,26 @@ class TestFileReader:
         reader = FileReader(path=test_file, preprocess=False)
         reader.cfg = MagicMock()
         reader.cfg.mode.sample_rate = 16000
+        reader.cfg.mode.mode_type = "ws"
         
-        with patch('palabra_ai.task.adapter.file.av.open') as mock_open:
-            with patch('palabra_ai.task.adapter.file.create_audio_resampler') as mock_resampler:
-                # Setup mocks
+        with patch('palabra_ai.task.adapter.file.setup_streaming_audio') as mock_setup:
+                # Setup mocks for setup_streaming_audio return values
                 mock_container = MagicMock()
-                mock_stream = MagicMock()
-                mock_stream.type = "audio"
-                mock_stream.duration = 1000
-                mock_stream.time_base = 0.001
-                mock_stream.codec.name = "mp3"
-                mock_stream.sample_rate = 44100
-                mock_stream.channels = 2
-                mock_stream.codec_context.thread_type = MagicMock()
-                
-                mock_open.return_value = mock_container
-                mock_container.streams = [mock_stream]
+                mock_resampler = MagicMock()
+                mock_metadata = {
+                    "original_rate": 8000,
+                    "final_rate": 16000,
+                    "resampled": True,
+                    "duration": 1.0,
+                }
+                mock_setup.return_value = (mock_container, mock_resampler, 16000, mock_metadata)
                 mock_container.decode.return_value = iter([])
-                
+
                 reader.do_preprocess()
-                
+
                 assert reader._container is not None
                 assert reader._target_rate == 16000
-                mock_resampler.assert_called_once_with(16000)
+                mock_setup.assert_called_once_with(test_file, 16000, "ws", timeout=10.0)
     
     @pytest.mark.asyncio
     async def test_read_preprocessed_mode(self, tmp_path):

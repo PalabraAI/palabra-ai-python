@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, MagicMock, patch, call
 import pytest
 from palabra_ai.task.manager import Manager
 from palabra_ai.exc import ConfigurationError
-from palabra_ai.config import Config
+from palabra_ai.config import Config, WsMode, WebrtcMode
 from palabra_ai.internal.rest import SessionCredentials
 from palabra_ai.task.adapter.base import Reader, Writer
 from palabra_ai.task.adapter.dummy import DummyWriter
@@ -70,8 +70,7 @@ class TestManager:
         self.mock_config.source.reader = MockReader()
         self.mock_config.targets[0].writer = MockWriter()
         self.mock_config.targets[0].on_transcription = None
-        self.mock_config.mode = MagicMock()
-        self.mock_config.mode.name = "ws"
+        self.mock_config.mode = WsMode()
         self.mock_config.log_file = None
         self.mock_config.to_dict.return_value = {}
     
@@ -125,11 +124,22 @@ class TestManager:
     
     def test_init_unsupported_io_mode(self):
         """Test error when unsupported IO mode"""
-        self.mock_config.mode.name = "unsupported"
-        
+        # Create a custom mode class that's not WebrtcMode or WsMode
+        from palabra_ai.config import IoMode
+
+        class UnsupportedMode(IoMode):
+            pass
+
+        self.mock_config.mode = UnsupportedMode(
+            name="unsupported",
+            sample_rate=16000,
+            num_channels=1,
+            chunk_duration_ms=100
+        )
+
         with pytest.raises(ConfigurationError) as exc_info:
             Manager(cfg=self.mock_config, credentials=self.mock_credentials)
-        
+
         assert "Unsupported IO mode" in str(exc_info.value)
     
     @pytest.mark.asyncio

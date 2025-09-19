@@ -54,14 +54,70 @@ def test_ws_mode():
     """Test WsMode"""
     mode = WsMode()
     assert mode.name == "ws"
-    assert mode.sample_rate == 24000
+    assert mode.sample_rate == 16000
     assert mode.num_channels == 1
     assert mode.chunk_duration_ms == 320
-    
+
     dump = mode.model_dump()
     assert dump["input_stream"]["source"]["type"] == "ws"
     assert dump["input_stream"]["source"]["format"] == "pcm_s16le"
     assert dump["output_stream"]["target"]["type"] == "ws"
+
+def test_io_mode_get_io_class():
+    """Test IoMode.get_io_class() method"""
+    from palabra_ai.task.io.webrtc import WebrtcIo
+    from palabra_ai.task.io.ws import WsIo
+
+    webrtc_mode = WebrtcMode()
+    ws_mode = WsMode()
+
+    assert webrtc_mode.get_io_class() == WebrtcIo
+    assert ws_mode.get_io_class() == WsIo
+
+def test_io_mode_from_string():
+    """Test IoMode.from_string() method"""
+    # Test webrtc mode creation
+    webrtc_mode = IoMode.from_string("webrtc")
+    assert isinstance(webrtc_mode, WebrtcMode)
+    assert webrtc_mode.name == "webrtc"
+
+    # Test ws mode creation
+    ws_mode = IoMode.from_string("ws")
+    assert isinstance(ws_mode, WsMode)
+    assert ws_mode.name == "ws"
+
+    # Test with custom parameters
+    custom_mode = IoMode.from_string("ws", chunk_duration_ms=100)
+    assert custom_mode.chunk_duration_ms == 100
+
+    # Test error for invalid mode
+    with pytest.raises(ConfigurationError) as exc_info:
+        IoMode.from_string("invalid")
+    assert "Unsupported mode string: invalid" in str(exc_info.value)
+
+def test_io_mode_from_api_source():
+    """Test IoMode.from_api_source() method"""
+    # Test webrtc from API source
+    webrtc_source = {"type": "webrtc"}
+    webrtc_mode = IoMode.from_api_source(webrtc_source)
+    assert isinstance(webrtc_mode, WebrtcMode)
+
+    # Test ws from API source
+    ws_source = {
+        "type": "ws",
+        "sample_rate": 24000,
+        "channels": 2
+    }
+    ws_mode = IoMode.from_api_source(ws_source)
+    assert isinstance(ws_mode, WsMode)
+    assert ws_mode.sample_rate == 24000
+    assert ws_mode.num_channels == 2
+
+    # Test error for invalid source type
+    invalid_source = {"type": "invalid"}
+    with pytest.raises(ConfigurationError) as exc_info:
+        IoMode.from_api_source(invalid_source)
+    assert "Unsupported API source type: invalid" in str(exc_info.value)
 
 def test_preprocessing():
     """Test Preprocessing defaults"""
@@ -282,7 +338,7 @@ def test_config_round_trip_ws_mode():
     config1 = Config(
         source=SourceLang(lang=ES),
         targets=[TargetLang(lang=EN)],
-        mode=WsMode(sample_rate=24000, num_channels=1, chunk_duration_ms=100)
+        mode=WsMode(sample_rate=16000, num_channels=1, chunk_duration_ms=100)
     )
 
     # Serialize to JSON string
@@ -299,7 +355,7 @@ def test_config_round_trip_ws_mode():
 
     # Check that mode was preserved
     assert isinstance(config2.mode, WsMode)
-    assert config2.mode.sample_rate == 24000
+    assert config2.mode.sample_rate == 16000
     assert config2.mode.num_channels == 1
     assert config2.mode.chunk_duration_ms == 320  # Default for WsMode
 
@@ -342,7 +398,7 @@ def test_config_json_format():
     config = Config(
         source=SourceLang(lang=ES),
         targets=[TargetLang(lang=EN)],
-        mode=WsMode(sample_rate=24000, num_channels=1)
+        mode=WsMode(sample_rate=16000, num_channels=1)
     )
 
     # Convert to dict for inspection
@@ -355,7 +411,7 @@ def test_config_json_format():
 
     # Check input_stream structure
     assert data["input_stream"]["source"]["type"] == "ws"
-    assert data["input_stream"]["source"]["sample_rate"] == 24000
+    assert data["input_stream"]["source"]["sample_rate"] == 16000
     assert data["input_stream"]["source"]["channels"] == 1
     assert data["input_stream"]["source"]["format"] == "pcm_s16le"
 
@@ -373,7 +429,7 @@ def test_config_from_api_json():
             "source": {
                 "type": "ws",
                 "format": "pcm_s16le",
-                "sample_rate": 24000,
+                "sample_rate": 16000,
                 "channels": 1
             }
         },
@@ -382,7 +438,7 @@ def test_config_from_api_json():
             "target": {
                 "type": "ws",
                 "format": "pcm_s16le",
-                "sample_rate": 24000,
+                "sample_rate": 16000,
                 "channels": 1
             }
         },
@@ -404,7 +460,7 @@ def test_config_from_api_json():
 
     # Check that mode was reconstructed
     assert isinstance(config.mode, WsMode)
-    assert config.mode.sample_rate == 24000
+    assert config.mode.sample_rate == 16000
     assert config.mode.num_channels == 1
     assert config.mode.chunk_duration_ms == 320  # Default for WsMode
 

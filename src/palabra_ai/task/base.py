@@ -97,10 +97,7 @@ class Task(abc.ABC):
                     raise
                 except Exception as e:
                     self._state.append("💥")
-                    error(
-                        f"{self.name}.run() failed with error: {e}, exiting...",
-                        exc_info=True,
-                    )
+                    error(f"{self.name}.run() failed with error: {e}, exiting...")
                     self.sub_tg._abort()
                     self.root_tg._abort()
                     raise
