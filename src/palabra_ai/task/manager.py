@@ -3,9 +3,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import KW_ONLY, dataclass, field
 
-from palabra_ai.config import (
-    Config,
-)
+from palabra_ai.config import Config
 from palabra_ai.constant import (
     BOOT_TIMEOUT,
     SAFE_PUBLICATION_END_DELAY,
@@ -21,8 +19,6 @@ from palabra_ai.task.base import Task
 
 # from palabra_ai.internal.webrtc import AudioTrackSettings
 from palabra_ai.task.io.base import Io
-from palabra_ai.task.io.webrtc import WebrtcIo
-from palabra_ai.task.io.ws import WsIo
 from palabra_ai.task.logger import Logger
 from palabra_ai.task.stat import Stat
 from palabra_ai.task.transcription import Transcription
@@ -97,17 +93,7 @@ class Manager(Task):
         #     self.reader.set_track_settings(self.track_settings)
 
         if not self.io_class:
-            io_classes = {
-                "webrtc": WebrtcIo,
-                "ws": WsIo,
-                # IoMode.WS: WsIo, IoMode.MIXED: MixedIo
-            }
-            self.io_class = io_classes.get(self.cfg.mode.name)
-            if not self.io_class:
-                raise ConfigurationError(
-                    f"Unsupported IO mode: {self.cfg.mode.name}, "
-                    f"supported modes are: {io_classes}"
-                )
+            self.io_class = self.cfg.mode.get_io_class()
         self.io = self.io_class(
             cfg=self.cfg,
             credentials=self.credentials,
