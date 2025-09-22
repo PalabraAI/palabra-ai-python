@@ -8,7 +8,7 @@ from palabra_ai.config import (
     SpeechGen, TranslationAdvanced, Translation, QueueConfig, QueueConfigs,
     validate_language, serialize_language
 )
-from palabra_ai.lang import Language
+from palabra_ai.lang import Language, ES, EN, FR, DE, JA, KO, BA, AZ, FIL, ZH_HANS, TH
 from palabra_ai.exc import ConfigurationError
 from palabra_ai.message import Message
 
@@ -54,7 +54,7 @@ def test_ws_mode():
     """Test WsMode"""
     mode = WsMode()
     assert mode.name == "ws"
-    assert mode.sample_rate == 24000
+    assert mode.sample_rate == 16000
     assert mode.num_channels == 1
     assert mode.chunk_duration_ms == 320
 
@@ -62,6 +62,62 @@ def test_ws_mode():
     assert dump["input_stream"]["source"]["type"] == "ws"
     assert dump["input_stream"]["source"]["format"] == "pcm_s16le"
     assert dump["output_stream"]["target"]["type"] == "ws"
+
+def test_io_mode_get_io_class():
+    """Test IoMode.get_io_class() method"""
+    from palabra_ai.task.io.webrtc import WebrtcIo
+    from palabra_ai.task.io.ws import WsIo
+
+    webrtc_mode = WebrtcMode()
+    ws_mode = WsMode()
+
+    assert webrtc_mode.get_io_class() == WebrtcIo
+    assert ws_mode.get_io_class() == WsIo
+
+def test_io_mode_from_string():
+    """Test IoMode.from_string() method"""
+    # Test webrtc mode creation
+    webrtc_mode = IoMode.from_string("webrtc")
+    assert isinstance(webrtc_mode, WebrtcMode)
+    assert webrtc_mode.name == "webrtc"
+
+    # Test ws mode creation
+    ws_mode = IoMode.from_string("ws")
+    assert isinstance(ws_mode, WsMode)
+    assert ws_mode.name == "ws"
+
+    # Test with custom parameters
+    custom_mode = IoMode.from_string("ws", chunk_duration_ms=100)
+    assert custom_mode.chunk_duration_ms == 100
+
+    # Test error for invalid mode
+    with pytest.raises(ConfigurationError) as exc_info:
+        IoMode.from_string("invalid")
+    assert "Unsupported mode string: invalid" in str(exc_info.value)
+
+def test_io_mode_from_api_source():
+    """Test IoMode.from_api_source() method"""
+    # Test webrtc from API source
+    webrtc_source = {"type": "webrtc"}
+    webrtc_mode = IoMode.from_api_source(webrtc_source)
+    assert isinstance(webrtc_mode, WebrtcMode)
+
+    # Test ws from API source
+    ws_source = {
+        "type": "ws",
+        "sample_rate": 24000,
+        "channels": 2
+    }
+    ws_mode = IoMode.from_api_source(ws_source)
+    assert isinstance(ws_mode, WsMode)
+    assert ws_mode.sample_rate == 24000
+    assert ws_mode.num_channels == 2
+
+    # Test error for invalid source type
+    invalid_source = {"type": "invalid"}
+    with pytest.raises(ConfigurationError) as exc_info:
+        IoMode.from_api_source(invalid_source)
+    assert "Unsupported API source type: invalid" in str(exc_info.value)
 
 def test_preprocessing():
     """Test Preprocessing defaults"""
@@ -198,20 +254,18 @@ def test_config_basic():
 
 def test_config_with_source_and_targets():
     """Test Config with source and targets"""
-    source = SourceLang(lang="es")
-    targets = [TargetLang(lang="en"), TargetLang(lang="fr")]
-
+    source = SourceLang(lang=ES)
+    targets = [TargetLang(lang=EN), TargetLang(lang=FR)]
     config = Config(source=source, targets=targets)
     assert config.source.lang.code == "es"
     assert len(config.targets) == 2
-    assert config.targets[0].lang.code == "en"
+    assert config.targets[0].lang.code == "en"  # Creating from string "en" gives EN object
     assert config.targets[1].lang.code == "fr"
 
 def test_config_single_target():
     """Test Config with single target (not a list)"""
-    source = SourceLang(lang="es")
-    target = TargetLang(lang="en")
-
+    source = SourceLang(lang=ES)
+    target = TargetLang(lang=EN)
     config = Config(source=source, targets=target)
     # model_post_init should have been called and converted single target to list
     # But it seems the init process doesn't trigger it properly. Let's test what we get
@@ -225,19 +279,19 @@ def test_config_single_target():
 
 def test_config_to_dict():
     """Test Config.to_dict()"""
-    source = SourceLang(lang="es")
-    target = TargetLang(lang="en")
+    source = SourceLang(lang=ES)
+    target = TargetLang(lang=EN)
     config = Config(source=source, targets=[target])
 
     data = config.to_dict()
     assert "pipeline" in data
     assert data["pipeline"]["transcription"]["source_language"] == "es"
-    assert data["pipeline"]["translations"][0]["target_language"] == "en"
+    assert data["pipeline"]["translations"][0]["target_language"] == "en-us"  # EN smart maps to EN_US
 
 def test_config_to_json():
     """Test Config.to_json()"""
-    source = SourceLang(lang="es")
-    target = TargetLang(lang="en")  # Add a target to avoid None targets
+    source = SourceLang(lang=ES)
+    target = TargetLang(lang=EN)  # Add a target to avoid None targets
     config = Config(source=source, targets=[target])
     json_str = config.to_json()
     assert isinstance(json_str, str)
@@ -253,7 +307,7 @@ def test_config_from_dict():
             },
             "translations": [
                 {
-                    "target_language": "en",
+                    "target_language": "en-us",
                     "translation_model": "auto"
                 }
             ],
@@ -266,7 +320,7 @@ def test_config_from_dict():
     config = Config.from_dict(data)
     assert config.source.lang.code == "es"
     assert len(config.targets) == 1
-    assert config.targets[0].lang.code == "en"
+    assert config.targets[0].lang.code == "en-us"  # Parsed from "en-us" in JSON
 
 def test_config_allowed_message_types():
     """Test Config allowed_message_types default"""
@@ -280,9 +334,9 @@ def test_config_round_trip_ws_mode():
     """Test that Config with WsMode survives round-trip serialization"""
     # Create config with WsMode
     config1 = Config(
-        source=SourceLang(lang="es"),
-        targets=[TargetLang(lang="en")],
-        mode=WsMode(sample_rate=24000, num_channels=1, chunk_duration_ms=100)
+        source=SourceLang(lang=ES),
+        targets=[TargetLang(lang=EN)],
+        mode=WsMode(sample_rate=16000, num_channels=1, chunk_duration_ms=100)
     )
 
     # Serialize to JSON string
@@ -299,21 +353,21 @@ def test_config_round_trip_ws_mode():
 
     # Check that mode was preserved
     assert isinstance(config2.mode, WsMode)
-    assert config2.mode.sample_rate == 24000
+    assert config2.mode.sample_rate == 16000
     assert config2.mode.num_channels == 1
     assert config2.mode.chunk_duration_ms == 320  # Default for WsMode
 
     # Check languages preserved
     assert config2.source.lang.code == "es"
-    assert config2.targets[0].lang.code == "en"
+    assert config2.targets[0].lang.code == "en-us"  # EN smart maps to EN_US
 
 
 def test_config_round_trip_webrtc_mode():
     """Test that Config with WebrtcMode survives round-trip serialization"""
     # Create config with WebrtcMode
     config1 = Config(
-        source=SourceLang(lang="fr"),
-        targets=[TargetLang(lang="de")],
+        source=SourceLang(lang=FR),
+        targets=[TargetLang(lang=DE)],
         mode=WebrtcMode()
     )
 
@@ -340,9 +394,9 @@ def test_config_round_trip_webrtc_mode():
 def test_config_json_format():
     """Test that Config serializes to expected JSON format"""
     config = Config(
-        source=SourceLang(lang="es"),
-        targets=[TargetLang(lang="en")],
-        mode=WsMode(sample_rate=24000, num_channels=1)
+        source=SourceLang(lang=ES),
+        targets=[TargetLang(lang=EN)],
+        mode=WsMode(sample_rate=16000, num_channels=1)
     )
 
     # Convert to dict for inspection
@@ -355,14 +409,14 @@ def test_config_json_format():
 
     # Check input_stream structure
     assert data["input_stream"]["source"]["type"] == "ws"
-    assert data["input_stream"]["source"]["sample_rate"] == 24000
+    assert data["input_stream"]["source"]["sample_rate"] == 16000
     assert data["input_stream"]["source"]["channels"] == 1
     assert data["input_stream"]["source"]["format"] == "pcm_s16le"
 
     # Check pipeline structure
     assert "pipeline" in data
     assert data["pipeline"]["transcription"]["source_language"] == "es"
-    assert data["pipeline"]["translations"][0]["target_language"] == "en"
+    assert data["pipeline"]["translations"][0]["target_language"] == "en-us"  # EN smart maps to EN_US
 
 
 def test_config_from_api_json():
@@ -373,7 +427,7 @@ def test_config_from_api_json():
             "source": {
                 "type": "ws",
                 "format": "pcm_s16le",
-                "sample_rate": 24000,
+                "sample_rate": 16000,
                 "channels": 1
             }
         },
@@ -382,7 +436,7 @@ def test_config_from_api_json():
             "target": {
                 "type": "ws",
                 "format": "pcm_s16le",
-                "sample_rate": 24000,
+                "sample_rate": 16000,
                 "channels": 1
             }
         },
@@ -392,7 +446,7 @@ def test_config_from_api_json():
                 "source_language": "es"
             },
             "translations": [{
-                "target_language": "en"
+                "target_language": "en-us"
             }],
             "translation_queue_configs": {},
             "allowed_message_types": []
@@ -404,20 +458,20 @@ def test_config_from_api_json():
 
     # Check that mode was reconstructed
     assert isinstance(config.mode, WsMode)
-    assert config.mode.sample_rate == 24000
+    assert config.mode.sample_rate == 16000
     assert config.mode.num_channels == 1
     assert config.mode.chunk_duration_ms == 320  # Default for WsMode
 
     # Check languages
     assert config.source.lang.code == "es"
-    assert config.targets[0].lang.code == "en"
+    assert config.targets[0].lang.code == "en-us"  # Parsed from API JSON with "en-us"
 
 
 def test_config_multiple_round_trips():
     """Test that Config remains stable after multiple round trips"""
     config = Config(
-        source=SourceLang(lang="ja"),
-        targets=[TargetLang(lang="ko")],
+        source=SourceLang(lang=JA),
+        targets=[TargetLang(lang=KO)],
         mode=WsMode()
     )
 
@@ -446,8 +500,8 @@ def test_config_multiple_round_trips():
 def test_config_preserves_preprocessing_settings():
     """Test that preprocessing settings are preserved in round trip"""
     config1 = Config(
-        source=SourceLang(lang="es"),
-        targets=[TargetLang(lang="en")]
+        source=SourceLang(lang=ES),
+        targets=[TargetLang(lang=EN)]
     )
 
     # Modify preprocessing settings

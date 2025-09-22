@@ -50,6 +50,7 @@ class Io(Task):
     _global_start_ts: float | None = field(default=None, init=False)
     _frames_sent: int = field(default=0, init=False)
     _total_duration_sent: float = field(default=0.0, init=False)
+    eos_received: bool = field(default=False, init=False)
 
     @property
     @abc.abstractmethod

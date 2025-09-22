@@ -47,6 +47,7 @@ from palabra_ai.constant import (
     WEBRTC_MODE_SAMPLE_RATE,
     WS_MODE_CHANNELS,
     WS_MODE_CHUNK_DURATION_MS,
+    WS_MODE_OUTPUT_SAMPLE_RATE,
     WS_MODE_SAMPLE_RATE,
 )
 from palabra_ai.exc import ConfigurationError
@@ -102,6 +103,16 @@ def serialize_language(lang: Language) -> str:
     return lang.bcp47
 
 
+def serialize_language_source(lang: Language) -> str:
+    """Serialize language for source (recognition) - uses source_code"""
+    return lang.source_code
+
+
+def serialize_language_target(lang: Language) -> str:
+    """Serialize language for target (translation) - uses target_code"""
+    return lang.target_code
+
+
 LanguageField = Annotated[
     Language, BeforeValidator(validate_language), PlainSerializer(serialize_language)
 ]
@@ -109,13 +120,13 @@ LanguageField = Annotated[
 SourceLanguageField = Annotated[
     Language,
     BeforeValidator(validate_source_language),
-    PlainSerializer(serialize_language),
+    PlainSerializer(serialize_language_source),
 ]
 
 TargetLanguageField = Annotated[
     Language,
     BeforeValidator(validate_target_language),
-    PlainSerializer(serialize_language),
+    PlainSerializer(serialize_language_target),
 ]
 
 
@@ -144,6 +155,66 @@ class IoMode(BaseModel):
     @cached_property
     def for_audio_frame(self) -> tuple[int, int, int]:
         return self.sample_rate, self.num_channels, self.samples_per_channel
+
+    @property
+    def mode_type(self) -> str:
+        """Get mode type string for internal use."""
+        if isinstance(self, WebrtcMode):
+            return "webrtc"
+        elif isinstance(self, WsMode):
+            return "ws"
+        else:
+            raise ConfigurationError(
+                f"Unsupported IO mode: {type(self).__name__}, "
+                f"supported modes are: WebrtcMode, WsMode"
+            )
+
+    def get_io_class(self):
+        """Get the corresponding IO class for this mode."""
+        if isinstance(self, WebrtcMode):
+            from palabra_ai.task.io.webrtc import WebrtcIo
+
+            return WebrtcIo
+        elif isinstance(self, WsMode):
+            from palabra_ai.task.io.ws import WsIo
+
+            return WsIo
+        else:
+            raise ConfigurationError(
+                f"Unsupported IO mode: {type(self).__name__}, "
+                f"supported modes are: WebrtcMode, WsMode"
+            )
+
+    @classmethod
+    def from_string(cls, mode_str: str, **kwargs) -> IoMode:
+        """Create mode instance from string."""
+        if mode_str == "webrtc":
+            return WebrtcMode(**kwargs)
+        elif mode_str == "ws":
+            return WsMode(**kwargs)
+        else:
+            raise ConfigurationError(
+                f"Unsupported mode string: {mode_str}, "
+                f"supported modes are: 'webrtc', 'ws'"
+            )
+
+    @classmethod
+    def from_api_source(cls, source: dict) -> IoMode:
+        """Create mode instance from API source dictionary."""
+        source_type = source.get("type")
+        if source_type == "webrtc":
+            return WebrtcMode()
+        elif source_type == "ws":
+            return WsMode(
+                sample_rate=source.get("sample_rate", WS_MODE_SAMPLE_RATE),
+                num_channels=source.get("channels", WS_MODE_CHANNELS),
+                # chunk_duration_ms will use default WS_MODE_CHUNK_DURATION_MS
+            )
+        else:
+            raise ConfigurationError(
+                f"Unsupported API source type: {source_type}, "
+                f"supported types are: 'webrtc', 'ws'"
+            )
 
     def __str__(self) -> str:
         return f"[{self.name}: {self.sample_rate}Hz, {self.num_channels}ch, {self.chunk_duration_ms}ms]"
@@ -194,7 +265,7 @@ class WsMode(IoMode):
                 "target": {
                     "type": "ws",
                     "format": "pcm_s16le",
-                    "sample_rate": self.sample_rate,
+                    "sample_rate": WS_MODE_OUTPUT_SAMPLE_RATE,
                     "channels": self.num_channels,
                 },
             },
@@ -481,19 +552,7 @@ class Config(BaseModel):
         # Reconstruct mode from input_stream/output_stream
         if "input_stream" in data and "mode" not in data:
             source = data.get("input_stream", {}).get("source", {})
-            source_type = source.get("type")
-
-            if source_type == "webrtc":
-                # WebrtcMode with default parameters
-                data["mode"] = WebrtcMode()
-            elif source_type == "ws":
-                # WsMode with parameters from JSON
-                # Note: chunk_duration_ms is not in API format, use default
-                data["mode"] = WsMode(
-                    sample_rate=source.get("sample_rate", WS_MODE_SAMPLE_RATE),
-                    num_channels=source.get("channels", WS_MODE_CHANNELS),
-                    # chunk_duration_ms will use default WS_MODE_CHUNK_DURATION_MS
-                )
+            data["mode"] = IoMode.from_api_source(source)
 
             # Remove input/output streams as they are generated from mode
             data.pop("input_stream", None)

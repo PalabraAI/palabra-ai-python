@@ -437,23 +437,23 @@ class TestIo:
             reader=mock_reader,
             writer=mock_writer
         )
-        
+
         # Ensure timing not initialized
         assert io._global_start_ts is None
         assert io._frames_sent == 0
         assert io._total_duration_sent == 0.0
-        
+
         # Call ensure timing initialized
         io._ensure_timing_initialized()
-        
+
         # Check timing was initialized
         assert io._global_start_ts is not None
         assert isinstance(io._global_start_ts, float)
         assert io._global_start_ts > 0
-        
+
         # Check writer was updated
         assert mock_writer.start_perf_ts == io._global_start_ts
-        
+
     @pytest.mark.asyncio
     async def test_single_chunk_timing_precision(self, mock_config, mock_credentials, mock_reader, mock_writer):
         """Test precise timing for single chunk sending"""
@@ -463,31 +463,31 @@ class TestIo:
             reader=mock_reader,
             writer=mock_writer
         )
-        
+
         io.push = AsyncMock()
         chunk = b"test_chunk"
-        
+
         # Initialize timing slightly in the past to force a wait
         io._global_start_ts = time.perf_counter() - 0.001  # 1ms ago
         io._frames_sent = 0
         io._total_duration_sent = 0.0
-        
+
         # Send single chunk with timing
         with patch('asyncio.sleep') as mock_sleep:
             await io._send_single_chunk(chunk)
-            
+
             # Should have called sleep with appropriate timing
             if mock_sleep.call_count > 0:
                 sleep_time = mock_sleep.call_args[0][0]
                 assert 0 <= sleep_time <= 0.02  # Should be between 0 and chunk_duration
-            
+
         # Check chunk was sent
         io.push.assert_called_once_with(chunk)
-        
+
         # Check metrics updated
         assert io._frames_sent == 1
         assert io._total_duration_sent == 0.02  # 20ms
-        
+
     @pytest.mark.asyncio
     async def test_burst_mode_activation(self, mock_config, mock_credentials, mock_reader, mock_writer):
         """Test that burst mode activates when behind schedule"""
@@ -497,19 +497,19 @@ class TestIo:
             reader=mock_reader,
             writer=mock_writer
         )
-        
+
         # Initialize timing from past to simulate being behind
         io._global_start_ts = time.perf_counter() - 1.0  # 1 second ago
         io._frames_sent = 0
         io._total_duration_sent = 0.0  # Should have sent 50 chunks by now (1000ms / 20ms)
-        
+
         # Check that we're behind schedule
         assert io._is_behind_schedule() is True
-        
+
         # Calculate timing metrics
         target_time, current_time, time_behind = io._calculate_timing_metrics()
         assert time_behind > 0.02  # Should be more than one chunk behind
-        
+
     @pytest.mark.asyncio
     async def test_burst_mode_chunk_sending(self, mock_config, mock_credentials, mock_reader, mock_writer):
         """Test burst mode sends multiple chunks at once"""
@@ -519,27 +519,27 @@ class TestIo:
             reader=mock_reader,
             writer=mock_writer
         )
-        
+
         io._send_chunk_immediately = AsyncMock()
         io._read_next_chunk = AsyncMock(return_value=b"next_chunk")
-        
+
         # Initialize timing to be significantly behind (500ms behind = 25 chunks)
         io._global_start_ts = time.perf_counter() - 0.5
         io._frames_sent = 0
         io._total_duration_sent = 0.0
-        
+
         with patch('palabra_ai.task.io.base.debug') as mock_debug:
             await io._send_burst_chunks(b"initial_chunk")
-            
+
             # Should send up to MAX_BURST (20) chunks
             assert io._send_chunk_immediately.call_count == 20
-            
+
             # Check debug message
             debug_calls = [str(call) for call in mock_debug.call_args_list]
             assert any("BURST:" in call for call in debug_calls)
             assert any("25 chunks" in call for call in debug_calls)  # Should mention being 25 chunks behind
             assert any("sending 20 chunks" in call for call in debug_calls)  # But only sending MAX_BURST
-            
+
     @pytest.mark.asyncio
     async def test_burst_mode_limited_by_max(self, mock_config, mock_credentials, mock_reader, mock_writer):
         """Test burst mode respects MAX_BURST limit"""
@@ -549,20 +549,20 @@ class TestIo:
             reader=mock_reader,
             writer=mock_writer
         )
-        
+
         io._send_chunk_immediately = AsyncMock()
         io._read_next_chunk = AsyncMock(return_value=b"next_chunk")
-        
+
         # Initialize timing to be very far behind (2 seconds = 100 chunks)
         io._global_start_ts = time.perf_counter() - 2.0
         io._frames_sent = 0
         io._total_duration_sent = 0.0
-        
+
         await io._send_burst_chunks(b"initial_chunk")
-        
+
         # Should still only send MAX_BURST (20) chunks
         assert io._send_chunk_immediately.call_count == 20
-        
+
     @pytest.mark.asyncio
     async def test_timing_metrics_calculation(self, mock_config, mock_credentials, mock_reader, mock_writer):
         """Test accurate calculation of timing metrics"""
@@ -572,23 +572,23 @@ class TestIo:
             reader=mock_reader,
             writer=mock_writer
         )
-        
+
         # Set known timing state
         start_time = time.perf_counter()
         io._global_start_ts = start_time
         io._total_duration_sent = 0.1  # 100ms sent
-        
+
         target_time, current_time, time_behind = io._calculate_timing_metrics()
-        
+
         # Target time should be start + duration sent
         assert target_time == start_time + 0.1
-        
+
         # Current time should be approximately now
         assert abs(current_time - time.perf_counter()) < 0.001
-        
+
         # Time behind can be negative (if we're ahead) or positive (if behind)
         assert isinstance(time_behind, float)
-        
+
     @pytest.mark.asyncio
     async def test_do_method_integration(self, mock_config, mock_credentials, mock_reader, mock_writer):
         """Test the main do() loop with timing"""
@@ -602,27 +602,27 @@ class TestIo:
         # Mock reader to return chunks then EOF
         chunks = [b"chunk1", b"chunk2", b"chunk3", None]
         mock_reader.read.side_effect = chunks
-        
+
         io.push = AsyncMock()
         io.push_in_msg = AsyncMock()
-        
+
         with patch('asyncio.sleep') as mock_sleep:
             await io.do()
             
             # Should have processed 3 chunks
             assert io.push.call_count == 3
-            
+
             # Should have initialized timing
             assert io._global_start_ts is not None
-            
+
             # Should have updated metrics
             assert io._frames_sent == 3
             assert io._total_duration_sent == 0.06  # 3 * 20ms
-            
+
             # Should have sent EOF message
             io.push_in_msg.assert_called_once()
             assert isinstance(io.push_in_msg.call_args[0][0], EndTaskMessage)
-            
+
     @pytest.mark.asyncio
     async def test_no_drift_over_time(self, mock_config, mock_credentials, mock_reader, mock_writer):
         """Test that timing doesn't drift over many chunks"""
@@ -632,28 +632,28 @@ class TestIo:
             reader=mock_reader,
             writer=mock_writer
         )
-        
+
         io.push = AsyncMock()
-        
+
         # Initialize timing
         start_time = time.perf_counter()
         io._global_start_ts = start_time
         io._frames_sent = 0
         io._total_duration_sent = 0.0
-        
+
         # Simulate sending 100 chunks
         for i in range(100):
             await io._send_chunk_immediately(b"chunk")
-            
+
         # Check that total duration matches expected (within floating point precision)
         expected_duration = 100 * 0.02  # 100 chunks * 20ms
         assert abs(io._total_duration_sent - expected_duration) < 1e-10
         assert io._frames_sent == 100
-        
+
         # The target time for next chunk should be exactly start + total duration
         target_time, _, _ = io._calculate_timing_metrics()
         assert abs(target_time - (start_time + expected_duration)) < 1e-10
-        
+
     @pytest.mark.asyncio
     async def test_handles_eof_correctly(self, mock_config, mock_credentials, mock_reader, mock_writer):
         """Test EOF handling in the main loop"""
@@ -663,21 +663,21 @@ class TestIo:
             reader=mock_reader,
             writer=mock_writer
         )
-        
+
         # Mock reader to return None (EOF)
         mock_reader.read.return_value = None
-        
+
         io.push_in_msg = AsyncMock()
-        
+
         await io.do()
-        
+
         # Should handle EOF
         assert io.eof.is_set()
-        
+
         # Should send EndTaskMessage
         io.push_in_msg.assert_called_once()
         assert isinstance(io.push_in_msg.call_args[0][0], EndTaskMessage)
-        
+
     @pytest.mark.asyncio
     async def test_empty_chunk_handling(self, mock_config, mock_credentials, mock_reader, mock_writer):
         """Test that empty chunks are skipped"""
@@ -687,16 +687,39 @@ class TestIo:
             reader=mock_reader,
             writer=mock_writer
         )
-        
+
         # Mock reader to return empty chunk, real chunk, then EOF
         mock_reader.read.side_effect = [b"", b"real_chunk", None]
-        
+
         io.push = AsyncMock()
         io.push_in_msg = AsyncMock()
-        
+
         await io.do()
-        
+
         # Should only process the real chunk
         assert io.push.call_count == 1
         io.push.assert_called_with(b"real_chunk")
 
+    def test_eos_received_field_default(self, mock_config, mock_credentials, mock_reader, mock_writer):
+        """Test Io eos_received field defaults to False"""
+        io = ConcreteIo(
+            cfg=mock_config,
+            credentials=mock_credentials,
+            reader=mock_reader,
+            writer=mock_writer
+        )
+
+        assert hasattr(io, 'eos_received')
+        assert io.eos_received is False
+
+    def test_eos_received_field_can_be_set(self, mock_config, mock_credentials, mock_reader, mock_writer):
+        """Test Io eos_received field can be set to True"""
+        io = ConcreteIo(
+            cfg=mock_config,
+            credentials=mock_credentials,
+            reader=mock_reader,
+            writer=mock_writer
+        )
+
+        io.eos_received = True
+        assert io.eos_received is True

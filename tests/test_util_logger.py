@@ -335,3 +335,99 @@ class TestLoggerExports:
         assert isinstance(WARNING, int)
         assert isinstance(ERROR, int)
         assert isinstance(SUCCESS, int)
+
+
+class TestLoggerBraceHandling:
+    """Test logger behavior with curly braces in messages."""
+
+    def test_simple_braces_no_exc_info(self):
+        """Test that simple braces work without exc_info."""
+        # Should work fine
+        debug("Message with {'key': 'value'}")
+        info("Single brace: {")
+        warning("Error with {unknown} placeholder")
+
+    def test_validation_error_message_without_exc_info(self):
+        """Test the exact validation error that caused KeyError (without exc_info)."""
+        validation_error = "ValidationError(model='SetTaskRequestMessage', errors=[{'loc': ('output_stream', 'target', 'type'), 'msg': \"unexpected value; permitted: 'livekit', 'webrtc'\"}])"
+
+        try:
+            raise Exception(validation_error)
+        except Exception as e:
+            # This should not raise KeyError (without exc_info)
+            error(f"Task failed: {e}")
+
+    def test_dict_like_content_without_exc_info(self):
+        """Test dict-like content in exception without exc_info."""
+        try:
+            raise Exception("Error with {'loc': 'test', 'msg': 'test message'}")
+        except Exception as e:
+            # This should not raise KeyError
+            error(f"Exception occurred: {e}")
+
+    def test_single_brace_without_exc_info(self):
+        """Test single brace in exception without exc_info."""
+        try:
+            raise Exception("Single brace: {")
+        except Exception as e:
+            # This should not raise ValueError or KeyError
+            error(f"Error: {e}")
+
+    def test_unknown_placeholder_without_exc_info(self):
+        """Test unknown placeholder in exception without exc_info."""
+        try:
+            raise Exception("Error with {unknown} placeholder")
+        except Exception as e:
+            # This should not raise KeyError
+            error(f"Failed: {e}")
+
+    def test_nested_dict_in_exception(self):
+        """Test nested dict structures in exception."""
+        try:
+            complex_error = "ValidationError(errors=[{'loc': ('field',), 'ctx': {'given': 'ws', 'permitted': ('webrtc',)}}])"
+            raise Exception(complex_error)
+        except Exception as e:
+            # This should not raise KeyError
+            error(f"Complex error: {e}")
+
+    def test_all_log_levels_with_problematic_content(self):
+        """Test all log levels with content that could cause formatting issues."""
+        problematic_msg = "Content with {'key': 'value'} and {placeholder}"
+
+        try:
+            raise Exception(problematic_msg)
+        except Exception as e:
+            # All of these should work without KeyError (no exc_info)
+            debug(f"Debug: {e}")
+            info(f"Info: {e}")
+            warning(f"Warning: {e}")
+            error(f"Error: {e}")
+            critical(f"Critical: {e}")
+            exception(f"Exception: {e}")
+
+    def test_normal_formatting_still_works(self):
+        """Test that normal loguru formatting still works."""
+        # These should still work as before
+        debug("Normal message")
+        info("Value: {}", 42)
+        warning("Multiple values: {} and {}", "first", "second")
+
+    def test_exact_task_base_scenario(self):
+        """Test the exact scenario from task/base.py after removing exc_info."""
+        try:
+            # Simulate the exact error from the server
+            server_error = "ValidationError(model='SetTaskRequestMessage', errors=[{'loc': ('output_stream', 'target', 'type'), 'msg': \"unexpected value; permitted: 'livekit', 'webrtc'\"}, {'loc': ('output_stream', 'target', 'sample_rate'), 'msg': 'ensure this value is less than or equal to 24000'}])"
+            raise Exception(server_error)
+        except Exception as e:
+            # This is exactly line 100 from task/base.py (without exc_info)
+            error(f"Task.run() failed with error: {e}, exiting...")
+
+    def test_output_looks_normal(self):
+        """Test that logger works with problematic braces without error."""
+        # This test just ensures no KeyError is raised
+        error("Error with {'loc': 'test'}")
+        debug("Debug with {unknown} placeholder")
+        warning("Warning with {'key': 'value'} dict")
+
+        # If we reach here without exception, the test passes
+        assert True

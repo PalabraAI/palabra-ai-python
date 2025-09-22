@@ -146,6 +146,7 @@ trace = logger.trace
 
 
 __all__ = [
+    "success",
     "debug",
     "info",
     "warning",

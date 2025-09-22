@@ -4,27 +4,30 @@ import asyncio
 from collections import deque
 from collections.abc import Iterator
 from dataclasses import KW_ONLY, dataclass
-from io import BytesIO
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import av
 import numpy as np
 from tqdm import tqdm
 
-from palabra_ai.constant import BYTES_PER_SAMPLE, DECODE_TIMEOUT, MAX_FRAMES_PER_READ
+from palabra_ai.constant import (
+    AUDIO_CHUNK_DURATION_SECONDS,
+    BYTES_PER_SAMPLE,
+    DECODE_TIMEOUT,
+    MAX_FRAMES_PER_READ,
+)
 from palabra_ai.internal.audio import (
-    create_audio_resampler,
-    create_normalization_filter_graph,
-    create_pcm_output_container,
-    flush_filters_and_encoder,
-    get_audio_stream_info,
-    open_audio_container,
-    process_audio_frames,
+    preprocess_audio_file,
+    setup_streaming_audio,
     write_to_disk,
 )
 from palabra_ai.task.adapter.base import BufferedWriter, Reader
 from palabra_ai.util.aio import warn_if_cancel
 from palabra_ai.util.logger import debug, error, warning
+
+if TYPE_CHECKING:
+    pass
 
 
 @dataclass
@@ -52,83 +55,52 @@ class FileReader(Reader):
         self._buffer = deque()
 
     def _preprocess_audio(self):
-        """Preprocess audio with loudnorm and speechnorm filters."""
-        debug(f"Preprocessing audio file {self.path}...")
-
-        # Open input container and get info
-        input_container, audio_stream = open_audio_container(str(self.path))
-        audio_info = get_audio_stream_info(audio_stream)
-        self._total_duration = audio_info["duration"]
-
-        debug(
-            f"Audio: {audio_info['codec']}, {audio_info['sample_rate']}Hz, {audio_info['channels']}ch"
-        )
-        debug(f"Duration: {self._total_duration:.1f}s")
-
-        # Get target configuration
-        target_rate = self.cfg.mode.sample_rate
-
-        # Create output container and filter graph
-        output_buffer = BytesIO()
-        output_container, output_stream = create_pcm_output_container(
-            output_buffer, target_rate, "mono"
-        )
-        _, filter_buffer, filter_sink = create_normalization_filter_graph(
-            output_stream.format.name,
-            output_stream.rate,
-            output_stream.layout,
-            output_stream.time_base,
-        )
-
-        # Create resampler
-        resampler = create_audio_resampler(target_rate)
+        """Preprocess audio with smart resampling."""
+        # Determine mode type from config
+        mode_type = self.cfg.mode.mode_type
 
         # Setup progress bar
-        total_frames = (
-            int(self._total_duration * audio_info["sample_rate"])
-            if self._total_duration > 0
-            else None
-        )
         progress = tqdm(
-            total=total_frames,
             desc=f"Preprocessing {self.path.name}",
             unit="frames",
             unit_scale=True,
         )
 
-        # Process frames with progress callback
         def progress_callback(samples):
             progress.update(samples)
 
         try:
-            dts = process_audio_frames(
-                input_container,
-                output_stream,
-                resampler,
-                filter_buffer,
-                filter_sink,
-                progress_callback,
+            # Use unified preprocessing function
+            preprocessed_data, metadata = preprocess_audio_file(
+                self.path,
+                self.cfg.mode.sample_rate,
+                mode_type,
+                normalize=True,
+                progress_callback=progress_callback,
             )
-            flush_filters_and_encoder(filter_buffer, filter_sink, output_stream, dts)
+
+            # Update config with final sample rate if not resampled
+            if not metadata["resampled"] and mode_type == "ws":
+                self.cfg.mode.sample_rate = metadata["final_rate"]
+                debug(f"Updated config sample rate to {metadata['final_rate']}Hz")
+
+            self._total_duration = metadata["duration"]
+            self._target_rate = metadata["final_rate"]
+
+            # Split into chunks and store in buffer
+            chunk_size = (
+                self._target_rate * BYTES_PER_SAMPLE * AUDIO_CHUNK_DURATION_SECONDS
+            )
+            for i in range(0, len(preprocessed_data), chunk_size):
+                self._buffer.append(preprocessed_data[i : i + chunk_size])
+
+            self._preprocessed = True
+            debug(
+                f"Preprocessing complete: {len(preprocessed_data)} bytes, {len(self._buffer)} chunks"
+            )
+
         finally:
             progress.close()
-            output_container.close()
-            input_container.close()
-
-        # Store preprocessed data in buffer
-        output_buffer.seek(0)
-        preprocessed_data = output_buffer.read()
-
-        # Split into chunks and store in buffer
-        chunk_size = target_rate * BYTES_PER_SAMPLE * 2  # 2 seconds per chunk
-        for i in range(0, len(preprocessed_data), chunk_size):
-            self._buffer.append(preprocessed_data[i : i + chunk_size])
-
-        self._preprocessed = True
-        self._target_rate = target_rate
-        debug(
-            f"Preprocessing complete: {len(preprocessed_data)} bytes, {len(self._buffer)} chunks"
-        )
 
     def do_preprocess(self):
         """Preprocess audio if needed, or open for streaming."""
@@ -139,37 +111,25 @@ class FileReader(Reader):
         else:
             debug(f"Opening {self.path} for streaming...")
 
-            # Open container for streaming mode
-            self._container = av.open(
-                str(self.path), timeout=DECODE_TIMEOUT, metadata_errors="ignore"
+            # Determine mode type from config
+            mode_type = self.cfg.mode.mode_type
+
+            # Use unified streaming setup
+            self._container, self._resampler, self._target_rate, metadata = (
+                setup_streaming_audio(
+                    self.path,
+                    self.cfg.mode.sample_rate,
+                    mode_type,
+                    timeout=DECODE_TIMEOUT,
+                )
             )
 
-            # Find audio stream
-            audio_streams = [s for s in self._container.streams if s.type == "audio"]
-            if not audio_streams:
-                raise ValueError(f"No audio streams found in {self.path}")
+            # Update config with final sample rate if not resampled
+            if not metadata["resampled"] and mode_type == "ws":
+                self.cfg.mode.sample_rate = metadata["final_rate"]
+                debug(f"Updated config sample rate to {metadata['final_rate']}Hz")
 
-            audio_stream = audio_streams[0]
-            self._total_duration = (
-                float(audio_stream.duration * audio_stream.time_base)
-                if audio_stream.duration
-                else 0
-            )
-
-            debug(
-                f"Audio: {audio_stream.codec.name}, {audio_stream.sample_rate}Hz, {audio_stream.channels}ch"
-            )
-            debug(f"Duration: {self._total_duration:.1f}s")
-
-            # Setup target rate
-            self._target_rate = self.cfg.mode.sample_rate
-
-            # Create resampler
-            self._resampler = create_audio_resampler(self._target_rate)
-            debug(f"Resampler: {self._target_rate}Hz mono")
-
-            # Enable threading for faster decode
-            audio_stream.codec_context.thread_type = av.codec.context.ThreadType.FRAME
+            self._total_duration = metadata["duration"]
 
             # Create iterator but don't start reading yet
             self._iterator = self._container.decode(audio=0)
@@ -303,7 +263,7 @@ class FileWriter(BufferedWriter):
             self._delete_on_error()
             raise
         except Exception as e:
-            error(f"Error converting to WAV: {e}", exc_info=True)
+            error(f"Error converting to WAV: {e}")
             self._delete_on_error()
             raise
 

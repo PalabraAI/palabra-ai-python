@@ -160,7 +160,7 @@ class WebrtcIo(Io):
             await self.set_task()
             debug(f"WebrtcIo.boot() set_task() completed for {self.name}")
         except Exception as e:
-            error(f"WebrtcIo.boot() set_task() FAILED: {e}", exc_info=True)
+            error(f"WebrtcIo.boot() set_task() FAILED: {e}")
             raise
 
         self.in_track_name = self.in_track_name or f"{uuid.uuid4()}_{lang.code}"

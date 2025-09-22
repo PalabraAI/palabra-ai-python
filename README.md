@@ -257,7 +257,7 @@ if reader and writer:
     palabra.run(config)
 ```
 
-### Async Context Manager ⚡
+### Async Translation ⚡
 
 ```python
 import asyncio
@@ -269,11 +269,54 @@ async def translate():
         source=SourceLang(EN, FileReader("input.mp3")),
         targets=[TargetLang(ES, FileWriter("output.wav"))]
     )
-    async with palabra.process(config) as manager:
-        await manager.task
+    result = await palabra.arun(config)
+    # Result contains: result.ok, result.exc, result.log_data
 
 if __name__ == "__main__":
     asyncio.run(translate())
+```
+
+### Synchronous Translation 🔄
+
+```python
+from palabra_ai import PalabraAI, Config, SourceLang, TargetLang, FileReader, FileWriter, EN, ES
+
+# Synchronous execution (blocks until complete)
+palabra = PalabraAI()
+config = Config(
+    source=SourceLang(EN, FileReader("input.mp3")),
+    targets=[TargetLang(ES, FileWriter("output.wav"))]
+)
+result = palabra.run(config)
+# Result contains: result.ok, result.exc, result.log_data
+```
+
+### Signal Handling 🛡️
+
+```python
+# Enable Ctrl+C signal handlers (disabled by default)
+result = palabra.run(config, signal_handlers=True)
+
+# Default behavior (signal handlers disabled)
+result = palabra.run(config)  # signal_handlers=False by default
+```
+
+### Result Handling 📊
+
+Both `run()` and `arun()` return a `RunResult` object with status information:
+
+```python
+result = palabra.run(config)
+# or: result = await palabra.arun(config)
+
+if result.ok:
+    print("✅ Translation completed successfully!")
+    if result.log_data:
+        print(f"📊 Processing stats: {result.log_data}")
+    if result.eos:
+        print("🔚 End of stream signal received")
+else:
+    print(f"❌ Translation failed: {result.exc}")
 ```
 
 ## I/O Adapters & Mixing 🔌

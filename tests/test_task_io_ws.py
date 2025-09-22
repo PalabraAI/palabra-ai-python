@@ -311,3 +311,68 @@ class TestWsIo:
 
         # Should complete without error
         assert ws_io.ws is None
+
+    def test_eos_received_field_default(self, mock_config, mock_credentials, mock_reader, mock_writer):
+        """Test WsIo eos_received field defaults to False"""
+        ws_io = WsIo(cfg=mock_config, credentials=mock_credentials, reader=mock_reader, writer=mock_writer)
+
+        assert hasattr(ws_io, 'eos_received')
+        assert ws_io.eos_received is False
+
+    @pytest.mark.asyncio
+    async def test_ws_receiver_eos_sets_flag(self, mock_config, mock_credentials, mock_reader, mock_writer):
+        """Test ws_receiver sets eos_received flag when EOS message received"""
+        ws_io = WsIo(cfg=mock_config, credentials=mock_credentials, reader=mock_reader, writer=mock_writer)
+        ws_io.stopper = TaskEvent()
+        ws_io.eof = TaskEvent()
+        ws_io._idx = iter(range(100))
+        ws_io._out_audio_num = iter(range(100))
+        ws_io.out_msg_foq = MagicMock()
+
+        # Verify eos_received starts as False
+        assert ws_io.eos_received is False
+
+        # Mock WebSocket that yields an EOS message
+        ws_io.ws = AsyncMock()
+        raw_msg = b"eos_message"
+        ws_io.ws.__aiter__.return_value = [raw_msg]
+
+        # Mock AudioFrame.from_ws to return None
+        # Mock Message.decode to return EosMessage
+        mock_eos = MagicMock(spec=EosMessage)
+
+        with patch('palabra_ai.audio.AudioFrame.from_ws', return_value=None):
+            with patch('palabra_ai.message.Message.decode', return_value=mock_eos):
+                with patch('palabra_ai.task.io.ws.debug'):
+                    with patch('palabra_ai.task.io.ws.trace'):
+                        await ws_io.ws_receiver()
+
+                        # Check eos_received was set to True
+                        assert ws_io.eos_received is True
+                        # Check EOF was also set
+                        assert ws_io.eof.is_set()
+
+    @pytest.mark.asyncio
+    async def test_ws_receiver_eof_exception_sets_flag(self, mock_config, mock_credentials, mock_reader, mock_writer):
+        """Test ws_receiver sets eos_received flag in EOFError handler"""
+        ws_io = WsIo(cfg=mock_config, credentials=mock_credentials, reader=mock_reader, writer=mock_writer)
+        ws_io.stopper = TaskEvent()
+        ws_io.eof = TaskEvent()
+        ws_io._idx = iter(range(100))
+        ws_io._out_audio_num = iter(range(100))
+        ws_io.out_msg_foq = MagicMock()
+
+        # Verify eos_received starts as False
+        assert ws_io.eos_received is False
+
+        # Mock WebSocket that raises EOFError directly
+        ws_io.ws = AsyncMock()
+        ws_io.ws.__aiter__.side_effect = EOFError("Connection closed")
+
+        with patch('palabra_ai.task.io.ws.debug'):
+            await ws_io.ws_receiver()
+
+            # Check eos_received was set to True in exception handler
+            assert ws_io.eos_received is True
+            # Check EOF was also set
+            assert ws_io.eof.is_set()
