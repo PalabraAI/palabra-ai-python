@@ -47,9 +47,9 @@ def test_run_with_running_loop():
         result = client.run(config)
 
         # Should create new loop regardless
-            mock_new_loop.assert_called_once()
-            mock_set_loop.assert_called_once_with(mock_loop)
-            mock_loop.close.assert_called_once()
+        mock_new_loop.assert_called_once()
+        mock_set_loop.assert_called_once_with(mock_loop)
+        mock_loop.close.assert_called_once()
 
 def test_run_without_loop():
     """Test run method without running loop"""
@@ -146,18 +146,16 @@ def test_run_with_keyboard_interrupt():
 
     client = PalabraAI(client_id="test", client_secret="test")
 
+    with patch('palabra_ai.client.SIGTERM') as mock_sigterm, \
+         patch('palabra_ai.client.SIGHUP') as mock_sighup, \
+         patch('palabra_ai.client.SIGINT') as mock_sigint:
 
+        # Mock the signal context manager to raise KeyboardInterrupt
+        mock_context = MagicMock()
+        mock_sigterm.__or__.return_value.__or__.return_value.__enter__.return_value = mock_context
+        mock_context.run_until_complete.side_effect = KeyboardInterrupt()
 
-        with patch('palabra_ai.client.SIGTERM') as mock_sigterm, \
-             patch('palabra_ai.client.SIGHUP') as mock_sighup, \
-             patch('palabra_ai.client.SIGINT') as mock_sigint:
-
-            # Mock the signal context manager to raise KeyboardInterrupt
-            mock_context = MagicMock()
-            mock_sigterm.__or__.return_value.__or__.return_value.__enter__.return_value = mock_context
-            mock_context.run_until_complete.side_effect = KeyboardInterrupt()
-
-            # Should handle KeyboardInterrupt gracefullyand return None
+        # Should handle KeyboardInterrupt gracefully and return None
         result = client.run(config, signal_handlers=True)
         assert result is None
 
@@ -168,20 +166,18 @@ def test_run_with_exception():
 
     client = PalabraAI(client_id="test", client_secret="test")
 
+    with patch('palabra_ai.client.SIGTERM') as mock_sigterm, \
+         patch('palabra_ai.client.SIGHUP') as mock_sighup, \
+         patch('palabra_ai.client.SIGINT') as mock_sigint:
 
+        # Mock the signal context manager to raise exception
+        mock_context = MagicMock()
+        mock_sigterm.__or__.return_value.__or__.return_value.__enter__.return_value = mock_context
+        mock_context.run_until_complete.side_effect = ValueError("Test error")
 
-        with patch('palabra_ai.client.SIGTERM') as mock_sigterm, \
-             patch('palabra_ai.client.SIGHUP') as mock_sighup, \
-             patch('palabra_ai.client.SIGINT') as mock_sigint:
-
-            # Mock the signal context manager to raise exception
-            mock_context = MagicMock()
-            mock_sigterm.__or__.return_value.__or__.return_value.__enter__.return_value = mock_context
-            mock_context.run_until_complete.side_effect = ValueError("Test error")
-
-            # Should re-raise the exception
-            with pytest.raises(ValueError) as exc_info:
-                client.run(config, signal_handlers=True)
+        # Should re-raise the exception
+        with pytest.raises(ValueError) as exc_info:
+            client.run(config, signal_handlers=True)
         assert "Test error" in str(exc_info.value)
 
 def test_run_with_deep_debug():
@@ -398,11 +394,11 @@ def test_run_with_no_raise_flag():
         mock_loop.run_until_complete.side_effect = ValueError("Test error")
         mock_new_loop.return_value = mock_loop
 
-            # Should return RunResult with error instead of raising
-            result = client.run(config, no_raise=True)
-            assert result.ok is False
-            assert isinstance(result.exc, ValueError)
-            assert "Test error" in str(result.exc)
+        # Should return RunResult with error instead of raising
+        result = client.run(config, no_raise=True)
+        assert result.ok is False
+        assert isinstance(result.exc, ValueError)
+        assert "Test error" in str(result.exc)
 
 def test_run_without_signal_handlers():
     """Test run method with signal_handlers=False (default)"""
