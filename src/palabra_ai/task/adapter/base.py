@@ -109,7 +109,7 @@ class BufferedWriter(Writer):
         # Create buffer with estimated duration
         estimated_duration = getattr(self.cfg, "estimated_duration", 60.0)
         self.ab = AudioBuffer(
-            sample_rate=self.cfg.mode.sample_rate,
+            sample_rate=self.cfg.mode.output_sample_rate,
             num_channels=self.cfg.mode.num_channels,
             original_duration=estimated_duration,
             drop_empty_frames=getattr(self.cfg, "drop_empty_frames", False),

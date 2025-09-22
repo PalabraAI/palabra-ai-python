@@ -50,7 +50,7 @@ class TestDeviceReader:
         reader.sdm = mock_sdm
         reader.sub_tg = MagicMock()
         reader.cfg = MagicMock()
-        reader.cfg.mode.sample_rate = 16000
+        reader.cfg.mode.input_sample_rate = 16000
         reader.cfg.mode.channels = 1
         reader.q = asyncio.Queue()
         reader.ready = TaskEvent()
@@ -80,7 +80,7 @@ class TestDeviceReader:
         reader.sdm = mock_sdm
         reader.sub_tg = MagicMock()
         reader.cfg = MagicMock()
-        reader.cfg.mode.sample_rate = 16000
+        reader.cfg.mode.input_sample_rate = 16000
         reader.cfg.mode.channels = 1
         reader.q = asyncio.Queue()
         reader.ready = TaskEvent()
@@ -218,7 +218,7 @@ class TestDeviceWriter:
         writer._sdm = mock_sdm
         writer.sub_tg = MagicMock()
         writer.cfg = MagicMock()
-        writer.cfg.mode.sample_rate = 16000
+        writer.cfg.mode.output_sample_rate = 16000
         writer.cfg.mode.num_channels = 1
 
         mock_output_device = MagicMock()
@@ -257,7 +257,7 @@ class TestDeviceWriter:
         writer._sdm = mock_sdm
         writer.sub_tg = MagicMock()
         writer.cfg = MagicMock()
-        writer.cfg.mode.sample_rate = 16000
+        writer.cfg.mode.output_sample_rate = 16000
         writer.cfg.mode.num_channels = 1
 
         mock_output_device = MagicMock()

@@ -73,7 +73,7 @@ class FileReader(Reader):
             # Use unified preprocessing function
             preprocessed_data, metadata = preprocess_audio_file(
                 self.path,
-                self.cfg.mode.sample_rate,
+                self.cfg.mode.input_sample_rate,
                 mode_type,
                 normalize=True,
                 progress_callback=progress_callback,
@@ -81,7 +81,7 @@ class FileReader(Reader):
 
             # Update config with final sample rate if not resampled
             if not metadata["resampled"] and mode_type == "ws":
-                self.cfg.mode.sample_rate = metadata["final_rate"]
+                self.cfg.mode.input_sample_rate = metadata["final_rate"]
                 debug(f"Updated config sample rate to {metadata['final_rate']}Hz")
 
             self._total_duration = metadata["duration"]
@@ -118,7 +118,7 @@ class FileReader(Reader):
             self._container, self._resampler, self._target_rate, metadata = (
                 setup_streaming_audio(
                     self.path,
-                    self.cfg.mode.sample_rate,
+                    self.cfg.mode.input_sample_rate,
                     mode_type,
                     timeout=DECODE_TIMEOUT,
                 )
@@ -126,7 +126,7 @@ class FileReader(Reader):
 
             # Update config with final sample rate if not resampled
             if not metadata["resampled"] and mode_type == "ws":
-                self.cfg.mode.sample_rate = metadata["final_rate"]
+                self.cfg.mode.input_sample_rate = metadata["final_rate"]
                 debug(f"Updated config sample rate to {metadata['final_rate']}Hz")
 
             self._total_duration = metadata["duration"]

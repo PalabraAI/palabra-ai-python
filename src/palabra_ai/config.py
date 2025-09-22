@@ -132,13 +132,14 @@ TargetLanguageField = Annotated[
 
 class IoMode(BaseModel):
     name: str
-    sample_rate: int
+    input_sample_rate: int
+    output_sample_rate: int
     num_channels: int
     chunk_duration_ms: int
 
     @cached_property
     def samples_per_channel(self) -> int:
-        return int(self.sample_rate * (self.chunk_duration_ms / 1000))
+        return int(self.input_sample_rate * (self.chunk_duration_ms / 1000))
 
     @cached_property
     def bytes_per_channel(self) -> int:
@@ -154,7 +155,7 @@ class IoMode(BaseModel):
 
     @cached_property
     def for_audio_frame(self) -> tuple[int, int, int]:
-        return self.sample_rate, self.num_channels, self.samples_per_channel
+        return self.input_sample_rate, self.num_channels, self.samples_per_channel
 
     @property
     def mode_type(self) -> str:
@@ -206,7 +207,7 @@ class IoMode(BaseModel):
             return WebrtcMode()
         elif source_type == "ws":
             return WsMode(
-                sample_rate=source.get("sample_rate", WS_MODE_SAMPLE_RATE),
+                input_sample_rate=source.get("sample_rate", WS_MODE_SAMPLE_RATE),
                 num_channels=source.get("channels", WS_MODE_CHANNELS),
                 # chunk_duration_ms will use default WS_MODE_CHUNK_DURATION_MS
             )
@@ -217,12 +218,13 @@ class IoMode(BaseModel):
             )
 
     def __str__(self) -> str:
-        return f"[{self.name}: {self.sample_rate}Hz, {self.num_channels}ch, {self.chunk_duration_ms}ms]"
+        return f"[{self.name}: {self.input_sample_rate}Hz, {self.num_channels}ch, {self.chunk_duration_ms}ms]"
 
 
 class WebrtcMode(IoMode):
     name: str = "webrtc"
-    sample_rate: int = WEBRTC_MODE_SAMPLE_RATE
+    input_sample_rate: int = WEBRTC_MODE_SAMPLE_RATE
+    output_sample_rate: int = WEBRTC_MODE_SAMPLE_RATE
     num_channels: int = WEBRTC_MODE_CHANNELS
     chunk_duration_ms: int = WEBRTC_MODE_CHUNK_DURATION_MS
 
@@ -245,7 +247,8 @@ class WebrtcMode(IoMode):
 
 class WsMode(IoMode):
     name: str = "ws"
-    sample_rate: int = WS_MODE_SAMPLE_RATE
+    input_sample_rate: int = WS_MODE_SAMPLE_RATE
+    output_sample_rate: int = WS_MODE_OUTPUT_SAMPLE_RATE
     num_channels: int = WS_MODE_CHANNELS
     chunk_duration_ms: int = WS_MODE_CHUNK_DURATION_MS
 
@@ -256,7 +259,7 @@ class WsMode(IoMode):
                 "source": {
                     "type": "ws",
                     "format": "pcm_s16le",
-                    "sample_rate": self.sample_rate,
+                    "sample_rate": self.input_sample_rate,
                     "channels": self.num_channels,
                 },
             },
@@ -265,7 +268,7 @@ class WsMode(IoMode):
                 "target": {
                     "type": "ws",
                     "format": "pcm_s16le",
-                    "sample_rate": WS_MODE_OUTPUT_SAMPLE_RATE,
+                    "sample_rate": self.output_sample_rate,
                     "channels": self.num_channels,
                 },
             },
@@ -490,6 +493,7 @@ class Config(BaseModel):
     timeout: int = Field(default=TIMEOUT, exclude=True)  # TODO!
     trace_file: Path | str | None = Field(default=None, exclude=True)
     drop_empty_frames: bool = Field(default=False, exclude=True)
+    estimated_duration: float | None = Field(default=None, exclude=True)
 
     def __init__(
         self,

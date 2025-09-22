@@ -17,7 +17,7 @@ except ImportError:
 
 from palabra_ai import PalabraAI, Config, SourceLang, TargetLang
 from palabra_ai.lang import Language, is_valid_source_language, is_valid_target_language
-from palabra_ai.task.adapter.file import FileReader
+from palabra_ai.task.adapter.file import FileReader, FileWriter
 from palabra_ai.task.adapter.dummy import DummyWriter
 from palabra_ai.util.orjson import to_json, from_json
 from palabra_ai.util.logger import debug, error, warning, info
@@ -32,7 +32,8 @@ class BenchmarkRunner:
 
     def __init__(self, audio_file: str, source_lang: Optional[str] = None, target_lang: Optional[str] = None,
                  silent: bool = True, mode: Optional[str] = None, chunk_duration_ms: Optional[int] = None,
-                 base_config: Optional[Config] = None, palabra_client: PalabraAI | None = None):
+                 base_config: Optional[Config] = None, palabra_client: PalabraAI | None = None,
+                 save_audio: bool = False, output_dir: Optional[Path] = None):
         self.palabra_client = palabra_client or PalabraAI()
         self.audio_file = Path(audio_file)
         self.base_config = base_config
@@ -84,6 +85,8 @@ class BenchmarkRunner:
         self.progress_bar = None
         self.audio_duration = None
         self.last_timestamp = 0.0
+        self.save_audio = save_audio
+        self.output_dir = output_dir or Path.cwd()
 
         # Validate audio file
         if not self.audio_file.exists():
@@ -132,7 +135,16 @@ class BenchmarkRunner:
         try:
             # Create reader and writer
             reader = FileReader(str(self.audio_file))
-            writer = DummyWriter()
+            
+            # Create writer based on save_audio flag
+            if self.save_audio:
+                from datetime import datetime
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                audio_output = self.output_dir / f"{self.audio_file.stem}_{timestamp}.wav"
+
+                writer = FileWriter(path=audio_output, delete_on_error=False)
+            else:
+                writer = DummyWriter()
 
             # Configure with benchmark mode
             if self.base_config:
@@ -182,6 +194,7 @@ class BenchmarkRunner:
                 # Set benchmark-specific settings
                 config.silent = self.silent
                 config.benchmark = True
+                config.estimated_duration = self.audio_duration
             else:
                 # Create appropriate IoMode based on mode parameter
                 from palabra_ai.config import IoMode
@@ -197,6 +210,7 @@ class BenchmarkRunner:
                     silent=self.silent,
                     benchmark=True,
                     mode=io_mode,
+                    estimated_duration=self.audio_duration,
                 )
 
             # Run the processing
@@ -238,6 +252,10 @@ class BenchmarkRunner:
             if self.progress_bar:
                 self.progress_bar.update(100 - self.progress_bar.n)  # Complete to 100%
                 self.progress_bar.close()
+
+            # Log saved audio file
+            if self.save_audio and audio_output and audio_output.exists():
+                info(f"✅ Audio saved to: {audio_output}")
 
             return result
 
@@ -391,7 +409,8 @@ def run_benchmark(audio_file: str, source_lang: Optional[str] = None, target_lan
                  silent: bool = True, show_progress: bool = True,
                  mode: Optional[str] = None, chunk_duration_ms: Optional[int] = None,
                  base_config: Optional[Config] = None,
-                  palabra_client: PalabraAI | None = None) -> BenchmarkAnalyzer:
+                 palabra_client: PalabraAI | None = None,
+                 save_audio: bool = False, output_dir: Optional[Path] = None) -> BenchmarkAnalyzer:
     """
     Convenience function to run benchmark and return analyzer
 
@@ -408,6 +427,6 @@ def run_benchmark(audio_file: str, source_lang: Optional[str] = None, target_lan
     Returns:
         BenchmarkAnalyzer instance with results
     """
-    runner = BenchmarkRunner(audio_file, source_lang, target_lang, silent, mode, chunk_duration_ms, base_config, palabra_client)
+    runner = BenchmarkRunner(audio_file, source_lang, target_lang, silent, mode, chunk_duration_ms, base_config, palabra_client, save_audio, output_dir)
     result = runner.run(show_progress)
     return BenchmarkAnalyzer(result)

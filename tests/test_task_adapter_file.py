@@ -58,7 +58,7 @@ class TestFileReader:
 
         reader = FileReader(path=test_file, preprocess=True)
         reader.cfg = MagicMock()
-        reader.cfg.mode.sample_rate = 16000
+        reader.cfg.mode.input_sample_rate = 16000
 
         with patch.object(reader, '_preprocess_audio') as mock_preprocess:
             with patch('palabra_ai.task.adapter.file.debug') as mock_debug:
@@ -74,7 +74,7 @@ class TestFileReader:
 
         reader = FileReader(path=test_file, preprocess=False)
         reader.cfg = MagicMock()
-        reader.cfg.mode.sample_rate = 16000
+        reader.cfg.mode.input_sample_rate = 16000
         reader.cfg.mode.mode_type = "ws"
 
         with patch('palabra_ai.task.adapter.file.setup_streaming_audio') as mock_setup:

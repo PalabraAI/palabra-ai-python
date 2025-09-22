@@ -47,8 +47,8 @@ def create_ascii_histogram(values: List[float], bins: int = 20, width: int = 50,
     return "\n".join(lines)
 
 
-def create_ascii_box_plot(values: List[float], width: int = 60, label: str = "") -> str:
-    """Create ASCII box plot for console output"""
+def create_ascii_box_plot(values: List[float], width: int, label: str, global_min: float, global_max: float) -> str:
+    """Create ASCII box plot with global scale"""
     if not values:
         return "No data"
 
@@ -61,68 +61,78 @@ def create_ascii_box_plot(values: List[float], width: int = 60, label: str = "")
     q3 = sorted_vals[int(n * 0.75)]
     max_val = sorted_vals[-1]
 
-    # Normalize to width
-    range_val = max_val - min_val
+    # Use GLOBAL range for positioning
+    range_val = global_max - global_min
     if range_val == 0:
         return f"{label}: All values = {min_val:.3f}s"
 
     def pos(val):
-        return int((val - min_val) / range_val * width)
+        return int((val - global_min) / range_val * width)
 
-    # Create the plot
+    # Create the plot line
     line = [" "] * (width + 1)
 
-    # Min to Q1
+    # Draw elements
     for i in range(pos(min_val), pos(q1)):
-        line[i] = "─"
+        if 0 <= i < len(line):
+            line[i] = "─"
 
-    # Q1 to Q3 (box)
     for i in range(pos(q1), pos(q3) + 1):
-        line[i] = "█"
+        if 0 <= i < len(line):
+            line[i] = "█"
 
-    # Q3 to Max
     for i in range(pos(q3) + 1, pos(max_val) + 1):
-        line[i] = "─"
+        if 0 <= i < len(line):
+            line[i] = "─"
 
     # Mark special points
-    line[pos(min_val)] = "├"
-    line[pos(max_val)] = "┤"
-    line[pos(median)] = "┃"
+    if 0 <= pos(min_val) < len(line):
+        line[pos(min_val)] = "├"
+    if 0 <= pos(max_val) < len(line):
+        line[pos(max_val)] = "┤"
+    if 0 <= pos(median) < len(line):
+        line[pos(median)] = "┃"
 
-    result = f"{label:20s} {''.join(line)}\n"
+    # Build plot line
+    plot_line = f"{label:30s} {''.join(line)}"
 
-    # Build labels line with proper spacing
-    labels_line = " " * 20  # Start with label indent
-    labels_line += f"{min_val:.2f}s"
+    # Create labels line with exact positioning
+    labels_line = " " * 30  # Indent for label
 
-    # Calculate positions and add spacing
-    q1_pos = 20 + pos(q1)
-    median_pos = 20 + pos(median)
-    q3_pos = 20 + pos(q3)
-    max_pos = 20 + pos(max_val)
+    # Create labels array
+    labels = [" "] * (width + 20)  # Extra space for labels
 
-    # Add Q1 label with spacing
-    q1_label = f"Q1:{q1:.2f}s"
-    spacing_to_q1 = max(2, pos(q1) - len(f"{min_val:.2f}s") - 2)
-    labels_line += " " * spacing_to_q1 + q1_label
+    # Place labels at exact positions with overlap handling
+    label_data = [
+        (pos(min_val), f"{min_val:.2f}s"),
+        (pos(q1), f"Q1:{q1:.2f}s"),
+        (pos(median), f"M:{median:.2f}s"),
+        (pos(q3), f"Q3:{q3:.2f}s"),
+        (pos(max_val), f"{max_val:.2f}s")
+    ]
 
-    # Add Median label with spacing
-    median_label = f"M:{median:.2f}s"
-    spacing_to_median = max(2, pos(median) - pos(q1) - len(q1_label) - 2)
-    labels_line += " " * spacing_to_median + median_label
+    # Sort by position to handle overlaps properly
+    label_data.sort(key=lambda x: x[0])
 
-    # Add Q3 label with spacing
-    q3_label = f"Q3:{q3:.2f}s"
-    spacing_to_q3 = max(2, pos(q3) - pos(median) - len(median_label) - 2)
-    labels_line += " " * spacing_to_q3 + q3_label
+    # Place labels with spacing to avoid overlaps
+    last_end = -10  # Start well before any label
+    for position, text in label_data:
+        if 0 <= position < width:  # Only place labels within plot area
+            # Ensure minimum spacing between labels
+            start_pos = max(position, last_end + 1)
+            if start_pos + len(text) > len(labels):
+                continue  # Skip if label would exceed array bounds
 
-    # Add Max label with spacing
-    spacing_to_max = max(2, pos(max_val) - pos(q3) - len(q3_label) - 2)
-    labels_line += " " * spacing_to_max + f"{max_val:.2f}s"
+            # Place the label
+            for i, char in enumerate(text):
+                if start_pos + i < len(labels):
+                    labels[start_pos + i] = char
 
-    result += labels_line
+            last_end = start_pos + len(text) - 1
 
-    return result
+    labels_line += ''.join(labels).rstrip()
+
+    return plot_line + "\n" + labels_line
 
 
 def create_ascii_time_series(x_values: List[float], y_values: List[float],
@@ -258,19 +268,44 @@ def generate_text_report(analysis: Dict[str, Any], max_chunks: int = -1, show_em
             lines.append(f"  Mean:   {stats['mean']:.3f}s")
             lines.append(f"  StDev:  {stats['stdev']:.3f}s")
 
-    # Box plots for each metric (if measurements available)
+    # Box plots with UNIFIED scale
     if "measurements" in analysis:
         lines.append("\n" + "=" * 80)
         lines.append("LATENCY DISTRIBUTION (Box Plots)")
         lines.append("=" * 80)
-        lines.append("\nEach metric showing: Min ├──[Q1 ███ Median ███ Q3]──┤ Max\n")
+        lines.append("\nAll metrics on the same time scale:\n")
 
         measurements = analysis["measurements"]
+
+        # Collect ALL values for global range
+        all_values = []
         for metric in metrics_order:
             if metric in measurements and measurements[metric]:
-                label = metric_names[metric]
-                lines.append(create_ascii_box_plot(measurements[metric], width=50, label=label))
-                lines.append("")
+                all_values.extend(measurements[metric])
+
+        if all_values:
+            global_min = min(all_values)
+            global_max = max(all_values)
+            width = 50
+
+            # Scale header
+            lines.append(f"{'':30s} {global_min:.1f}s" + " " * (width - 10) + f"{global_max:.1f}s")
+            lines.append(f"{'':30s} ├" + "─" * width + "┤")
+            lines.append("")
+
+            # Draw each metric with GLOBAL scale
+            for metric in metrics_order:
+                if metric in measurements and measurements[metric]:
+                    label = metric_names[metric][:29]  # Truncate to 29 chars
+                    plot = create_ascii_box_plot(
+                        measurements[metric],
+                        width=width,
+                        label=label,
+                        global_min=global_min,
+                        global_max=global_max
+                    )
+                    lines.append(plot)
+                    lines.append("")  # Empty line between plots
 
     # Histogram for Validated Transcription latency
     if "measurements" in analysis and "validated_transcription" in analysis["measurements"]:

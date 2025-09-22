@@ -132,7 +132,8 @@ class TestManager:
 
         self.mock_config.mode = UnsupportedMode(
             name="unsupported",
-sample_rate=16000,
+            input_sample_rate=16000,
+            output_sample_rate=16000,
             num_channels=1,
             chunk_duration_ms=100
         )

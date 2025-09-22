@@ -81,7 +81,7 @@ class ConcreteBufferedWriter(BufferedWriter):
         from palabra_ai.audio import AudioBuffer
         estimated_duration = getattr(self.cfg, "estimated_duration", 60.0)
         self.ab = AudioBuffer(
-            sample_rate=self.cfg.mode.sample_rate,
+            sample_rate=self.cfg.mode.output_sample_rate,
             num_channels=self.cfg.mode.num_channels,
             original_duration=estimated_duration,
             drop_empty_frames=getattr(self.cfg, "drop_empty_frames", False),
@@ -136,7 +136,8 @@ def mock_config():
     """Create mock config"""
     config = MagicMock()
     config.mode = MagicMock()
-    config.mode.sample_rate = 16000
+    config.mode.input_sample_rate = 16000
+    config.mode.output_sample_rate = 16000
     config.mode.num_channels = 1
     return config
 
@@ -352,7 +353,7 @@ class TestBufferedWriter:
         from palabra_ai.config import Config, WsMode
 
         # Create real config with drop_empty_frames=True
-        config = Config(drop_empty_frames=True, mode=WsMode())
+        config = Config(drop_empty_frames=True, mode=WsMode(), estimated_duration=60.0)
 
         writer = ConcreteBufferedWriter(cfg=config)
         await writer.boot()
@@ -367,7 +368,7 @@ class TestBufferedWriter:
         from palabra_ai.config import Config, WsMode
 
         # Create real config with drop_empty_frames=False (default)
-        config = Config(drop_empty_frames=False, mode=WsMode())
+        config = Config(drop_empty_frames=False, mode=WsMode(), estimated_duration=60.0)
 
         writer = ConcreteBufferedWriter(cfg=config)
         await writer.boot()

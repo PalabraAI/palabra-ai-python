@@ -29,7 +29,7 @@ def test_serialize_language():
 
 def test_io_mode():
     """Test IoMode properties"""
-    mode = IoMode(name="test", sample_rate=48000, num_channels=2, chunk_duration_ms=20)
+    mode = IoMode(name="test", input_sample_rate=48000, output_sample_rate=48000, num_channels=2, chunk_duration_ms=20)
 
     assert mode.samples_per_channel == 960  # 48000 * 0.02
     assert mode.bytes_per_channel == 1920  # 960 * 2
@@ -42,7 +42,7 @@ def test_webrtc_mode():
     """Test WebrtcMode"""
     mode = WebrtcMode()
     assert mode.name == "webrtc"
-    assert mode.sample_rate == 48000
+    assert mode.input_sample_rate == 48000
     assert mode.num_channels == 1
     assert mode.chunk_duration_ms == 320
 
@@ -54,7 +54,7 @@ def test_ws_mode():
     """Test WsMode"""
     mode = WsMode()
     assert mode.name == "ws"
-    assert mode.sample_rate == 16000
+    assert mode.input_sample_rate == 16000
     assert mode.num_channels == 1
     assert mode.chunk_duration_ms == 320
 
@@ -110,7 +110,7 @@ def test_io_mode_from_api_source():
     }
     ws_mode = IoMode.from_api_source(ws_source)
     assert isinstance(ws_mode, WsMode)
-    assert ws_mode.sample_rate == 24000
+    assert ws_mode.input_sample_rate == 24000
     assert ws_mode.num_channels == 2
 
     # Test error for invalid source type
@@ -336,7 +336,7 @@ def test_config_round_trip_ws_mode():
     config1 = Config(
         source=SourceLang(lang=ES),
         targets=[TargetLang(lang=EN)],
-        mode=WsMode(sample_rate=16000, num_channels=1, chunk_duration_ms=100)
+        mode=WsMode(input_sample_rate=16000, output_sample_rate=24000, num_channels=1, chunk_duration_ms=100)
     )
 
     # Serialize to JSON string
@@ -353,7 +353,7 @@ def test_config_round_trip_ws_mode():
 
     # Check that mode was preserved
     assert isinstance(config2.mode, WsMode)
-    assert config2.mode.sample_rate == 16000
+    assert config2.mode.input_sample_rate == 16000
     assert config2.mode.num_channels == 1
     assert config2.mode.chunk_duration_ms == 320  # Default for WsMode
 
@@ -396,7 +396,7 @@ def test_config_json_format():
     config = Config(
         source=SourceLang(lang=ES),
         targets=[TargetLang(lang=EN)],
-        mode=WsMode(sample_rate=16000, num_channels=1)
+        mode=WsMode(input_sample_rate=16000, output_sample_rate=24000, num_channels=1)
     )
 
     # Convert to dict for inspection
@@ -458,7 +458,7 @@ def test_config_from_api_json():
 
     # Check that mode was reconstructed
     assert isinstance(config.mode, WsMode)
-    assert config.mode.sample_rate == 16000
+    assert config.mode.input_sample_rate == 16000
     assert config.mode.num_channels == 1
     assert config.mode.chunk_duration_ms == 320  # Default for WsMode
 

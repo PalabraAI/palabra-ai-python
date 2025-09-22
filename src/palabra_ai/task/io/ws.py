@@ -50,7 +50,7 @@ class WsIo(Io):
                 trace(f"-> {raw_msg[:30]}")
                 audio_frame = AudioFrame.from_ws(
                     raw_msg,
-                    sample_rate=self.cfg.mode.sample_rate,
+                    sample_rate=self.cfg.mode.output_sample_rate,
                     num_channels=self.cfg.mode.num_channels,
                     samples_per_channel=self.cfg.mode.samples_per_channel,
                     perf_ts=perf_ts,

@@ -64,6 +64,8 @@ Examples:
                        help="Connection mode: ws (WebSocket) or webrtc (default: ws)")
     parser.add_argument("--chunk-duration-ms", type=int, default=100,
                        help="Audio chunk duration in milliseconds (default: 100)")
+    parser.add_argument("--save-audio", action="store_true",
+                       help="Save translated audio output to WAV file")
 
     args = parser.parse_args()
 
@@ -130,7 +132,9 @@ Examples:
             show_progress=not args.no_progress,
             mode=mode,
             chunk_duration_ms=chunk_duration_ms,
-            base_config=base_config
+            base_config=base_config,
+            save_audio=args.save_audio,
+            output_dir=args.output_dir
         )
 
         # Analyze results
