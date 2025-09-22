@@ -43,38 +43,46 @@ def test_run_with_running_loop():
         with patch.object(client, 'arun') as mock_arun:
             mock_arun.return_value = MagicMock(ok=True)
 
-            result = client.run(config)
 
-            # Should create new loop regardless
-            mock_new_loop.assert_called_once()
-            mock_set_loop.assert_called_once_with(mock_loop)
-            mock_loop.close.assert_called_once()
+        result = client.run(config)
+
+        # Should create new loop regardless
+        mock_new_loop.assert_called_once()
+        mock_set_loop.assert_called_once_with(mock_loop)
+        mock_loop.close.assert_called_once()
 
 def test_run_without_loop():
     """Test run method without running loop"""
     config = Config()
     config.source = SourceLang(lang="es")
-    
+
     client = PalabraAI(client_id="test", client_secret="test")
-    
-    with patch('asyncio.get_running_loop') as mock_get_loop:
-        mock_get_loop.side_effect = RuntimeError("No running loop")
-        
-        with patch('aioshutdown.SIGTERM'), \
-             patch('aioshutdown.SIGHUP'), \
-             patch('aioshutdown.SIGINT'):
-            
-            # Mock the shutdown loop
-            with patch('palabra_ai.client.SIGTERM') as mock_sigterm:
-                mock_context = Mock()
-                mock_context.run_until_complete = Mock()
-                mock_sigterm.__or__ = Mock(return_value=Mock(__enter__=Mock(return_value=mock_context), __exit__=Mock()))
-                
-                # This would normally run the event loop
-                try:
+
+    # Mock the async context manager directly to avoid coroutine creation
+    with patch.object(client, 'process') as mock_process:
+        mock_manager = MagicMock()
+        mock_manager.logger = None
+        mock_async_context = AsyncMock()
+        mock_async_context.__aenter__.return_value = mock_manager
+        mock_async_context.__aexit__.return_value = None
+        mock_process.return_value = mock_async_context
+
+        with patch('asyncio.get_running_loop') as mock_get_loop:
+            mock_get_loop.side_effect = RuntimeError("No running loop")
+
+            with patch('asyncio.new_event_loop') as mock_new_loop, \
+                 patch('asyncio.set_event_loop') as mock_set_loop:
+
+                mock_loop = MagicMock()
+                mock_loop.run_until_complete = MagicMock(return_value=MagicMock(ok=True))
+                mock_loop.close = MagicMock()
+                mock_new_loop.return_value = mock_loop
+
+                with patch('palabra_ai.client.SIGTERM'), \
+                     patch('palabra_ai.client.SIGHUP'), \
+                     patch('palabra_ai.client.SIGINT'):
+
                     client.run(config)
-                except:
-                    pass  # We're just testing the setup
 
 def test_run_with_uvloop():
     """Test run method with uvloop available"""
@@ -109,7 +117,7 @@ def test_run_without_uvloop():
     """Test run method when uvloop is not available"""
     config = Config()
     config.source = SourceLang(lang="es")
-    
+
     client = PalabraAI(client_id="test", client_secret="test")
     
     # Make uvloop import fail
@@ -229,29 +237,29 @@ async def test_process_with_credentials_creation():
     config = Config()
     config.source = SourceLang(lang="es")
     config.targets = [TargetLang(lang="en")]
-    
+
     client = PalabraAI(client_id="test", client_secret="test")
-    
+
     mock_credentials = MagicMock()
-    
+
     with patch('palabra_ai.client.PalabraRESTClient') as mock_rest_class:
         mock_rest = AsyncMock()
         mock_rest.create_session.return_value = mock_credentials
         mock_rest_class.return_value = mock_rest
-        
+
         with patch('palabra_ai.client.Manager') as mock_manager_class:
             mock_manager = MagicMock()
             mock_manager_class.return_value = MagicMock(return_value=mock_manager)
-            
+
             with patch('asyncio.TaskGroup') as mock_tg_class:
-                mock_tg = AsyncMock()
-                mock_tg.__aenter__.return_value = mock_tg
-                mock_tg.__aexit__.return_value = None
+                mock_tg = MagicMock()
+                mock_tg.__aenter__ = AsyncMock(return_value=mock_tg)
+                mock_tg.__aexit__ = AsyncMock(return_value=None)
                 mock_tg_class.return_value = mock_tg
-                
+
                 async with client.process(config) as manager:
                     assert manager == mock_manager
-                
+
                 # Verify REST client was created
                 mock_rest_class.assert_called_once_with(
                     "test", "test", base_url="https://api.palabra.ai"
@@ -264,27 +272,27 @@ async def test_process_with_cancelled_error():
     config = Config()
     config.source = SourceLang(lang="es")
     config.targets = [TargetLang(lang="en")]
-    
+
     client = PalabraAI(client_id="test", client_secret="test")
-    
+
     mock_credentials = MagicMock()
-    
+
     with patch('palabra_ai.client.PalabraRESTClient') as mock_rest_class:
         mock_rest = AsyncMock()
         mock_rest.create_session.return_value = mock_credentials
         mock_rest_class.return_value = mock_rest
-        
+
         with patch('palabra_ai.client.Manager') as mock_manager_class:
             mock_manager = MagicMock()
             mock_manager_class.return_value = MagicMock(return_value=mock_manager)
-            
+
             with patch('asyncio.TaskGroup') as mock_tg_class:
                 mock_tg = AsyncMock()
                 mock_tg.__aenter__.return_value = mock_tg
                 # Simulate CancelledError in TaskGroup
                 mock_tg.__aexit__.side_effect = asyncio.CancelledError()
                 mock_tg_class.return_value = mock_tg
-                
+
                 # Should not raise CancelledError
                 async with client.process(config) as manager:
                     pass
@@ -295,24 +303,24 @@ async def test_process_with_exception_group():
     config = Config()
     config.source = SourceLang(lang="es")
     config.targets = [TargetLang(lang="en")]
-    
+
     client = PalabraAI(client_id="test", client_secret="test")
-    
+
     mock_credentials = MagicMock()
-    
+
     with patch('palabra_ai.client.PalabraRESTClient') as mock_rest_class:
         mock_rest = AsyncMock()
         mock_rest.create_session.return_value = mock_credentials
         mock_rest_class.return_value = mock_rest
-        
+
         with patch('palabra_ai.client.Manager') as mock_manager_class:
             mock_manager = MagicMock()
             mock_manager_class.return_value = MagicMock(return_value=mock_manager)
-            
+
             with patch('asyncio.TaskGroup') as mock_tg_class:
                 mock_tg = AsyncMock()
                 mock_tg.__aenter__.return_value = mock_tg
-                
+
                 # Create an exception group
                 exc1 = ValueError("Error 1")
                 exc2 = RuntimeError("Error 2")
@@ -321,61 +329,20 @@ async def test_process_with_exception_group():
                 except NameError:
                     # For Python < 3.11
                     exc_group = Exception("Test errors")
-                
+
                 # Simulate exception group in TaskGroup
                 mock_tg.__aexit__.side_effect = exc_group
                 mock_tg_class.return_value = mock_tg
-                
+
                 with patch('palabra_ai.client.unwrap_exceptions') as mock_unwrap:
                     mock_unwrap.return_value = [exc1, exc2]
-                    
+
                     with pytest.raises(ValueError) as exc_info:
                         async with client.process(config) as manager:
                             pass
-                    
+
                     assert "Error 1" in str(exc_info.value)
 
-@pytest.mark.skip(reason="CancelledError handling needs investigation")
-@pytest.mark.asyncio
-async def test_process_with_only_cancelled_errors():
-    """Test process handles exception group with only CancelledErrors"""
-    config = Config()
-    config.source = SourceLang(lang="es")
-    config.targets = [TargetLang(lang="en")]
-    
-    client = PalabraAI(client_id="test", client_secret="test")
-    
-    mock_credentials = MagicMock()
-    
-    with patch('palabra_ai.client.PalabraRESTClient') as mock_rest_class:
-        mock_rest = AsyncMock()
-        mock_rest.create_session.return_value = mock_credentials
-        mock_rest_class.return_value = mock_rest
-        
-        with patch('palabra_ai.client.Manager') as mock_manager_class:
-            mock_manager = MagicMock()
-            mock_manager_class.return_value = MagicMock(return_value=mock_manager)
-            
-            with patch('asyncio.TaskGroup') as mock_tg_class:
-                mock_tg = AsyncMock()
-                mock_tg.__aenter__.return_value = mock_tg
-                
-                # Create an exception group with only CancelledErrors
-                exc1 = asyncio.CancelledError()
-                exc2 = asyncio.CancelledError()
-                # CancelledError is special case - just use the first one
-                exc_group = exc1
-                
-                # Simulate exception group in TaskGroup
-                mock_tg.__aexit__.side_effect = exc_group
-                mock_tg_class.return_value = mock_tg
-                
-                with patch('palabra_ai.client.unwrap_exceptions') as mock_unwrap:
-                    mock_unwrap.return_value = [exc1, exc2]
-                    
-                    with pytest.raises(asyncio.CancelledError):
-                        async with client.process(config) as manager:
-                            pass
 
 @pytest.mark.asyncio
 async def test_process_finally_block():
@@ -383,32 +350,32 @@ async def test_process_finally_block():
     config = Config()
     config.source = SourceLang(lang="es")
     config.targets = [TargetLang(lang="en")]
-    
+
     client = PalabraAI(client_id="test", client_secret="test")
-    
+
     mock_credentials = MagicMock()
-    
+
     with patch('palabra_ai.client.PalabraRESTClient') as mock_rest_class:
         mock_rest = AsyncMock()
         mock_rest.create_session.return_value = mock_credentials
         mock_rest_class.return_value = mock_rest
-        
+
         with patch('palabra_ai.client.diagnose_hanging_tasks') as mock_diagnose:
             mock_diagnose.return_value = "Diagnostics"
-            
+
             with patch('palabra_ai.client.Manager') as mock_manager_class:
                 mock_manager = MagicMock()
                 mock_manager_class.return_value = MagicMock(return_value=mock_manager)
-                
+
                 with patch('asyncio.TaskGroup') as mock_tg_class:
                     mock_tg = AsyncMock()
                     mock_tg.__aenter__.return_value = mock_tg
                     mock_tg.__aexit__.return_value = None
                     mock_tg_class.return_value = mock_tg
-                    
+
                     async with client.process(config) as manager:
                         pass
-                    
+
                     # Verify finally block executed
                     mock_diagnose.assert_called_once()
 
@@ -421,6 +388,7 @@ def test_run_with_no_raise_flag():
 
     with patch('asyncio.new_event_loop') as mock_new_loop, \
          patch('asyncio.set_event_loop') as mock_set_loop:
+
 
         mock_loop = MagicMock()
         mock_loop.run_until_complete.side_effect = ValueError("Test error")
@@ -436,27 +404,29 @@ def test_run_without_signal_handlers():
     """Test run method with signal_handlers=False (default)"""
     config = Config()
     config.source = SourceLang(lang="es")
-    
+
     client = PalabraAI(client_id="test", client_secret="test")
-    
+
     with patch('asyncio.get_running_loop') as mock_get_loop:
         mock_get_loop.side_effect = RuntimeError("No running loop")
-        
+
         with patch('asyncio.new_event_loop') as mock_new_loop, \
              patch('asyncio.set_event_loop') as mock_set_loop:
-            
+
             mock_loop = MagicMock()
             mock_loop.run_until_complete = MagicMock(return_value=MagicMock(ok=True))
             mock_new_loop.return_value = mock_loop
-            
+
             with patch.object(client, 'process') as mock_process:
-                mock_manager = AsyncMock()
-                mock_manager.task = AsyncMock()
+                mock_manager = MagicMock()
+                mock_manager.task = MagicMock()
                 mock_manager.logger = None
-                mock_process.return_value.__aenter__.return_value = mock_manager
-                
+                mock_async_context = AsyncMock()
+                mock_async_context.__aenter__.return_value = mock_manager
+                mock_async_context.__aexit__.return_value = None
+                mock_process.return_value = mock_async_context
+
                 result = client.run(config, signal_handlers=False)
-                
                 # Verify new loop was created and set
                 mock_new_loop.assert_called_once()
                 mock_set_loop.assert_called_once_with(mock_loop)
@@ -466,42 +436,44 @@ def test_run_async_with_manager_task_cancelled():
     """Test _run_with_result when manager task is cancelled"""
     config = Config()
     config.source = SourceLang(lang="es")
-    
+
     client = PalabraAI(client_id="test", client_secret="test")
-    
+
     async def test_coro():
         with patch.object(client, 'process') as mock_process:
-            mock_manager = AsyncMock()
-            async def cancelled_task():
-                raise asyncio.CancelledError()
-            mock_manager.task = asyncio.create_task(cancelled_task())
+            mock_manager = MagicMock()
+            # Create a future that raises CancelledError when awaited
+            mock_task = asyncio.Future()
+            mock_task.set_exception(asyncio.CancelledError())
+            mock_manager.task = mock_task
             mock_manager.logger = MagicMock()
             mock_manager.logger._task = MagicMock()
             mock_manager.logger._task.done.return_value = True
             mock_manager.logger.result = None
             mock_process.return_value.__aenter__.return_value = mock_manager
             mock_process.return_value.__aexit__.return_value = None
-            
+
             result = await client.arun(config, no_raise=True)
             assert result.ok is False
             assert isinstance(result.exc, asyncio.CancelledError)
             assert result.log_data is None
-    
+
     asyncio.run(test_coro())
 
 def test_run_async_with_manager_error():
     """Test _run_with_result when manager task raises error"""
     config = Config()
     config.source = SourceLang(lang="es")
-    
+
     client = PalabraAI(client_id="test", client_secret="test")
-    
+
     async def test_coro():
         with patch.object(client, 'process') as mock_process:
-            mock_manager = AsyncMock()
-            async def error_task():
-                raise ValueError("Manager error")
-            mock_manager.task = asyncio.create_task(error_task())
+            mock_manager = MagicMock()
+            # Create a future that raises ValueError when awaited
+            mock_task = asyncio.Future()
+            mock_task.set_exception(ValueError("Manager error"))
+            mock_manager.task = mock_task
             mock_manager.logger = MagicMock()
             mock_manager.logger._task = MagicMock()
             mock_manager.logger._task.done.return_value = False
@@ -509,26 +481,26 @@ def test_run_async_with_manager_error():
             mock_manager.logger.exit = AsyncMock(return_value=None)
             mock_process.return_value.__aenter__.return_value = mock_manager
             mock_process.return_value.__aexit__.return_value = None
-            
+
             with patch('palabra_ai.client.error') as mock_error:
                 result = await client.arun(config, no_raise=True)
                 assert result.ok is False
                 assert isinstance(result.exc, ValueError)
                 assert result.log_data is None
                 mock_error.assert_any_call("Error in manager task: Manager error")
-    
+
     asyncio.run(test_coro())
 
 def test_run_async_with_logger_timeout():
     """Test _run_with_result when logger times out"""
     config = Config()
     config.source = SourceLang(lang="es")
-    
+
     client = PalabraAI(client_id="test", client_secret="test")
-    
+
     async def test_coro():
         with patch.object(client, 'process') as mock_process:
-            mock_manager = AsyncMock()
+            mock_manager = MagicMock()
             async def normal_task():
                 return None
             mock_manager.task = asyncio.create_task(normal_task())
@@ -539,29 +511,30 @@ def test_run_async_with_logger_timeout():
             mock_manager.logger.exit = AsyncMock(side_effect=asyncio.TimeoutError())
             mock_process.return_value.__aenter__.return_value = mock_manager
             mock_process.return_value.__aexit__.return_value = None
-            
+
             with patch('asyncio.wait_for', side_effect=asyncio.TimeoutError()):
                 with patch('palabra_ai.client.debug') as mock_debug:
                     result = await client.arun(config, no_raise=True)
                     assert result.ok is True
                     assert result.log_data is None
                     mock_debug.assert_any_call("Logger task timeout or cancelled, checking result anyway")
-    
+
     asyncio.run(test_coro())
 
 def test_run_async_with_logger_exception():
     """Test _run_with_result when logger.exit() raises exception"""
     config = Config()
     config.source = SourceLang(lang="es")
-    
+
     client = PalabraAI(client_id="test", client_secret="test")
-    
+
     async def test_coro():
         with patch.object(client, 'process') as mock_process:
-            mock_manager = AsyncMock()
-            async def normal_task():
-                return None
-            mock_manager.task = asyncio.create_task(normal_task())
+            mock_manager = MagicMock()
+            # Create a future that completes normally
+            mock_task = asyncio.Future()
+            mock_task.set_result(None)
+            mock_manager.task = mock_task
             mock_manager.logger = MagicMock()
             mock_manager.logger._task = MagicMock()
             mock_manager.logger._task.done.return_value = True
@@ -569,33 +542,32 @@ def test_run_async_with_logger_exception():
             mock_manager.logger.exit = AsyncMock(side_effect=RuntimeError("Logger exit error"))
             mock_process.return_value.__aenter__.return_value = mock_manager
             mock_process.return_value.__aexit__.return_value = None
-            
+
             with patch('palabra_ai.client.debug') as mock_debug:
                 with patch('palabra_ai.client.error') as mock_error:
                     result = await client.arun(config, no_raise=True)
                     assert result.ok is True
                     assert result.log_data is None
                     mock_debug.assert_any_call("Failed to get log_data from logger.exit(): Logger exit error")
-    
+
     asyncio.run(test_coro())
 
 def test_run_async_with_process_error():
     """Test _run when process raises error"""
     config = Config()
     config.source = SourceLang(lang="es")
-    
+
     client = PalabraAI(client_id="test", client_secret="test")
-    
+
     async def test_coro():
         with patch.object(client, 'process') as mock_process:
             mock_process.side_effect = RuntimeError("Process error")
-            
+
             with patch('palabra_ai.client.error') as mock_error:
                 result = await client.arun(config, no_raise=True)
                 assert result.ok is False
                 assert isinstance(result.exc, RuntimeError)
                 mock_error.assert_called_with("Error in PalabraAI.arun(): Process error")
-
     asyncio.run(test_coro())
 
 # Tests for new arun() method

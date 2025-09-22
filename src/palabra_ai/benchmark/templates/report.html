@@ -108,11 +108,11 @@
 </head>
 <body>
     <h1>Palabra Benchmark Report</h1>
-    
+
     <div class="timestamp">
         Generated: {{ generated_at }}
     </div>
-    
+
     <h2>Summary</h2>
     <div class="summary-grid">
         <div class="summary-card">
@@ -132,7 +132,7 @@
             <div class="value">{{ "%.1f"|format(summary.chunks_with_translation / summary.total_chunks * 100) }}<span class="unit">%</span></div>
         </div>
     </div>
-    
+
     <h2>Latency Statistics</h2>
     <table>
         <thead>
@@ -172,21 +172,21 @@
             {% endfor %}
         </tbody>
     </table>
-    
+
     <h2>Percentile Comparison</h2>
     <div class="chart-container">
         <div class="chart-wrapper">
             <canvas id="percentileChart"></canvas>
         </div>
     </div>
-    
+
     <h2>Latency Over Time</h2>
     <div class="chart-container">
         <div class="chart-wrapper">
             <canvas id="timeSeriesChart"></canvas>
         </div>
     </div>
-    
+
     <script>
         // Percentile Chart
         const percentileCtx = document.getElementById('percentileChart').getContext('2d');
@@ -225,7 +225,7 @@
                 }
             }
         });
-        
+
         // Time Series Chart
         const timeSeriesCtx = document.getElementById('timeSeriesChart').getContext('2d');
         new Chart(timeSeriesCtx, {

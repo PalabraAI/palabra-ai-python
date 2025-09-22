@@ -17,7 +17,7 @@ def test_validate_language():
     # Test with string
     lang = validate_language("es")
     assert lang.code == "es"
-    
+
     # Test with Language object
     lang_obj = Language.get_or_create("en")
     assert validate_language(lang_obj) == lang_obj
@@ -29,8 +29,8 @@ def test_serialize_language():
 
 def test_io_mode():
     """Test IoMode properties"""
-    mode = IoMode(name="test", sample_rate=48000, num_channels=2, chunk_duration_ms=20)
-    
+    mode = IoMode(name="test", input_sample_rate=48000, output_sample_rate=48000, num_channels=2, chunk_duration_ms=20)
+
     assert mode.samples_per_channel == 960  # 48000 * 0.02
     assert mode.bytes_per_channel == 1920  # 960 * 2
     assert mode.chunk_samples == 1920  # 960 * 2
@@ -42,10 +42,10 @@ def test_webrtc_mode():
     """Test WebrtcMode"""
     mode = WebrtcMode()
     assert mode.name == "webrtc"
-    assert mode.sample_rate == 48000
+    assert mode.input_sample_rate == 48000
     assert mode.num_channels == 1
     assert mode.chunk_duration_ms == 320
-    
+
     dump = mode.model_dump()
     assert dump["input_stream"]["source"]["type"] == "webrtc"
     assert dump["output_stream"]["target"]["type"] == "webrtc"
@@ -54,7 +54,7 @@ def test_ws_mode():
     """Test WsMode"""
     mode = WsMode()
     assert mode.name == "ws"
-    assert mode.sample_rate == 16000
+    assert mode.input_sample_rate == 16000
     assert mode.num_channels == 1
     assert mode.chunk_duration_ms == 320
 
@@ -110,7 +110,7 @@ def test_io_mode_from_api_source():
     }
     ws_mode = IoMode.from_api_source(ws_source)
     assert isinstance(ws_mode, WsMode)
-    assert ws_mode.sample_rate == 24000
+    assert ws_mode.input_sample_rate == 24000
     assert ws_mode.num_channels == 2
 
     # Test error for invalid source type
@@ -177,13 +177,13 @@ def test_source_lang():
 def test_source_lang_with_callback():
     """Test SourceLang with callback validation"""
     lang = Language.get_or_create("es")
-    
+
     def callback(msg):
         pass
-    
+
     source = SourceLang(lang=lang, on_transcription=callback)
     assert source.on_transcription == callback
-    
+
     # Test with non-callable
     with pytest.raises(ConfigurationError) as exc_info:
         SourceLang(lang=lang, on_transcription="not callable")
@@ -202,19 +202,19 @@ def test_target_lang():
 def test_source_lang_validation():
     """Test SourceLang language validation"""
     from palabra_ai.lang import EN, BA, AZ, FIL
-    
+
     # Valid source languages should work
     source = SourceLang(lang=EN)
     assert source.lang == EN
-    
+
     source = SourceLang(lang=BA)  # Bashkir can be source
     assert source.lang == BA
-    
+
     # Invalid source languages should raise error
     with pytest.raises(ConfigurationError) as exc_info:
         SourceLang(lang=AZ)  # Azerbaijani cannot be source
     assert "not supported as a source language" in str(exc_info.value)
-    
+
     with pytest.raises(ConfigurationError) as exc_info:
         SourceLang(lang=FIL)  # Filipino cannot be source
     assert "not supported as a source language" in str(exc_info.value)
@@ -223,22 +223,22 @@ def test_source_lang_validation():
 def test_target_lang_validation():
     """Test TargetLang language validation"""
     from palabra_ai.lang import ES, AZ, ZH_HANS, BA, TH
-    
+
     # Valid target languages should work
     target = TargetLang(lang=ES)
     assert target.lang == ES
-    
+
     target = TargetLang(lang=AZ)  # Azerbaijani can be target
     assert target.lang == AZ
-    
+
     target = TargetLang(lang=ZH_HANS)  # Chinese Simplified can be target
     assert target.lang == ZH_HANS
-    
+
     # Invalid target languages should raise error
     with pytest.raises(ConfigurationError) as exc_info:
         TargetLang(lang=BA)  # Bashkir cannot be target
     assert "not supported as a target language" in str(exc_info.value)
-    
+
     with pytest.raises(ConfigurationError) as exc_info:
         TargetLang(lang=TH)  # Thai cannot be target
     assert "not supported as a target language" in str(exc_info.value)
@@ -256,7 +256,6 @@ def test_config_with_source_and_targets():
     """Test Config with source and targets"""
     source = SourceLang(lang=ES)
     targets = [TargetLang(lang=EN), TargetLang(lang=FR)]
-    
     config = Config(source=source, targets=targets)
     assert config.source.lang.code == "es"
     assert len(config.targets) == 2
@@ -267,12 +266,11 @@ def test_config_single_target():
     """Test Config with single target (not a list)"""
     source = SourceLang(lang=ES)
     target = TargetLang(lang=EN)
-    
     config = Config(source=source, targets=target)
     # model_post_init should have been called and converted single target to list
     # But it seems the init process doesn't trigger it properly. Let's test what we get
     assert config.targets == target  # Should be single target initially
-    
+
     # Force the conversion by calling model_post_init manually
     config.model_post_init(None)
     assert isinstance(config.targets, list)
@@ -284,7 +282,7 @@ def test_config_to_dict():
     source = SourceLang(lang=ES)
     target = TargetLang(lang=EN)
     config = Config(source=source, targets=[target])
-    
+
     data = config.to_dict()
     assert "pipeline" in data
     assert data["pipeline"]["transcription"]["source_language"] == "es"
@@ -318,7 +316,7 @@ def test_config_from_dict():
             "allowed_message_types": []
         }
     }
-    
+
     config = Config.from_dict(data)
     assert config.source.lang.code == "es"
     assert len(config.targets) == 1
@@ -338,7 +336,7 @@ def test_config_round_trip_ws_mode():
     config1 = Config(
         source=SourceLang(lang=ES),
         targets=[TargetLang(lang=EN)],
-        mode=WsMode(sample_rate=16000, num_channels=1, chunk_duration_ms=100)
+        mode=WsMode(input_sample_rate=16000, output_sample_rate=24000, num_channels=1, chunk_duration_ms=100)
     )
 
     # Serialize to JSON string
@@ -355,7 +353,7 @@ def test_config_round_trip_ws_mode():
 
     # Check that mode was preserved
     assert isinstance(config2.mode, WsMode)
-    assert config2.mode.sample_rate == 16000
+    assert config2.mode.input_sample_rate == 16000
     assert config2.mode.num_channels == 1
     assert config2.mode.chunk_duration_ms == 320  # Default for WsMode
 
@@ -398,7 +396,7 @@ def test_config_json_format():
     config = Config(
         source=SourceLang(lang=ES),
         targets=[TargetLang(lang=EN)],
-        mode=WsMode(sample_rate=16000, num_channels=1)
+        mode=WsMode(input_sample_rate=16000, output_sample_rate=24000, num_channels=1)
     )
 
     # Convert to dict for inspection
@@ -460,7 +458,7 @@ def test_config_from_api_json():
 
     # Check that mode was reconstructed
     assert isinstance(config.mode, WsMode)
-    assert config.mode.sample_rate == 16000
+    assert config.mode.input_sample_rate == 16000
     assert config.mode.num_channels == 1
     assert config.mode.chunk_duration_ms == 320  # Default for WsMode
 

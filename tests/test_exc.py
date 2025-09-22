@@ -74,11 +74,11 @@ def test_unwrap_exceptions_group():
     exc1 = ValueError("test1")
     exc2 = RuntimeError("test2")
     exc3 = TypeError("test3")
-    
+
     # Create nested ExceptionGroups
     group1 = ExceptionGroup("group1", [exc1, exc2])
     group2 = ExceptionGroup("group2", [group1, exc3])
-    
+
     result = unwrap_exceptions(group2)
     assert len(result) == 3
     assert exc1 in result
@@ -90,12 +90,12 @@ def test_unwrap_exceptions_deeply_nested():
     """Test unwrap_exceptions with deeply nested ExceptionGroups"""
     exc1 = ValueError("test1")
     exc2 = RuntimeError("test2")
-    
+
     # Create deeply nested structure
     group1 = ExceptionGroup("group1", [exc1])
     group2 = ExceptionGroup("group2", [group1])
     group3 = ExceptionGroup("group3", [group2, exc2])
-    
+
     result = unwrap_exceptions(group3)
     assert len(result) == 2
     assert exc1 in result

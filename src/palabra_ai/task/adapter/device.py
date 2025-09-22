@@ -182,7 +182,9 @@ class DeviceReader(Reader):
         device_name = (
             self.device.name if isinstance(self.device, Device) else self.device
         )
-        sample_rate = self.cfg.mode.sample_rate if self.cfg else SAMPLE_RATE_DEFAULT
+        sample_rate = (
+            self.cfg.mode.input_sample_rate if self.cfg else SAMPLE_RATE_DEFAULT
+        )
         await self.sdm.start_input_device(
             device_name,
             channels=CHANNELS_MONO,
@@ -234,7 +236,7 @@ class DeviceWriter(Writer):
         self._output_device = self._sdm.start_output_device(
             device_name,
             channels=self.cfg.mode.num_channels,
-            sample_rate=self.cfg.mode.sample_rate,
+            sample_rate=self.cfg.mode.output_sample_rate,
         )
         self._loop = asyncio.get_running_loop()
         # Base Writer class will handle queue processing

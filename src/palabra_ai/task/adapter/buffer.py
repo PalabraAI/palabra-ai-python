@@ -146,20 +146,21 @@ class RunAsPipe:
 
     def _cleanup(self):
         """Clean up process"""
-        if self._closed:
+        if getattr(self, "_closed", False):
             return
 
         self._closed = True
-        if self.process and self.process in RunAsPipe._active_processes:
-            RunAsPipe._active_processes.remove(self.process)
+        process = getattr(self, "process", None)
+        if process and process in RunAsPipe._active_processes:
+            RunAsPipe._active_processes.remove(process)
 
-            if self.process.poll() is None:
-                self.process.terminate()
+            if process.poll() is None:
+                process.terminate()
                 try:
-                    self.process.wait(timeout=2)
+                    process.wait(timeout=2)
                 except subprocess.TimeoutExpired:
-                    self.process.kill()
-                    self.process.wait()
+                    process.kill()
+                    process.wait()
 
     @staticmethod
     def _cleanup_all():

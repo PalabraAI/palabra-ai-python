@@ -5,7 +5,7 @@ import asyncio
 from dataclasses import KW_ONLY, dataclass, field
 from typing import TYPE_CHECKING
 
-from palabra_ai.audio import AudioBuffer
+from palabra_ai.audio import AudioBuffer, AudioFrame
 from palabra_ai.constant import SLEEP_INTERVAL_DEFAULT, SLEEP_INTERVAL_LONG
 from palabra_ai.task.base import Task, TaskEvent
 from palabra_ai.util.logger import debug, trace
@@ -50,6 +50,17 @@ class Writer(Task):
     cfg: Config = field(default=None, init=False, repr=False)
     q: asyncio.Queue[AudioFrame | None] = field(default_factory=asyncio.Queue)
     _frames_processed: int = field(default=0, init=False)
+    __start_perf_ts: float | None = field(default=None, init=False, repr=False)
+
+    @property
+    def start_perf_ts(self):
+        return self.__start_perf_ts
+
+    @start_perf_ts.setter
+    def start_perf_ts(self, value):
+        if self.__start_perf_ts:
+            return
+        self.__start_perf_ts = value
 
     async def do(self):
         from palabra_ai.util.logger import debug, warning
@@ -93,15 +104,22 @@ class BufferedWriter(Writer):
 
     _: KW_ONLY
     ab: AudioBuffer | None = field(default=None, init=False)
-    drop_empty_frames: bool = field(default=False)
 
     async def boot(self):
+        # Create buffer with estimated duration
+        estimated_duration = getattr(self.cfg, "estimated_duration", 60.0)
         self.ab = AudioBuffer(
-            sample_rate=self.cfg.mode.sample_rate,
+            sample_rate=self.cfg.mode.output_sample_rate,
             num_channels=self.cfg.mode.num_channels,
+            original_duration=estimated_duration,
+            drop_empty_frames=getattr(self.cfg, "drop_empty_frames", False),
         )
 
     async def write(self, frame: AudioFrame):
+        # Set global start time on first frame
+        if self.ab.global_start_time is None and self.start_perf_ts is not None:
+            self.ab.set_start_time(self.start_perf_ts)
+
         return await self.ab.write(frame)
 
     def to_wav_bytes(self) -> bytes:

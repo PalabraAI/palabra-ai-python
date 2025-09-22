@@ -15,7 +15,7 @@ def test_log_data_creation():
         debug=True,
         logs=["log1", "log2"]
     )
-    
+
     assert log_data.version == "1.0.0"
     assert log_data.sysinfo["os"] == "darwin"
     assert len(log_data.messages) == 1
@@ -30,7 +30,7 @@ def test_log_data_creation():
 def test_run_result_success():
     """Test RunResult model for successful run"""
     result = RunResult(ok=True)
-    
+
     assert result.ok is True
     assert result.exc is None
     assert result.log_data is None
@@ -40,7 +40,7 @@ def test_run_result_with_exception():
     """Test RunResult model with exception"""
     test_exception = ValueError("Test error")
     result = RunResult(ok=False, exc=test_exception)
-    
+
     assert result.ok is False
     assert result.exc == test_exception
     assert result.log_data is None
@@ -59,9 +59,9 @@ def test_run_result_with_log_data():
         debug=False,
         logs=[]
     )
-    
+
     result = RunResult(ok=True, log_data=log_data)
-    
+
     assert result.ok is True
     assert result.exc is None
     assert result.log_data == log_data

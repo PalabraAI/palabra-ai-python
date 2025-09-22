@@ -22,6 +22,7 @@ from palabra_ai.task.base import Task
 from palabra_ai.util.fanout_queue import FanoutQueue
 from palabra_ai.util.logger import debug
 from palabra_ai.util.orjson import to_json
+from palabra_ai.util.timing import get_perf_ts
 
 if TYPE_CHECKING:
     from palabra_ai.internal.rest import SessionCredentials
@@ -46,9 +47,9 @@ class Io(Task):
     _out_msg_num: Iterator[int] = field(default_factory=count, init=False)
     _in_audio_num: Iterator[int] = field(default_factory=count, init=False)
     _out_audio_num: Iterator[int] = field(default_factory=count, init=False)
-    _start_time: float | None = field(default=None, init=False)
-    _sent_count: int = field(default=0, init=False)
-    _pending: list = field(default_factory=list, init=False)
+    _global_start_ts: float | None = field(default=None, init=False)
+    _frames_sent: int = field(default=0, init=False)
+    _total_duration_sent: float = field(default=0.0, init=False)
     eos_received: bool = field(default=False, init=False)
 
     @property
@@ -61,6 +62,12 @@ class Io(Task):
     async def send_frame(self, frame) -> None:
         """Send an audio frame through the transport."""
         ...
+
+    def init_global_start_ts(self):
+        if self._global_start_ts is None:
+            self._global_start_ts = get_perf_ts()
+            if hasattr(self, "writer") and self.writer:
+                self.writer.start_perf_ts = self._global_start_ts
 
     @abc.abstractmethod
     async def send_message(self, msg_data: bytes) -> None:
@@ -75,14 +82,13 @@ class Io(Task):
 
     async def push_in_msg(self, msg: "Message") -> None:
         """Push an incoming message with debug tracking."""
-        _dbg = Dbg(
+        msg._dbg = Dbg(
             Kind.MESSAGE,
             self.channel,
             Direction.IN,
             num=next(self._in_msg_num),
             idx=next(self._idx),
         )
-        msg._dbg = _dbg
         debug(f"Pushing message: {msg!r}")
         self.in_msg_foq.publish(msg)
 
@@ -94,66 +100,108 @@ class Io(Task):
                     debug("stopping in_msg_sender due to None or stopper")
                     return
                 raw = to_json(msg)
-                debug(f"<- {raw[0:30]}")
+                debug(f"<- {raw[0:30]} / {msg.dbg_delta=}")
                 await self.send_message(raw)
 
     async def do(self):
         """Main processing loop - read audio chunks and push them."""
         await self.reader.ready
-        MAX_BURST = 20
 
         while not self.stopper and not self.eof:
-            chunk = await self.reader.read(self.cfg.mode.chunk_bytes)
-
+            chunk = await self._read_next_chunk()
             if chunk is None:
-                debug(f"T{self.name}: Audio EOF reached")
-                +self.eof  # noqa
-                await self.push_in_msg(EndTaskMessage())
+                await self._handle_eof()
                 break
 
             if not chunk:
                 continue
 
-            # Initialize on first chunk
-            if self._start_time is None:
-                self._start_time = time.perf_counter()
+            self._ensure_timing_initialized()
 
-            # Check if we're behind schedule
-            now = time.perf_counter()
-            elapsed_ms = (now - self._start_time) * 1000
-            should_have_sent = int(elapsed_ms / self.cfg.mode.chunk_duration_ms)
-            behind = should_have_sent - self._sent_count
-
-            # If behind by more than 1 chunk - enable burst mode
-            if behind > 1:
-                self._pending.append(chunk)
-                burst_count = min(len(self._pending), min(behind - 1, MAX_BURST))
-
-                if burst_count > 0:
-                    debug(
-                        f"BURST: Behind by {behind}, sending {burst_count} extra chunks"
-                    )
-                    for _ in range(burst_count):
-                        await self.push(self._pending.pop(0))
-                        self._sent_count += 1
-
-            # Send current chunk (or from queue if any)
-            if self._pending:
-                chunk_to_send = self._pending.pop(0)
+            if self._is_behind_schedule():
+                await self._send_burst_chunks(chunk)
             else:
-                chunk_to_send = chunk
+                await self._send_single_chunk(chunk)
 
-            start_time = time.perf_counter()
-            await self.push(chunk_to_send)
-            stop_time = time.perf_counter()
-            self._sent_count += 1
+    async def _read_next_chunk(self) -> bytes | None:
+        """Read the next audio chunk from reader."""
+        return await self.reader.read(self.cfg.mode.chunk_bytes)
 
-            # Wait until next chunk time
-            await self.wait_after_push(stop_time - start_time)
+    async def _handle_eof(self):
+        """Handle end of file condition."""
+        debug(f"T{self.name}: Audio EOF reached")
+        +self.eof  # noqa
+        await self.push_in_msg(EndTaskMessage())
 
-    async def wait_after_push(self, delta: float):
-        """Hook for subclasses to add post-chunk processing."""
-        await aio.sleep(self.cfg.mode.chunk_duration_ms / 1000 - delta)
+    def _ensure_timing_initialized(self):
+        """Initialize global timing on first chunk."""
+        if self._global_start_ts is None:
+            self._global_start_ts = time.perf_counter()
+            if hasattr(self, "writer") and self.writer:
+                self.writer.start_perf_ts = self._global_start_ts
+
+    def _is_behind_schedule(self) -> bool:
+        """Check if we're behind the expected schedule."""
+        chunk_duration_s = self.cfg.mode.chunk_duration_ms / 1000
+        target_time = self._global_start_ts + self._total_duration_sent
+        current_time = time.perf_counter()
+        time_behind = current_time - target_time
+        return time_behind > chunk_duration_s
+
+    def _calculate_timing_metrics(self) -> tuple[float, float, float]:
+        """Calculate current timing metrics.
+
+        Returns:
+            tuple of (target_time, current_time, time_behind)
+        """
+        target_time = self._global_start_ts + self._total_duration_sent
+        current_time = time.perf_counter()
+        time_behind = current_time - target_time
+        return target_time, current_time, time_behind
+
+    async def _send_burst_chunks(self, initial_chunk: bytes):
+        """Send multiple chunks in burst mode when behind schedule."""
+        MAX_BURST = 20
+        chunk_duration_s = self.cfg.mode.chunk_duration_ms / 1000
+
+        target_time, current_time, time_behind = self._calculate_timing_metrics()
+        chunks_behind = int(time_behind / chunk_duration_s)
+        burst_count = min(chunks_behind, MAX_BURST)
+
+        debug(
+            f"BURST: Behind by {time_behind:.3f}s ({chunks_behind} chunks), sending {burst_count} chunks"
+        )
+
+        chunk = initial_chunk
+        for i in range(burst_count):
+            await self._send_chunk_immediately(chunk)
+
+            # Read next chunk for burst if not last iteration
+            if i < burst_count - 1:
+                next_chunk = await self._read_next_chunk()
+                if next_chunk is None:
+                    break
+                chunk = next_chunk
+
+    async def _send_single_chunk(self, chunk: bytes):
+        """Send a single chunk with precise timing."""
+        chunk_duration_s = self.cfg.mode.chunk_duration_ms / 1000
+        target_time, current_time, _ = self._calculate_timing_metrics()
+
+        # Calculate precise wait time
+        wait_time = max(0.0, min(chunk_duration_s, target_time - current_time))
+
+        if wait_time > 0:
+            await aio.sleep(wait_time)
+
+        await self._send_chunk_immediately(chunk)
+
+    async def _send_chunk_immediately(self, chunk: bytes):
+        """Send a chunk and update timing metrics."""
+        chunk_duration_s = self.cfg.mode.chunk_duration_ms / 1000
+        await self.push(chunk)
+        self._frames_sent += 1
+        self._total_duration_sent += chunk_duration_s
 
     def new_frame(self) -> "AudioFrame":
         return AudioFrame.create(*self.cfg.mode.for_audio_frame)
@@ -182,16 +230,16 @@ class Io(Task):
             np.copyto(audio_data, padded_chunk)
 
             if self.cfg.benchmark:
-                _dbg = Dbg(
+                rms_db = await aio.to_thread(self.calc_rms_db, audio_frame)
+                audio_frame._dbg = Dbg(
                     Kind.AUDIO,
                     self.channel,
                     Direction.IN,
                     idx=next(self._idx),
                     num=next(self._in_audio_num),
                     chunk_duration_ms=self.cfg.mode.chunk_duration_ms,
+                    rms_db=rms_db,
                 )
-                _dbg.rms = await aio.to_thread(self.calc_rms_db, audio_frame)
-                audio_frame._dbg = _dbg
                 self.bench_audio_foq.publish(audio_frame)
 
             await self.send_frame(audio_frame)

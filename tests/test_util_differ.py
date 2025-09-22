@@ -10,7 +10,7 @@ def test_is_dict_subset_empty():
 def test_is_dict_subset_simple():
     """Test simple dict subset"""
     superset = {"a": 1, "b": 2, "c": 3}
-    
+
     assert is_dict_subset({"a": 1}, superset)
     assert is_dict_subset({"a": 1, "b": 2}, superset)
     assert is_dict_subset({"a": 1, "b": 2, "c": 3}, superset)
@@ -18,13 +18,13 @@ def test_is_dict_subset_simple():
 def test_is_dict_subset_not_subset():
     """Test when not a subset"""
     superset = {"a": 1, "b": 2}
-    
+
     # Missing key
     assert not is_dict_subset({"c": 3}, superset)
-    
+
     # Wrong value
     assert not is_dict_subset({"a": 2}, superset)
-    
+
     # Extra key
     assert not is_dict_subset({"a": 1, "b": 2, "c": 3}, superset)
 
@@ -38,12 +38,12 @@ def test_is_dict_subset_nested():
             "z": {"deep": True}
         }
     }
-    
+
     # Nested subset
     assert is_dict_subset({"b": {"x": 10}}, superset)
     assert is_dict_subset({"b": {"x": 10, "y": 20}}, superset)
     assert is_dict_subset({"b": {"z": {"deep": True}}}, superset)
-    
+
     # Not subset - wrong nested value
     assert not is_dict_subset({"b": {"x": 11}}, superset)
     assert not is_dict_subset({"b": {"z": {"deep": False}}}, superset)
@@ -54,15 +54,15 @@ def test_is_dict_subset_with_lists():
         "a": [1, 2, 3],
         "b": ["x", "y", "z"]
     }
-    
+
     # Exact list match
     assert is_dict_subset({"a": [1, 2, 3]}, superset)
     assert is_dict_subset({"b": ["x", "y", "z"]}, superset)
-    
+
     # Different list length
     assert not is_dict_subset({"a": [1, 2]}, superset)
     assert not is_dict_subset({"a": [1, 2, 3, 4]}, superset)
-    
+
     # Different list values
     assert not is_dict_subset({"a": [1, 2, 4]}, superset)
     assert not is_dict_subset({"b": ["x", "z", "y"]}, superset)  # Order matters
@@ -75,7 +75,7 @@ def test_is_dict_subset_list_with_dicts():
             {"id": 2, "name": "b", "extra": "data"}
         ]
     }
-    
+
     # Subset of dicts in list
     subset = {
         "items": [
@@ -84,7 +84,7 @@ def test_is_dict_subset_list_with_dicts():
         ]
     }
     assert is_dict_subset(subset, superset)
-    
+
     # Wrong value in nested dict
     subset_wrong = {
         "items": [
@@ -99,11 +99,11 @@ def test_is_dict_subset_type_errors():
     with pytest.raises(TypeError) as exc_info:
         is_dict_subset("not a dict", {})
     assert "Both arguments must be dictionaries" in str(exc_info.value)
-    
+
     with pytest.raises(TypeError) as exc_info:
         is_dict_subset({}, "not a dict")
     assert "Both arguments must be dictionaries" in str(exc_info.value)
-    
+
     with pytest.raises(TypeError) as exc_info:
         is_dict_subset([], [])
     assert "Both arguments must be dictionaries" in str(exc_info.value)
@@ -125,7 +125,7 @@ def test_is_dict_subset_type_errors():
             ]
         }
     }
-    
+
     # Deep nested subset
     subset = {
         "config": {
@@ -137,7 +137,7 @@ def test_is_dict_subset_type_errors():
         }
     }
     assert is_dict_subset(subset, superset)
-    
+
     # List subset with dict elements
     subset2 = {
         "config": {
