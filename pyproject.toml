@@ -88,7 +88,7 @@ addopts = [
     "--cov-report=xml",
     "--cov-report=html",
     "--cov-branch",
-    "--cov-fail-under=50",
+    "--cov-fail-under=80",
     "--doctest-modules",
     "--verbose",
     "--ignore=src/palabra_ai/experimental",
