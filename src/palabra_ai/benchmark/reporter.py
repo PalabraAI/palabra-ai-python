@@ -48,7 +48,7 @@ def create_ascii_histogram(values: List[float], bins: int = 20, width: int = 50,
 
 
 def create_ascii_box_plot(values: List[float], width: int, label: str, global_min: float, global_max: float) -> str:
-    """Create ASCII box plot with global scale"""
+    """Create ASCII box plot with global scale and fixed width"""
     if not values:
         return "No data"
 
@@ -67,72 +67,44 @@ def create_ascii_box_plot(values: List[float], width: int, label: str, global_mi
         return f"{label}: All values = {min_val:.3f}s"
 
     def pos(val):
-        return int((val - global_min) / range_val * width)
+        return int((val - global_min) / range_val * (width - 1))
 
-    # Create the plot line
-    line = [" "] * (width + 1)
+    # Create the plot line with FIXED width
+    line = [" "] * width
 
-    # Draw elements
-    for i in range(pos(min_val), pos(q1)):
-        if 0 <= i < len(line):
+    # Draw data elements (with bounds checking)
+    for i in range(pos(min_val), min(pos(q1), width)):
+        if 0 <= i < width:
             line[i] = "─"
 
-    for i in range(pos(q1), pos(q3) + 1):
-        if 0 <= i < len(line):
+    for i in range(pos(q1), min(pos(q3) + 1, width)):
+        if 0 <= i < width:
             line[i] = "█"
 
-    for i in range(pos(q3) + 1, pos(max_val) + 1):
-        if 0 <= i < len(line):
+    for i in range(pos(q3) + 1, min(pos(max_val) + 1, width)):
+        if 0 <= i < width:
             line[i] = "─"
 
-    # Mark special points
-    if 0 <= pos(min_val) < len(line):
-        line[pos(min_val)] = "├"
-    if 0 <= pos(max_val) < len(line):
-        line[pos(max_val)] = "┤"
-    if 0 <= pos(median) < len(line):
-        line[pos(median)] = "┃"
+    # SCALE BOUNDARIES - ALWAYS at beginning and end
+    line[0] = "├"  # Left scale boundary (global_min)
+    line[width-1] = "┤"  # Right scale boundary (global_max)
 
-    # Build plot line
-    plot_line = f"{label:30s} {''.join(line)}"
+    # Median marker (if not on boundaries)
+    med_pos = pos(median)
+    if 0 < med_pos < width-1:
+        line[med_pos] = "┃"
 
-    # Create labels line with exact positioning
-    labels_line = " " * 30  # Indent for label
+    # Verify length is exactly width
+    plot_str = ''.join(line)
+    assert len(plot_str) == width, f"Plot length {len(plot_str)} != {width}"
 
-    # Create labels array
-    labels = [" "] * (width + 20)  # Extra space for labels
+    # Build plot line with EXACTLY 30 char label + space + fixed width plot
+    plot_line = f"{label[:30].ljust(30)} {plot_str}"
 
-    # Place labels at exact positions with overlap handling
-    label_data = [
-        (pos(min_val), f"{min_val:.2f}s"),
-        (pos(q1), f"Q1:{q1:.2f}s"),
-        (pos(median), f"M:{median:.2f}s"),
-        (pos(q3), f"Q3:{q3:.2f}s"),
-        (pos(max_val), f"{max_val:.2f}s")
-    ]
+    # Add statistics in fixed-width columns (aligned with header)
+    stats_str = f"   {min_val:6.2f} {q1:6.2f} {median:6.2f} {q3:6.2f} {max_val:6.2f}"
 
-    # Sort by position to handle overlaps properly
-    label_data.sort(key=lambda x: x[0])
-
-    # Place labels with spacing to avoid overlaps
-    last_end = -10  # Start well before any label
-    for position, text in label_data:
-        if 0 <= position < width:  # Only place labels within plot area
-            # Ensure minimum spacing between labels
-            start_pos = max(position, last_end + 1)
-            if start_pos + len(text) > len(labels):
-                continue  # Skip if label would exceed array bounds
-
-            # Place the label
-            for i, char in enumerate(text):
-                if start_pos + i < len(labels):
-                    labels[start_pos + i] = char
-
-            last_end = start_pos + len(text) - 1
-
-    labels_line += ''.join(labels).rstrip()
-
-    return plot_line + "\n" + labels_line
+    return plot_line + stats_str
 
 
 def create_ascii_time_series(x_values: List[float], y_values: List[float],
@@ -235,9 +207,9 @@ def generate_text_report(analysis: Dict[str, Any], max_chunks: int = -1, show_em
     metrics_order = ["partial_transcription", "validated_transcription", "translated_transcription", "tts_audio"]
     metric_names = {
         "partial_transcription": "Partial Transcription Latency",
-        "validated_transcription": "Validated Transcription Latency",
-        "translated_transcription": "Translated Transcription Latency",
-        "tts_audio": "Translated Speech (TTS) Latency"
+        "validated_transcription": "Validated Transcription",
+        "translated_transcription": "Translation Latency",
+        "tts_audio": "TTS Audio Latency"
     }
 
     for metric in metrics_order:
@@ -288,15 +260,18 @@ def generate_text_report(analysis: Dict[str, Any], max_chunks: int = -1, show_em
             global_max = max(all_values)
             width = 50
 
-            # Scale header
-            lines.append(f"{'':30s} {global_min:.1f}s" + " " * (width - 10) + f"{global_max:.1f}s")
-            lines.append(f"{'':30s} ├" + "─" * width + "┤")
+            # Scale header with proper alignment
+            lines.append(f"{'':30s} {global_min:.1f}s{' ' * (width - 6)}{global_max:.1f}s")
+            # Create header line with same structure as graphs
+            header_line = '─' * width  # 50 symbols
+            header_line = '├' + header_line[1:-1] + '┤'  # Replace first and last
+            lines.append(f"{'':30s} {header_line}   {'min':>6} {'q1':>6} {'med':>6} {'q3':>6} {'max':>6}")
             lines.append("")
 
             # Draw each metric with GLOBAL scale
             for metric in metrics_order:
                 if metric in measurements and measurements[metric]:
-                    label = metric_names[metric][:29]  # Truncate to 29 chars
+                    label = metric_names[metric][:30].ljust(30)  # Pad to exactly 30 chars
                     plot = create_ascii_box_plot(
                         measurements[metric],
                         width=width,
@@ -305,7 +280,6 @@ def generate_text_report(analysis: Dict[str, Any], max_chunks: int = -1, show_em
                         global_max=global_max
                     )
                     lines.append(plot)
-                    lines.append("")  # Empty line between plots
 
     # Histogram for Validated Transcription latency
     if "measurements" in analysis and "validated_transcription" in analysis["measurements"]:
@@ -431,7 +405,7 @@ def generate_html_report(analysis: Dict[str, Any]) -> str:
         if metric in stats:
             s = stats[metric]
             percentile_data["series"].append({
-                "name": label,
+                "label": label,
                 "data": [s["p25"], s["p50"], s["p75"], s["p90"], s["p95"], s["p99"]]
             })
 

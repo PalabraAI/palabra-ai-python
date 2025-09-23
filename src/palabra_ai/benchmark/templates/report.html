@@ -124,12 +124,12 @@
             <div class="value">{{ "%.1f"|format(summary.total_duration) }}<span class="unit">s</span></div>
         </div>
         <div class="summary-card">
-            <h3>Transcribed</h3>
-            <div class="value">{{ "%.1f"|format(summary.chunks_with_validated / summary.total_chunks * 100) }}<span class="unit">%</span></div>
+            <h3>Sentences Transcribed</h3>
+            <div class="value">{{ summary.chunks_with_validated }}</div>
         </div>
         <div class="summary-card">
-            <h3>Translated</h3>
-            <div class="value">{{ "%.1f"|format(summary.chunks_with_translation / summary.total_chunks * 100) }}<span class="unit">%</span></div>
+            <h3>Sentences Translated</h3>
+            <div class="value">{{ summary.chunks_with_translation }}</div>
         </div>
     </div>
 
