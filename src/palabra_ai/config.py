@@ -44,11 +44,12 @@ from palabra_ai.constant import (
     VAD_THRESHOLD_DEFAULT,
     WEBRTC_MODE_CHANNELS,
     WEBRTC_MODE_CHUNK_DURATION_MS,
-    WEBRTC_MODE_SAMPLE_RATE,
+    WEBRTC_MODE_INPUT_SAMPLE_RATE,
+    WEBRTC_MODE_OUTPUT_SAMPLE_RATE,
     WS_MODE_CHANNELS,
     WS_MODE_CHUNK_DURATION_MS,
+    WS_MODE_INPUT_SAMPLE_RATE,
     WS_MODE_OUTPUT_SAMPLE_RATE,
-    WS_MODE_SAMPLE_RATE,
 )
 from palabra_ai.exc import ConfigurationError
 from palabra_ai.lang import Language, is_valid_source_language, is_valid_target_language
@@ -207,7 +208,7 @@ class IoMode(BaseModel):
             return WebrtcMode()
         elif source_type == "ws":
             return WsMode(
-                input_sample_rate=source.get("sample_rate", WS_MODE_SAMPLE_RATE),
+                input_sample_rate=source.get("sample_rate", WS_MODE_INPUT_SAMPLE_RATE),
                 num_channels=source.get("channels", WS_MODE_CHANNELS),
                 # chunk_duration_ms will use default WS_MODE_CHUNK_DURATION_MS
             )
@@ -223,8 +224,8 @@ class IoMode(BaseModel):
 
 class WebrtcMode(IoMode):
     name: str = "webrtc"
-    input_sample_rate: int = WEBRTC_MODE_SAMPLE_RATE
-    output_sample_rate: int = WEBRTC_MODE_SAMPLE_RATE
+    input_sample_rate: int = WEBRTC_MODE_INPUT_SAMPLE_RATE
+    output_sample_rate: int = WEBRTC_MODE_OUTPUT_SAMPLE_RATE
     num_channels: int = WEBRTC_MODE_CHANNELS
     chunk_duration_ms: int = WEBRTC_MODE_CHUNK_DURATION_MS
 
@@ -247,7 +248,7 @@ class WebrtcMode(IoMode):
 
 class WsMode(IoMode):
     name: str = "ws"
-    input_sample_rate: int = WS_MODE_SAMPLE_RATE
+    input_sample_rate: int = WS_MODE_INPUT_SAMPLE_RATE
     output_sample_rate: int = WS_MODE_OUTPUT_SAMPLE_RATE
     num_channels: int = WS_MODE_CHANNELS
     chunk_duration_ms: int = WS_MODE_CHUNK_DURATION_MS
@@ -495,9 +496,6 @@ class Config(BaseModel):
     trace_file: Path | str | None = Field(default=None, exclude=True)
     drop_empty_frames: bool = Field(default=False, exclude=True)
     estimated_duration: float | None = Field(default=None, exclude=True)
-    audio_processing_mode: str = Field(
-        default="simple", exclude=True
-    )  # "simple" or "legacy"
 
     def __init__(
         self,

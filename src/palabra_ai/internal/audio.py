@@ -41,38 +41,6 @@ async def read_from_disk(file_path: str | Path) -> bytes:
         raise
 
 
-def resample_pcm(
-    audio_data: bytes,
-    input_sample_rate: int,
-    output_sample_rate: int,
-    input_channels: int,
-    output_channels: int,
-) -> bytes:
-    incoming_audio_data = np.frombuffer(audio_data, dtype=np.int16)
-    incoming_audio_data = incoming_audio_data.astype(np.float32) / (
-        np.iinfo(np.int16).max or 1
-    )
-
-    if input_channels == 2 and output_channels == 1:
-        if incoming_audio_data.ndim == 1:
-            # if audio is 1D, it means the channels are interleaved
-            if incoming_audio_data.size % 2 != 0:
-                incoming_audio_data = incoming_audio_data[:-1]
-            incoming_audio_data = incoming_audio_data.reshape(-1, 2).mean(axis=1)
-        else:
-            # channels are already separated
-            incoming_audio_data = np.mean(
-                incoming_audio_data, axis=tuple(range(incoming_audio_data.ndim - 1))
-            )
-
-    if input_sample_rate != output_sample_rate:
-        incoming_audio_data = librosa.resample(
-            incoming_audio_data, orig_sr=input_sample_rate, target_sr=output_sample_rate
-        )
-
-    return (incoming_audio_data * np.iinfo(np.int16).max).astype(np.int16).tobytes()
-
-
 def convert_any_to_pcm16(
     audio_data: bytes,
     sample_rate: int,
@@ -259,184 +227,6 @@ def flush_filters_and_encoder(filter_buffer, filter_sink, output_stream, start_d
     return dts
 
 
-def should_resample_audio(
-    sample_rate: int, target_rate: int, mode_type: str = "ws"
-) -> bool:
-    """Determine if audio should be resampled based on mode and rates."""
-    from palabra_ai.constant import (
-        DEFAULT_WEBRTC_SAMPLE_RATE,
-        MAX_SUPPORTED_WS_SAMPLE_RATE,
-        MIN_SUPPORTED_WS_SAMPLE_RATE,
-    )
-
-    if mode_type == "webrtc":
-        return sample_rate != DEFAULT_WEBRTC_SAMPLE_RATE
-    # For WS: if both in supported range - don't resample
-    if (
-        MIN_SUPPORTED_WS_SAMPLE_RATE <= sample_rate <= MAX_SUPPORTED_WS_SAMPLE_RATE
-        and MIN_SUPPORTED_WS_SAMPLE_RATE <= target_rate <= MAX_SUPPORTED_WS_SAMPLE_RATE
-    ):
-        return False
-    return sample_rate != target_rate
-
-
-def get_optimal_sample_rate(input_rate: int, mode_type: str = "ws") -> int:
-    """Get optimal sample rate for given input and mode."""
-    from palabra_ai.constant import (
-        DEFAULT_WEBRTC_SAMPLE_RATE,
-        DEFAULT_WS_SAMPLE_RATE,
-        MAX_SUPPORTED_WS_SAMPLE_RATE,
-        MIN_SUPPORTED_WS_SAMPLE_RATE,
-    )
-
-    if mode_type == "webrtc":
-        return DEFAULT_WEBRTC_SAMPLE_RATE
-    if MIN_SUPPORTED_WS_SAMPLE_RATE <= input_rate <= MAX_SUPPORTED_WS_SAMPLE_RATE:
-        return input_rate  # Use original rate if in supported range
-    return DEFAULT_WS_SAMPLE_RATE
-
-
-def preprocess_audio_file(
-    file_path: str | Path,
-    target_rate: int,
-    mode_type: str = "ws",
-    normalize: bool = True,
-    progress_callback=None,
-) -> tuple[bytes, dict]:
-    """Unified preprocessing with smart resampling."""
-    debug(f"Preprocessing audio file {file_path}...")
-
-    # Open input container and get info
-    input_container, audio_stream = open_audio_container(str(file_path))
-    audio_info = get_audio_stream_info(audio_stream)
-
-    debug(
-        f"Audio: {audio_info['codec']}, {audio_info['sample_rate']}Hz, {audio_info['channels']}ch"
-    )
-    debug(f"Duration: {audio_info['duration']:.1f}s")
-
-    # Determine optimal sample rate
-    input_rate = audio_info["sample_rate"]
-    optimal_rate = get_optimal_sample_rate(input_rate, mode_type)
-
-    # Check if we need to resample
-    needs_resample = should_resample_audio(input_rate, optimal_rate, mode_type)
-    final_rate = optimal_rate if needs_resample else input_rate
-
-    debug(
-        f"Smart resampling: {input_rate}Hz -> {final_rate}Hz (resample: {needs_resample})"
-    )
-
-    # Create output container
-    output_buffer = BytesIO()
-    output_container, output_stream = create_pcm_output_container(
-        output_buffer, final_rate, "mono"
-    )
-
-    # Create filter graph if normalization is needed
-    filter_buffer, filter_sink = None, None
-    if normalize:
-        _, filter_buffer, filter_sink = create_normalization_filter_graph(
-            output_stream.format.name,
-            output_stream.rate,
-            output_stream.layout,
-            output_stream.time_base,
-        )
-
-    # Create resampler
-    resampler = create_audio_resampler(final_rate)
-
-    try:
-        dts = process_audio_frames(
-            input_container,
-            output_stream,
-            resampler,
-            filter_buffer,
-            filter_sink,
-            progress_callback,
-        )
-        flush_filters_and_encoder(filter_buffer, filter_sink, output_stream, dts)
-    finally:
-        output_container.close()
-        input_container.close()
-
-    output_buffer.seek(0)
-    preprocessed_data = output_buffer.read()
-
-    metadata = {
-        "original_rate": input_rate,
-        "final_rate": final_rate,
-        "resampled": needs_resample,
-        "duration": audio_info["duration"],
-        "size": len(preprocessed_data),
-    }
-
-    debug(f"Preprocessing complete: {len(preprocessed_data)} bytes")
-    return preprocessed_data, metadata
-
-
-def setup_streaming_audio(
-    file_path: str | Path,
-    target_rate: int,
-    mode_type: str = "ws",
-    timeout: float = None,
-) -> tuple["av.Container", "av.AudioResampler", int, dict]:
-    """Setup for streaming with optimal sample rate selection."""
-    debug(f"Setting up streaming for {file_path}...")
-
-    # Open container for streaming
-    container = av.open(str(file_path), timeout=timeout, metadata_errors="ignore")
-
-    # Find audio stream
-    audio_streams = [s for s in container.streams if s.type == "audio"]
-    if not audio_streams:
-        container.close()
-        raise ValueError(f"No audio streams found in {file_path}")
-
-    audio_stream = audio_streams[0]
-    audio_info = get_audio_stream_info(audio_stream)
-
-    debug(
-        f"Audio: {audio_info['codec']}, {audio_info['sample_rate']}Hz, {audio_info['channels']}ch"
-    )
-    debug(f"Duration: {audio_info['duration']:.1f}s")
-
-    # Determine optimal sample rate
-    input_rate = audio_info["sample_rate"]
-    optimal_rate = get_optimal_sample_rate(input_rate, mode_type)
-
-    # Check if we need to resample
-    needs_resample = should_resample_audio(input_rate, optimal_rate, mode_type)
-    final_rate = optimal_rate if needs_resample else input_rate
-
-    debug(
-        f"Smart streaming: {input_rate}Hz -> {final_rate}Hz (resample: {needs_resample})"
-    )
-
-    # Create resampler
-    resampler = create_audio_resampler(final_rate)
-
-    # Enable threading for faster decode
-    audio_stream.codec_context.thread_type = av.codec.context.ThreadType.FRAME
-
-    metadata = {
-        "original_rate": input_rate,
-        "final_rate": final_rate,
-        "resampled": needs_resample,
-        "duration": audio_info["duration"],
-    }
-
-    debug(f"Streaming setup complete: {final_rate}Hz")
-    return container, resampler, final_rate, metadata
-
-
-def create_audio_resampler(target_rate, audio_format="s16", layout="mono"):
-    """Create audio resampler - used in multiple places."""
-    return av.AudioResampler(
-        format=av.AudioFormat(audio_format), layout=layout, rate=target_rate
-    )
-
-
 # NEW SIMPLE AUDIO PROCESSING PIPELINE
 def open_audio_file(audio_data: bytes, sample_rate: int) -> np.ndarray:
     """Simple audio processing pipeline: librosa first, PyAV fallback."""
@@ -466,7 +256,7 @@ def open_audio_file(audio_data: bytes, sample_rate: int) -> np.ndarray:
 
 def convert_any_to_wav(
     audio_data: bytes,
-    sample_rate: int = 16000,
+    sample_rate: int,
     layout: str = "mono",
     s16le: bool = False,
 ) -> bytes:
@@ -515,7 +305,7 @@ def convert_any_to_wav(
 
 def simple_preprocess_audio_file(
     file_path: str | Path,
-    target_rate: int = 16000,
+    target_rate: int,
     normalize: bool = False,
     progress_callback=None,
 ) -> tuple[bytes, dict]:
@@ -585,10 +375,10 @@ def simple_preprocess_audio_file(
 
 def simple_setup_streaming_audio(
     file_path: str | Path,
-    target_rate: int = 16000,
+    target_rate: int,
     timeout: float = None,
 ) -> tuple["av.Container", "av.AudioResampler", int, dict]:
-    """Simple streaming setup: always use 16kHz."""
+    """Simple streaming setup with configurable sample rate."""
     debug(f"Simple streaming setup for {file_path}...")
 
     # Open container for streaming

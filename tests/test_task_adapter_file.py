@@ -77,7 +77,7 @@ class TestFileReader:
         reader.cfg.mode.input_sample_rate = 16000
         reader.cfg.mode.mode_type = "ws"
 
-        with patch('palabra_ai.task.adapter.file.setup_streaming_audio') as mock_setup:
+        with patch('palabra_ai.task.adapter.file.simple_setup_streaming_audio') as mock_setup:
                 # Setup mocks for setup_streaming_audio return values
                 mock_container = MagicMock()
                 mock_resampler = MagicMock()
@@ -94,7 +94,7 @@ class TestFileReader:
 
                 assert reader._container is not None
                 assert reader._target_rate == 16000
-                mock_setup.assert_called_once_with(test_file, 16000, "ws", timeout=10.0)
+                mock_setup.assert_called_once_with(test_file, target_rate=16000, timeout=10.0)
     @pytest.mark.asyncio
     async def test_read_preprocessed_mode(self, tmp_path):
         """Test read in preprocessed mode"""
