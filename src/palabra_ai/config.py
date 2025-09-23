@@ -296,6 +296,7 @@ class Preprocessing(BaseModel):
     pre_vad_dsp: bool = True
     record_tracks: list[str] = []
     auto_tempo: bool = False
+    normalize_audio: bool = False  # Enable loudnorm filters (disabled by default)
 
 
 class SplitterAdvanced(BaseModel):
@@ -494,6 +495,9 @@ class Config(BaseModel):
     trace_file: Path | str | None = Field(default=None, exclude=True)
     drop_empty_frames: bool = Field(default=False, exclude=True)
     estimated_duration: float | None = Field(default=None, exclude=True)
+    audio_processing_mode: str = Field(
+        default="simple", exclude=True
+    )  # "simple" or "legacy"
 
     def __init__(
         self,
