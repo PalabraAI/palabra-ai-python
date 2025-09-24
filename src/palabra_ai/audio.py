@@ -8,7 +8,7 @@ from typing import Optional
 import numpy as np
 from livekit.rtc import AudioFrame as RtcAudioFrame
 
-from palabra_ai.constant import BYTES_PER_SAMPLE
+from palabra_ai.constant import AUDIO_BUFFER_PADDING_SEC, BYTES_PER_SAMPLE
 from palabra_ai.util.logger import error
 from palabra_ai.util.orjson import from_json, to_json
 from palabra_ai.util.timing import get_perf_ts
@@ -286,16 +286,23 @@ class AudioBuffer:
     audio_array: np.ndarray = field(default=None, init=False)
     last_audio_end_position: int = field(default=0, init=False)
     global_start_time: float | None = field(default=None, init=False)
+    external_buffer: io.BytesIO | None = field(default=None, init=False)
 
     def __post_init__(self):
-        # Create numpy array like file2file - duration + 60s buffer
-        total_samples = int((self.original_duration + 60) * self.sample_rate)
+        # Create numpy array like file2file - duration + buffer padding
+        total_samples = int(
+            (self.original_duration + AUDIO_BUFFER_PADDING_SEC) * self.sample_rate
+        )
         self.audio_array = np.zeros(total_samples, dtype=np.int16)
 
     def set_start_time(self, start_time: float):
         """Set global start time for timing calculations"""
         if self.global_start_time is None:
             self.global_start_time = start_time
+
+    def replace_buffer(self, external_buffer: io.BytesIO):
+        """Replace internal buffer with external BytesIO buffer for direct writing"""
+        self.external_buffer = external_buffer
 
     def to_wav_bytes(self) -> bytes:
         """Convert buffer to WAV format"""
@@ -315,13 +322,25 @@ class AudioBuffer:
             : last_sample + int(self.sample_rate * 2)
         ]  # +2s buffer
 
-        with io.BytesIO() as wav_file:
-            with wave.open(wav_file, "wb") as wav:
+        # If external buffer is set, write directly to it
+        if self.external_buffer is not None:
+            self.external_buffer.seek(0)
+            with wave.open(self.external_buffer, "wb") as wav:
                 wav.setnchannels(self.num_channels)
                 wav.setframerate(self.sample_rate)
                 wav.setsampwidth(BYTES_PER_SAMPLE)
                 wav.writeframes(trimmed_array.tobytes())
-            return wav_file.getvalue()
+            self.external_buffer.seek(0)
+            return self.external_buffer.getvalue()
+        else:
+            # Default behavior: return bytes
+            with io.BytesIO() as wav_file:
+                with wave.open(wav_file, "wb") as wav:
+                    wav.setnchannels(self.num_channels)
+                    wav.setframerate(self.sample_rate)
+                    wav.setsampwidth(BYTES_PER_SAMPLE)
+                    wav.writeframes(trimmed_array.tobytes())
+                return wav_file.getvalue()
 
     async def write(self, frame: AudioFrame):
         """Write frame to buffer using file2file approach"""

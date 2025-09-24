@@ -6,8 +6,9 @@ import os
 import signal
 import subprocess
 import threading
-from dataclasses import KW_ONLY, dataclass
+from dataclasses import KW_ONLY, dataclass, field
 
+from palabra_ai.constant import BYTES_PER_SAMPLE
 from palabra_ai.task.adapter.base import BufferedWriter, Reader
 from palabra_ai.util.logger import debug, warning
 
@@ -18,6 +19,7 @@ class BufferReader(Reader):
 
     buffer: io.BytesIO | RunAsPipe
     _: KW_ONLY
+    _buffer_size: int | None = field(default=None, init=False, repr=False)
 
     def __post_init__(self):
         self._position = 0
@@ -25,6 +27,18 @@ class BufferReader(Reader):
         self.buffer.seek(0, io.SEEK_END)
         self._buffer_size = self.buffer.tell()
         self.buffer.seek(current_pos)
+
+    def do_preprocess(self):
+        """Calculate duration from buffer size."""
+        if self._buffer_size:
+            sample_rate = self.cfg.mode.input_sample_rate
+            channels = self.cfg.mode.num_channels
+            self.duration = self._buffer_size / (
+                sample_rate * channels * BYTES_PER_SAMPLE
+            )
+            debug(
+                f"{self.__class__.__name__}: calculated duration={self.duration:.2f}s from buffer size {self._buffer_size}"
+            )
 
     async def boot(self):
         debug(f"{self.name} contains {self._buffer_size} bytes")
@@ -60,7 +74,11 @@ class BufferWriter(BufferedWriter):
         await super().boot()
         self.ab.replace_buffer(self.buffer)
 
-    async def exit(self): ...
+    async def exit(self):
+        """Write the buffered WAV data to external buffer"""
+        debug("Finalizing BufferWriter...")
+        if self.ab is not None:
+            self.ab.to_wav_bytes()
 
 
 class RunAsPipe:

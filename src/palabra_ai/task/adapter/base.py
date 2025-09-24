@@ -25,6 +25,7 @@ class Reader(Task):
     q: asyncio.Queue[AudioFrame] = field(default_factory=asyncio.Queue)
     # chunk_size: int = CHUNK_SIZE
     eof: TaskEvent = field(default_factory=TaskEvent, init=False)
+    duration: float | None = field(default=None, init=False)
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -106,12 +107,11 @@ class BufferedWriter(Writer):
     ab: AudioBuffer | None = field(default=None, init=False)
 
     async def boot(self):
-        # Create buffer with estimated duration
-        estimated_duration = getattr(self.cfg, "estimated_duration", 60.0)
+        # Create buffer with estimated duration from config
         self.ab = AudioBuffer(
             sample_rate=self.cfg.mode.output_sample_rate,
             num_channels=self.cfg.mode.num_channels,
-            original_duration=estimated_duration,
+            original_duration=self.cfg.estimated_duration,
             drop_empty_frames=getattr(self.cfg, "drop_empty_frames", False),
         )
 

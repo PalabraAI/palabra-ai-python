@@ -13,6 +13,7 @@ from palabra_ai.constant import (
     AUDIO_CHUNK_SECONDS,
     CHANNELS_MONO,
     DEVICE_ID_HASH_LENGTH,
+    RT_DEFAULT_DURATION,
     SAMPLE_RATE_DEFAULT,
     THREADPOOL_MAX_WORKERS,
 )
@@ -160,6 +161,13 @@ class DeviceReader(Reader):
     sdm: SoundDeviceManager = field(default_factory=SoundDeviceManager)
     tg: asyncio.TaskGroup | None = field(default=None, init=False)
 
+    def do_preprocess(self):
+        """Set default duration for real-time input."""
+        self.duration = RT_DEFAULT_DURATION
+        debug(
+            f"{self.__class__.__name__}: using default duration={self.duration}s for real-time input"
+        )
+
     def _setup_signal_handlers(self):
         try:
             loop = asyncio.get_running_loop()
@@ -239,14 +247,10 @@ class DeviceWriter(Writer):
             sample_rate=self.cfg.mode.output_sample_rate,
         )
         self._loop = asyncio.get_running_loop()
-        # Base Writer class will handle queue processing
-        await super().boot()
 
     async def exit(self):
         await self._stop_device()
         self._executor.shutdown(wait=False)
-        # Base class will handle queue cleanup
-        await super().exit()
 
     async def _stop_device(self):
         if self._output_device:

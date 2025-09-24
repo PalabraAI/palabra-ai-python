@@ -96,8 +96,11 @@ class Task(abc.ABC):
                     debug(f"{self.name}.run() cancelled, exiting...")
                     raise
                 except Exception as e:
+                    import traceback
+
                     self._state.append("💥")
                     error(f"{self.name}.run() failed with error: {e}, exiting...")
+                    error(f"{self.name} full traceback:\n{traceback.format_exc()}")
                     self.sub_tg._abort()
                     self.root_tg._abort()
                     raise

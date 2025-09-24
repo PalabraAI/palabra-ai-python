@@ -6,8 +6,8 @@ from palabra_ai import (
     PalabraAI,
     SourceLang,
     TargetLang,
+    TranscriptionMessage,
 )
-from palabra_ai.base.message import TranscriptionMessage
 
 
 async def print_translation_async(msg: TranscriptionMessage):

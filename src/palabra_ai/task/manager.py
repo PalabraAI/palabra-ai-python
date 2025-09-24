@@ -87,6 +87,19 @@ class Manager(Task):
         # Preprocess audio if needed (before boot/start_system to avoid timeouts)
         self.reader.do_preprocess()
 
+        # Set estimated duration from reader
+        if hasattr(self.reader, "duration") and self.reader.duration:
+            self.cfg.estimated_duration = self.reader.duration
+            debug(
+                f"🔧 {self.name} set estimated_duration={self.cfg.estimated_duration:.2f}s"
+            )
+        else:
+            # Fallback if Reader didn't set duration
+            self.cfg.estimated_duration = 60.0
+            debug(
+                f"🔧 {self.name} using default estimated_duration={self.cfg.estimated_duration}s"
+            )
+
         # if hasattr(self.writer, "set_track_settings"):
         #     self.writer.set_track_settings(self.track_settings)
         # if hasattr(self.reader, "set_track_settings"):
