@@ -1,3 +1,5 @@
+.PHONY: format check lint test
+
 format:
 	uv run ruff format ./src
 

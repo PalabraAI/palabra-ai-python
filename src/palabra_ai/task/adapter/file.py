@@ -18,8 +18,8 @@ from palabra_ai.constant import (
     MAX_FRAMES_PER_READ,
 )
 from palabra_ai.internal.audio import (
-    preprocess_audio_file,
-    setup_streaming_audio,
+    simple_preprocess_audio_file,
+    simple_setup_streaming_audio,
     write_to_disk,
 )
 from palabra_ai.task.adapter.base import BufferedWriter, Reader
@@ -55,10 +55,7 @@ class FileReader(Reader):
         self._buffer = deque()
 
     def _preprocess_audio(self):
-        """Preprocess audio with smart resampling."""
-        # Determine mode type from config
-        mode_type = self.cfg.mode.mode_type
-
+        """Preprocess audio with configurable pipeline."""
         # Setup progress bar
         progress = tqdm(
             desc=f"Preprocessing {self.path.name}",
@@ -70,19 +67,19 @@ class FileReader(Reader):
             progress.update(samples)
 
         try:
-            # Use unified preprocessing function
-            preprocessed_data, metadata = preprocess_audio_file(
+            # New simple pipeline
+            debug(f"Using simple audio processing pipeline for {self.path}")
+            normalize = getattr(self.cfg.preprocessing, "normalize_audio", False)
+            preprocessed_data, metadata = simple_preprocess_audio_file(
                 self.path,
-                self.cfg.mode.input_sample_rate,
-                mode_type,
-                normalize=True,
+                target_rate=self.cfg.mode.input_sample_rate,
+                normalize=normalize,
                 progress_callback=progress_callback,
             )
-
-            # Update config with final sample rate if not resampled
-            if not metadata["resampled"] and mode_type == "ws":
-                self.cfg.mode.input_sample_rate = metadata["final_rate"]
-                debug(f"Updated config sample rate to {metadata['final_rate']}Hz")
+            # Simple mode uses config as-is
+            debug(
+                f"Simple mode: using config sample rate {self.cfg.mode.input_sample_rate}Hz"
+            )
 
             self._total_duration = metadata["duration"]
             self._target_rate = metadata["final_rate"]
@@ -111,23 +108,19 @@ class FileReader(Reader):
         else:
             debug(f"Opening {self.path} for streaming...")
 
-            # Determine mode type from config
-            mode_type = self.cfg.mode.mode_type
-
-            # Use unified streaming setup
+            # New simple streaming setup
+            debug(f"Using simple streaming setup for {self.path}")
             self._container, self._resampler, self._target_rate, metadata = (
-                setup_streaming_audio(
+                simple_setup_streaming_audio(
                     self.path,
-                    self.cfg.mode.input_sample_rate,
-                    mode_type,
+                    target_rate=self.cfg.mode.input_sample_rate,
                     timeout=DECODE_TIMEOUT,
                 )
             )
-
-            # Update config with final sample rate if not resampled
-            if not metadata["resampled"] and mode_type == "ws":
-                self.cfg.mode.input_sample_rate = metadata["final_rate"]
-                debug(f"Updated config sample rate to {metadata['final_rate']}Hz")
+            # Simple mode uses config as-is
+            debug(
+                f"Simple streaming: using config sample rate {self.cfg.mode.input_sample_rate}Hz"
+            )
 
             self._total_duration = metadata["duration"]
 

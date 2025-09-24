@@ -5,7 +5,6 @@ import numpy as np
 from palabra_ai.internal.audio import (
     write_to_disk,
     read_from_disk,
-    resample_pcm,
     convert_any_to_pcm16,
     pull_until_blocked
 )
@@ -71,49 +70,6 @@ async def test_read_from_disk_cancelled():
             await read_from_disk("test.txt")
 
 
-def test_resample_pcm_mono_to_mono_same_rate():
-    """Test resample_pcm with mono to mono, same sample rate"""
-    # Create test audio data
-    audio_data = np.array([100, 200, 300, 400], dtype=np.int16).tobytes()
-
-    result = resample_pcm(audio_data, 16000, 16000, 1, 1)
-
-    # Should be unchanged when rates are same
-    result_array = np.frombuffer(result, dtype=np.int16)
-    assert np.allclose(result_array, [100, 200, 300, 400], atol=1)
-
-
-def test_resample_pcm_stereo_to_mono():
-    """Test resample_pcm with stereo to mono conversion"""
-    # Create interleaved stereo data (L, R, L, R)
-    audio_data = np.array([100, 200, 300, 400], dtype=np.int16).tobytes()
-
-    result = resample_pcm(audio_data, 16000, 16000, 2, 1)
-
-    # Should average channels: (100+200)/2=150, (300+400)/2=350
-    result_array = np.frombuffer(result, dtype=np.int16)
-    assert len(result_array) == 2
-    assert np.allclose(result_array, [150, 350], atol=1)
-
-
-@patch('palabra_ai.internal.audio.librosa.resample')
-def test_resample_pcm_different_rates(mock_resample):
-    """Test resample_pcm with different sample rates"""
-    # Mock librosa resample
-    mock_resample.return_value = np.array([0.1, 0.2], dtype=np.float32)
-
-    audio_data = np.array([1000, 2000], dtype=np.int16).tobytes()
-
-    result = resample_pcm(audio_data, 16000, 8000, 1, 1)
-
-    # Check librosa was called
-    mock_resample.assert_called_once()
-    assert mock_resample.call_args[1]['orig_sr'] == 16000
-    assert mock_resample.call_args[1]['target_sr'] == 8000
-
-    # Check result
-    result_array = np.frombuffer(result, dtype=np.int16)
-    assert len(result_array) == 2
 
 
 @patch('palabra_ai.internal.audio.open_audio_container')
