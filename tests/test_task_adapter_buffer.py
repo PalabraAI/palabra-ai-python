@@ -138,12 +138,44 @@ class TestBufferWriter:
 
     @pytest.mark.asyncio
     async def test_exit(self):
-        """Test exit method (no-op)"""
+        """Test exit method"""
         buffer = io.BytesIO()
         writer = BufferWriter(buffer=buffer)
+        writer.ab = MagicMock()
+        writer.ab.to_wav_bytes = MagicMock(return_value=b"WAV data")
 
-        # Should complete without error
-        await writer.exit()
+        with patch('palabra_ai.task.adapter.buffer.debug'):
+            await writer.exit()
+            writer.ab.to_wav_bytes.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_exit_no_timeout_on_slow_save(self):
+        """Test that BufferWriter doesn't timeout on slow saves (via UnlimitedExitMixin)"""
+        from palabra_ai.constant import SHUTDOWN_TIMEOUT
+
+        buffer = io.BytesIO()
+        writer = BufferWriter(buffer=buffer)
+        writer.ab = MagicMock()
+
+        # Simulate slow save operation (longer than SHUTDOWN_TIMEOUT=5s)
+        slow_duration = SHUTDOWN_TIMEOUT + 2
+
+        def slow_save():
+            import time
+            time.sleep(slow_duration)
+            return b"WAV after delay"
+
+        writer.ab.to_wav_bytes = slow_save
+
+        with patch('palabra_ai.task.adapter.buffer.debug'):
+            # Should complete without timeout
+            start_time = asyncio.get_event_loop().time()
+            await writer.exit()
+            elapsed = asyncio.get_event_loop().time() - start_time
+
+            # Verify it waited for the slow operation
+            assert elapsed >= slow_duration
+            assert elapsed < slow_duration + 1
 
 
 class TestRunAsPipe:

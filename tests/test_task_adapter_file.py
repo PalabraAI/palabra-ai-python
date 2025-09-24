@@ -311,3 +311,45 @@ class TestFileWriter:
                     writer._delete_on_error()
 
                 mock_error.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_exit_no_timeout_on_slow_save(self, tmp_path):
+        """Test that FileWriter doesn't timeout on slow saves (via UnlimitedExitMixin)"""
+        from palabra_ai.constant import SHUTDOWN_TIMEOUT
+        import time
+
+        output_file = tmp_path / "test.wav"
+        writer = FileWriter(path=output_file)
+        writer.ab = MagicMock()
+
+        # Simulate slow save operation (longer than SHUTDOWN_TIMEOUT=5s)
+        slow_duration = SHUTDOWN_TIMEOUT + 2
+
+        def slow_save():
+            time.sleep(slow_duration)
+            return b"WAV data after delay"
+
+        writer.ab.to_wav_bytes = slow_save
+
+        with patch('palabra_ai.task.adapter.file.write_to_disk', new_callable=AsyncMock):
+            # Should complete without timeout
+            start_time = asyncio.get_event_loop().time()
+            result = await writer.exit()
+            elapsed = asyncio.get_event_loop().time() - start_time
+
+            assert result == b"WAV data after delay"
+            assert elapsed >= slow_duration  # Verify it actually waited
+            assert elapsed < slow_duration + 1  # But not much more
+
+    @pytest.mark.asyncio
+    async def test_exit_calls_unlimited_exit_mixin(self, tmp_path):
+        """Test that FileWriter uses UnlimitedExitMixin._exit (no timeout)"""
+        from palabra_ai.task.adapter.base import UnlimitedExitMixin
+
+        output_file = tmp_path / "test.wav"
+        writer = FileWriter(path=output_file)
+
+        # Verify FileWriter has UnlimitedExitMixin in MRO
+        assert UnlimitedExitMixin in FileWriter.__mro__
+        # Verify _exit comes from UnlimitedExitMixin, not Writer
+        assert writer._exit.__qualname__.startswith("UnlimitedExitMixin")
