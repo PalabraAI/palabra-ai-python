@@ -219,9 +219,10 @@ class TestTask:
             assert "💥" in task._state
             assert task.stopper.is_set()
 
-            # Check error logging
-            mock_error.assert_called_once()
-            assert "failed with error" in str(mock_error.call_args)
+            # Check error logging (called twice: once for error msg, once for traceback)
+            assert mock_error.call_count == 2
+            assert "failed with error" in str(mock_error.call_args_list[0])
+            assert "full traceback" in str(mock_error.call_args_list[1])
 
             # Check abort was called
             task.sub_tg._abort.assert_called_once()

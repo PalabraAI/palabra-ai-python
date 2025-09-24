@@ -44,7 +44,7 @@ class FileReader(Reader):
     _iterator: Iterator[av.AudioFrame] | None = None
     _buffer: deque = None
     _position: int = 0
-    _total_duration: float = 0.0
+
     _target_rate: int = 0
     _preprocessed: bool = False
 
@@ -81,7 +81,7 @@ class FileReader(Reader):
                 f"Simple mode: using config sample rate {self.cfg.mode.input_sample_rate}Hz"
             )
 
-            self._total_duration = metadata["duration"]
+            self.duration = metadata["duration"]
             self._target_rate = metadata["final_rate"]
 
             # Split into chunks and store in buffer
@@ -122,7 +122,7 @@ class FileReader(Reader):
                 f"Simple streaming: using config sample rate {self.cfg.mode.input_sample_rate}Hz"
             )
 
-            self._total_duration = metadata["duration"]
+            self.duration = metadata["duration"]
 
             # Create iterator but don't start reading yet
             self._iterator = self._container.decode(audio=0)
@@ -136,9 +136,7 @@ class FileReader(Reader):
     async def exit(self):
         seconds_processed = self._position / (self._target_rate * BYTES_PER_SAMPLE)
         progress_pct = (
-            (seconds_processed / self._total_duration) * 100
-            if self._total_duration > 0
-            else 0
+            (seconds_processed / self.duration) * 100 if self.duration > 0 else 0
         )
         debug(f"{self.name} processed {seconds_processed:.1f}s ({progress_pct:.1f}%)")
 

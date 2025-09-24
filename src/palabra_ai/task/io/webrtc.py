@@ -167,7 +167,7 @@ class WebrtcIo(Io):
         # noinspection PyTypeChecker
         self.in_track_options.source = self.track_source
         self.in_audio_source = rtc.AudioSource(
-            self.cfg.mode.sample_rate, self.cfg.mode.num_channels
+            self.cfg.mode.input_sample_rate, self.cfg.mode.num_channels
         )
         self.in_track = rtc.LocalAudioTrack.create_audio_track(
             self.in_track_name, self.in_audio_source

@@ -28,6 +28,8 @@ class DummyReader(Reader):
         self.eof_after_reads -= 1
         return self.return_data
 
+    def do_preprocess(self): ...
+
     async def do(self):
         while not self.stopper and not self.eof:
             await asyncio.sleep(SLEEP_INTERVAL_DEFAULT)

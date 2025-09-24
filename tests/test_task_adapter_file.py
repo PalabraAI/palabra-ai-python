@@ -164,7 +164,7 @@ class TestFileReader:
         reader = FileReader(path=test_file)
         reader._position = 16000 * 2 * 5  # 5 seconds at 16kHz, 16-bit
         reader._target_rate = 16000
-        reader._total_duration = 10.0  # 10 seconds total
+        reader.duration = 10.0  # 10 seconds total
         reader._container = MagicMock()
 
         with patch('palabra_ai.task.adapter.file.debug') as mock_debug:
