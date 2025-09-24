@@ -99,8 +99,18 @@ class Writer(Task):
         return await super()._exit()
 
 
+class UnlimitedExitMixin:
+    """Mixin to allow unlimited time for exit operations (file/buffer saving)."""
+
+    async def _exit(self):
+        """Override to allow unlimited time for saving operations"""
+        self.q.put_nowait(None)
+        debug(f"{self.name}._exit() allowing unlimited time for save operation...")
+        return await self.exit()
+
+
 @dataclass
-class BufferedWriter(Writer):
+class BufferedWriter(UnlimitedExitMixin, Writer):
     """Writer that buffers audio frames before writing."""
 
     _: KW_ONLY
