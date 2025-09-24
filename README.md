@@ -410,6 +410,22 @@ input_devices = dm.get_input_devices()
 output_devices = dm.get_output_devices()
 ```
 
+## Audio Configuration 🎵
+
+### Sample Rates by Protocol
+
+The SDK automatically handles audio sample rates based on the connection protocol:
+
+#### WebSocket (WS) Mode
+- **Input (to API)**: Always 16kHz mono PCM
+- **Output (from API)**: Always 24kHz mono PCM
+
+#### WebRTC Mode
+- **Input (to API)**: 48kHz mono PCM
+- **Output (from API)**: 48kHz mono PCM
+
+The SDK automatically resamples audio to match these requirements regardless of your input/output device capabilities.
+
 ## Supported languages 🌍
 
 ### Speech recognition languages 🎤 (Source)
