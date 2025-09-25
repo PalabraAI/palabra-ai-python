@@ -655,6 +655,91 @@ def test_run_signal_handlers_true():
                 # Should have used signal context manager
                 mock_context.run_until_complete.assert_called_once()
 
+class TestErrorHandlingNoRaise:
+    """Test error handling for both run() and arun() methods with no_raise parameter."""
+
+    @pytest.fixture
+    def mock_config(self):
+        """Create test configuration."""
+        from palabra_ai.config import SourceLang, TargetLang
+        from palabra_ai.lang import EN, ES
+        from palabra_ai.task.adapter.dummy import DummyReader, DummyWriter
+        from palabra_ai.config import WsMode
+
+        cfg = Config(
+            SourceLang(EN, DummyReader()),
+            [TargetLang(ES, DummyWriter())],
+            mode=WsMode(),
+            silent=True,
+            estimated_duration=5.0,
+        )
+        return cfg
+
+    @pytest.mark.asyncio
+    async def test_arun_no_raise_false_with_error_should_raise(self, mock_config):
+        """Test arun with no_raise=False should RAISE exception when there's an error."""
+        client = PalabraAI(client_id="test", client_secret="test")
+
+        # Mock process() to fail directly
+        with patch.object(client, 'process') as mock_process:
+            mock_process.side_effect = asyncio.TimeoutError("Process failed")
+
+            # This should RAISE exception, not return RunResult
+            try:
+                result = await client.arun(mock_config, no_raise=False)
+                # If we reach this line, the bug still exists
+                assert False, f"Expected TimeoutError to be raised, but got RunResult: {result}"
+            except asyncio.TimeoutError as e:
+                # This is what should happen
+                assert "Process failed" in str(e)
+
+    @pytest.mark.asyncio
+    async def test_arun_no_raise_true_with_error_should_return_result(self, mock_config):
+        """Test arun with no_raise=True should return RunResult(ok=False) when there's an error."""
+        client = PalabraAI(client_id="test", client_secret="test")
+
+        # Mock process() to fail directly
+        with patch.object(client, 'process') as mock_process:
+            mock_process.side_effect = asyncio.TimeoutError("Process failed")
+
+            result = await client.arun(mock_config, no_raise=True)
+
+            assert result is not None
+            assert result.ok is False
+            assert result.exc is not None
+            assert isinstance(result.exc, asyncio.TimeoutError)
+            assert "Process failed" in str(result.exc)
+
+    def test_run_no_raise_false_with_error_should_raise(self, mock_config):
+        """Test run with no_raise=False should RAISE exception when there's an error."""
+        client = PalabraAI(client_id="test", client_secret="test")
+
+        # Mock arun() to fail directly
+        with patch.object(client, 'arun') as mock_arun:
+            mock_arun.side_effect = asyncio.TimeoutError("arun failed")
+
+            # This should RAISE exception, not return RunResult
+            with pytest.raises(asyncio.TimeoutError) as exc_info:
+                client.run(mock_config, no_raise=False)
+
+            assert "arun failed" in str(exc_info.value)
+
+    def test_run_no_raise_true_with_error_should_return_result(self, mock_config):
+        """Test run with no_raise=True should return RunResult(ok=False) when there's an error."""
+        client = PalabraAI(client_id="test", client_secret="test")
+
+        # Mock arun() to fail directly
+        with patch.object(client, 'arun') as mock_arun:
+            mock_arun.side_effect = asyncio.TimeoutError("arun failed")
+
+            result = client.run(mock_config, no_raise=True)
+
+            assert result is not None
+            assert result.ok is False
+            assert result.exc is not None
+            assert isinstance(result.exc, asyncio.TimeoutError)
+            assert "arun failed" in str(result.exc)
+
 def test_run_signal_handlers_false():
     """Test run method with signal_handlers=False uses new event loop"""
     config = Config()
