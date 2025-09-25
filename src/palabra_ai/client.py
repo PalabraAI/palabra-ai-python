@@ -149,15 +149,22 @@ class PalabraAI:
             eos_received = manager.io.eos_received if manager.io else False
 
             # Return result with whatever we managed to get
-            if no_raise or ok:
+            if no_raise:
                 return RunResult(
                     ok=ok,
                     exc=exc if not ok else None,
                     log_data=log_data,
                     eos=eos_received,
                 )
-            elif exc:
-                # Save log_data before raising exception
+            elif ok:
+                return RunResult(
+                    ok=True,
+                    exc=None,
+                    log_data=log_data,
+                    eos=eos_received,
+                )
+            else:
+                # no_raise=False and there was an error - raise it
                 raise exc
 
         try:
