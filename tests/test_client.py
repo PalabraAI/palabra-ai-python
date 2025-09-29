@@ -5,6 +5,7 @@ from palabra_ai.client import PalabraAI
 from palabra_ai.config import Config, SourceLang, TargetLang
 from palabra_ai.exc import ConfigurationError
 from palabra_ai.task.base import TaskEvent
+from palabra_ai.model import RunResult
 
 def test_palabra_ai_creation():
     """Test PalabraAI client creation with credentials"""
@@ -293,9 +294,10 @@ async def test_process_with_cancelled_error():
                 mock_tg.__aexit__.side_effect = asyncio.CancelledError()
                 mock_tg_class.return_value = mock_tg
 
-                # Should not raise CancelledError
-                async with client.process(config) as manager:
-                    pass
+                # Should properly re-raise CancelledError from TaskGroup
+                with pytest.raises(asyncio.CancelledError):
+                    async with client.process(config) as manager:
+                        pass
 
 @pytest.mark.asyncio
 async def test_process_with_exception_group():
@@ -709,6 +711,93 @@ class TestErrorHandlingNoRaise:
             assert result.exc is not None
             assert isinstance(result.exc, asyncio.TimeoutError)
             assert "Process failed" in str(result.exc)
+
+    @pytest.mark.asyncio
+    async def test_arun_no_raise_false_with_cancelled_should_raise(self, mock_config):
+        """Test arun with no_raise=False should RAISE CancelledError when task is cancelled."""
+        client = PalabraAI(client_id="test", client_secret="test")
+
+        # Mock process() context manager to simulate cancellation
+        with patch.object(client, 'process') as mock_process:
+            mock_process.side_effect = asyncio.CancelledError("Task was cancelled")
+
+            # This should RAISE CancelledError, not return None or RunResult
+            with pytest.raises(asyncio.CancelledError) as exc_info:
+                await client.arun(mock_config, no_raise=False)
+
+            assert "Task was cancelled" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_arun_no_raise_true_with_cancelled_should_return_result(self, mock_config):
+        """Test arun with no_raise=True should return RunResult(ok=False) when cancelled."""
+        client = PalabraAI(client_id="test", client_secret="test")
+
+        # Mock process() to raise CancelledError
+        with patch.object(client, 'process') as mock_process:
+            mock_process.side_effect = asyncio.CancelledError("Task was cancelled")
+
+            result = await client.arun(mock_config, no_raise=True)
+
+            # CRITICAL: Must return RunResult, NOT None!
+            assert result is not None, "arun() returned None instead of RunResult"
+            assert result.ok is False
+            assert result.exc is not None
+            assert isinstance(result.exc, asyncio.CancelledError)
+            assert "Task was cancelled" in str(result.exc)
+
+    @pytest.mark.asyncio
+    async def test_arun_never_returns_none_with_no_raise_true(self, mock_config):
+        """Test that arun NEVER returns None when no_raise=True, even with weird errors."""
+        client = PalabraAI(client_id="test", client_secret="test")
+
+        # Test various exception types
+        exceptions_to_test = [
+            asyncio.CancelledError("Cancelled"),
+            asyncio.TimeoutError("Timeout"),
+            ConnectionError("Connection failed"),
+            RuntimeError("Random error"),
+            Exception("Generic exception"),
+        ]
+
+        for exc in exceptions_to_test:
+            with patch.object(client, 'process') as mock_process:
+                mock_process.side_effect = exc
+
+                result = await client.arun(mock_config, no_raise=True)
+
+                assert result is not None, f"arun() returned None for {type(exc).__name__}"
+                assert isinstance(result, RunResult), f"Expected RunResult, got {type(result)}"
+                assert result.ok is False
+                assert result.exc is exc
+
+    @pytest.mark.asyncio
+    async def test_arun_process_swallows_cancelled_error(self, mock_config):
+        """Test what happens when process() context manager fails to yield proper manager."""
+        client = PalabraAI(client_id="test", client_secret="test")
+
+        # Create a broken context manager that yields None instead of proper manager
+        async def broken_process_context(*args, **kwargs):
+            class BrokenContext:
+                async def __aenter__(self):
+                    # Simulate process() returning None/invalid manager due to suppressed CancelledError
+                    return None  # This is the bug!
+                async def __aexit__(self, exc_type, exc_val, exc_tb):
+                    return False
+            return BrokenContext()
+
+        with patch.object(client, 'process', side_effect=broken_process_context):
+            # This should expose the bug - if manager is None, _run_with_result will fail
+            try:
+                result = await client.arun(mock_config, no_raise=True)
+                # If we get here, check what we got
+                print(f"Got result: {result}, type: {type(result)}")
+                assert result is not None, "arun() returned None due to broken process() context manager"
+                assert isinstance(result, RunResult), f"Expected RunResult, got {type(result)}"
+            except Exception as e:
+                # This might happen if _run_with_result(None) fails
+                print(f"Exception occurred: {e}")
+                # Even with no_raise=True, we shouldn't get unhandled exceptions
+                assert False, f"arun() with no_raise=True should not raise exception: {e}"
 
     def test_run_no_raise_false_with_error_should_raise(self, mock_config):
         """Test run with no_raise=False should RAISE exception when there's an error."""
