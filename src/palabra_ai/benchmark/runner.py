@@ -5,8 +5,11 @@ Handles audio processing with DummyWriter and progress tracking
 
 import asyncio
 from pathlib import Path
-from typing import Optional, Dict, Any, Callable
+from typing import Any
+
 import librosa
+import numpy as np
+import soundfile as sf
 from tqdm import tqdm
 
 try:
@@ -15,28 +18,73 @@ try:
 except ImportError:
     pass  # uvloop not available, use default event loop
 
-from palabra_ai import PalabraAI, Config, SourceLang, TargetLang
+from palabra_ai import Config, PalabraAI, SourceLang, TargetLang
 from palabra_ai.lang import Language, is_valid_source_language, is_valid_target_language
-from palabra_ai.task.adapter.file import FileReader, FileWriter
 from palabra_ai.task.adapter.dummy import DummyWriter
-from palabra_ai.util.orjson import to_json, from_json
-from palabra_ai.util.logger import debug, error, warning, info
+from palabra_ai.task.adapter.file import FileReader, FileWriter
+from palabra_ai.util.logger import debug, error, info, warning
+from palabra_ai.util.orjson import from_json, to_json
 
 from .analyzer import analyze_latency
-from .reporter import generate_text_report, generate_html_report, generate_json_report
+from .reporter import generate_html_report, generate_json_report, generate_text_report
+
+
+def create_stereo_debug_mix(original_path: Path, tts_path: Path, output_path: Path):
+    """
+    Create stereo mix with original audio in left channel and TTS in right channel.
+    Both are resampled to 48kHz and padded to same length.
+    """
+    try:
+        # Load original audio (16kHz)
+        original_audio, original_sr = librosa.load(str(original_path), sr=None)
+        debug(f"Loaded original audio: {len(original_audio)} samples at {original_sr}Hz")
+
+        # Load TTS audio (24kHz)
+        tts_audio, tts_sr = librosa.load(str(tts_path), sr=None)
+        debug(f"Loaded TTS audio: {len(tts_audio)} samples at {tts_sr}Hz")
+
+        # Resample both to 48kHz
+        target_sr = 48000
+        original_resampled = librosa.resample(original_audio, orig_sr=original_sr, target_sr=target_sr)
+        tts_resampled = librosa.resample(tts_audio, orig_sr=tts_sr, target_sr=target_sr)
+
+        debug(f"Resampled original: {len(original_resampled)} samples at {target_sr}Hz")
+        debug(f"Resampled TTS: {len(tts_resampled)} samples at {target_sr}Hz")
+
+        # Pad to same length
+        max_length = max(len(original_resampled), len(tts_resampled))
+        original_padded = np.pad(original_resampled, (0, max_length - len(original_resampled)), mode='constant')
+        tts_padded = np.pad(tts_resampled, (0, max_length - len(tts_resampled)), mode='constant')
+
+        # Create stereo array: [left, right] = [original, tts]
+        stereo_audio = np.vstack([original_padded, tts_padded]).T
+
+        # Save stereo mix
+        sf.write(str(output_path), stereo_audio, target_sr)
+        debug(f"Saved stereo debug mix to: {output_path}")
+
+    except Exception as e:
+        error(f"Failed to create stereo debug mix: {e}")
+        import traceback
+        traceback.print_exc()
 
 
 
 class BenchmarkRunner:
     """Run Palabra AI benchmark with progress tracking"""
 
-    def __init__(self, audio_file: str, source_lang: Optional[str] = None, target_lang: Optional[str] = None,
-                 silent: bool = True, mode: Optional[str] = None, chunk_duration_ms: Optional[int] = None,
-                 base_config: Optional[Config] = None, palabra_client: PalabraAI | None = None,
-                 save_audio: bool = False, output_dir: Optional[Path] = None):
+    def __init__(self, audio_file: str, source_lang: str | None = None, target_lang: str | None = None,
+                 silent: bool = True, mode: str | None = None, chunk_duration_ms: int | None = None,
+                 base_config: Config | None = None, palabra_client: PalabraAI | None = None,
+                 save_audio: bool = False, output_dir: Path | None = None):
+        from datetime import datetime
+
         self.palabra_client = palabra_client or PalabraAI()
         self.audio_file = Path(audio_file)
         self.base_config = base_config
+
+        # Generate single timestamp for entire benchmark run
+        self.timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
         # If config provided, extract values from it
         if self.base_config:
@@ -113,7 +161,7 @@ class BenchmarkRunner:
                     progress_pct = min(100, (end_timestamp / self.audio_duration) * 100)
                     self.progress_bar.update(progress_pct - self.progress_bar.n)
 
-    def run(self, show_progress: bool = True) -> Dict[str, Any]:
+    def run(self, show_progress: bool = True) -> dict[str, Any]:
         """
         Run the benchmark and return the result
 
@@ -135,12 +183,10 @@ class BenchmarkRunner:
         try:
             # Create reader and writer
             reader = FileReader(str(self.audio_file))
-            
+
             # Create writer based on save_audio flag
             if self.save_audio:
-                from datetime import datetime
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                audio_output = self.output_dir / f"{self.audio_file.stem}_{timestamp}.wav"
+                audio_output = self.output_dir / f"{self.audio_file.stem}_{self.timestamp}.wav"
 
                 writer = FileWriter(path=audio_output, delete_on_error=False)
             else:
@@ -202,7 +248,7 @@ class BenchmarkRunner:
                     self.mode or "ws",  # default to ws
                     chunk_duration_ms=self.chunk_duration_ms
 )
-                
+
                 # Create config from scratch
                 config = Config(
                     SourceLang(self.source_lang, reader, on_transcription=self._on_transcription),
@@ -240,7 +286,7 @@ class BenchmarkRunner:
                     if isinstance(result.exc, asyncio.CancelledError):
                         debug("Task was cancelled but we might have log_data")
                     import traceback
-                    debug(f"Exception traceback:")
+                    debug("Exception traceback:")
                     traceback.print_exception(type(result.exc), result.exc, result.exc.__traceback__)
             else:
                 error("palabra.run() returned None!")
@@ -257,6 +303,12 @@ class BenchmarkRunner:
             if self.save_audio and audio_output and audio_output.exists():
                 info(f"✅ Audio saved to: {audio_output}")
 
+                # Create stereo debug mix with original + TTS
+                debug_output = audio_output.with_name(audio_output.stem + '_debug_in_out.wav')
+                create_stereo_debug_mix(self.audio_file, audio_output, debug_output)
+                if debug_output.exists():
+                    info(f"✅ Stereo debug mix saved to: {debug_output}")
+
             return result
 
         except Exception as e:
@@ -268,20 +320,25 @@ class BenchmarkRunner:
 class BenchmarkAnalyzer:
     """Analyze and generate reports from benchmark results"""
 
-    def __init__(self, result: Dict[str, Any]):
+    def __init__(self, result: dict[str, Any], timestamp: str = None):
         """
         Initialize analyzer with benchmark result
 
         Args:
             result: Result from BenchmarkRunner.run()
+            timestamp: Timestamp for consistent file naming
         """
+        from datetime import datetime
+
         self.result = result
+        self.timestamp = timestamp or datetime.now().strftime("%Y%m%d_%H%M%S")
+
         # Debug output
         debug(f"Result type: {type(result)}")
 
         # Handle different result scenarios
         if result is None:
-            error(f"Result is None!")
+            error("Result is None!")
             self.messages = []
         elif hasattr(result, 'exc') and result.exc:
             error(f"Benchmark failed with exception: {result.exc}")
@@ -291,23 +348,23 @@ class BenchmarkAnalyzer:
             self.messages = result.log_data.messages if result.log_data else []
             debug(f"Extracted {len(self.messages)} messages despite exception")
         elif hasattr(result, 'log_data'):
-            debug(f"Has log_data: True")
+            debug("Has log_data: True")
             debug(f"log_data is None: {result.log_data is None}")
             if result.log_data:
                 debug(f"Messages count: {len(result.log_data.messages)}")
                 self.messages = result.log_data.messages
             else:
-                warning(f"log_data is None!")
+                warning("log_data is None!")
                 self.messages = []
         else:
-            warning(f"Result has no log_data attribute!")
+            warning("Result has no log_data attribute!")
             self.messages = []
 
         debug(f"Final extracted messages count: {len(self.messages)}")
 
         self.analysis = None
 
-    def analyze(self) -> Dict[str, Any]:
+    def analyze(self) -> dict[str, Any]:
         """
         Perform latency analysis on the messages
 
@@ -336,7 +393,7 @@ class BenchmarkAnalyzer:
 
         return generate_text_report(self.analysis, max_chunks, show_empty)
 
-    def get_result(self) -> Dict[str, Any]:
+    def get_result(self) -> dict[str, Any]:
         return from_json(to_json(self.result))
 
     def get_html_report(self) -> str:
@@ -366,8 +423,8 @@ class BenchmarkAnalyzer:
 
         return generate_json_report(self.analysis, raw_result, self.get_result() if raw_result else None)
 
-    def save_reports(self, output_dir: Optional[Path] = None,
-                     html: bool = False, json: bool = False, raw_result: bool = False) -> Dict[str, Path]:
+    def save_reports(self, output_dir: Path | None = None,
+                 html: bool = False, json: bool = False, raw_result: bool = False) -> dict[str, Path]:
         """
         Save reports to files
 
@@ -389,28 +446,28 @@ class BenchmarkAnalyzer:
         saved_files = {}
 
         if html:
-            html_file = output_dir / "benchmark_report.html"
+            html_file = output_dir / f"benchmark_report_{self.timestamp}.html"
             html_file.write_text(self.get_html_report())
             saved_files['html'] = html_file
 
         if json:
-            json_file = output_dir / "benchmark_analysis.json"
+            json_file = output_dir / f"benchmark_analysis_{self.timestamp}.json"
             json_file.write_bytes(self.get_json_report(raw_result))
             saved_files['json'] = json_file
 
-            result_file = output_dir / "benchmark_result.json"
+            result_file = output_dir / f"benchmark_result_{self.timestamp}.json"
             result_file.write_bytes(to_json(self.result))
             saved_files['result'] = result_file
 
         return saved_files
 
 
-def run_benchmark(audio_file: str, source_lang: Optional[str] = None, target_lang: Optional[str] = None,
+def run_benchmark(audio_file: str, source_lang: str | None = None, target_lang: str | None = None,
                  silent: bool = True, show_progress: bool = True,
-                 mode: Optional[str] = None, chunk_duration_ms: Optional[int] = None,
-                 base_config: Optional[Config] = None,
+                 mode: str | None = None, chunk_duration_ms: int | None = None,
+                 base_config: Config | None = None,
                  palabra_client: PalabraAI | None = None,
-                 save_audio: bool = False, output_dir: Optional[Path] = None) -> BenchmarkAnalyzer:
+                 save_audio: bool = False, output_dir: Path | None = None) -> BenchmarkAnalyzer:
     """
     Convenience function to run benchmark and return analyzer
 
@@ -429,4 +486,4 @@ def run_benchmark(audio_file: str, source_lang: Optional[str] = None, target_lan
     """
     runner = BenchmarkRunner(audio_file, source_lang, target_lang, silent, mode, chunk_duration_ms, base_config, palabra_client, save_audio, output_dir)
     result = runner.run(show_progress)
-    return BenchmarkAnalyzer(result)
+    return BenchmarkAnalyzer(result, runner.timestamp)

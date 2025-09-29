@@ -91,7 +91,7 @@ class PalabraAI:
         cfg: Config,
         stopper: TaskEvent | None = None,
         no_raise=False,
-    ) -> RunResult | None:
+    ) -> RunResult:
         """
         Run the translation asynchronously (returns awaitable coroutine).
 
@@ -101,7 +101,9 @@ class PalabraAI:
             no_raise: If True, return RunResult with exception instead of raising
 
         Returns:
-            RunResult with execution status and logs, or None if cancelled
+            RunResult with execution status and logs
+            - If no_raise=False: returns RunResult(ok=True) or raises exception
+            - If no_raise=True: always returns RunResult (ok=True or ok=False with exc)
         """
 
         async def _run_with_result(manager: Manager) -> RunResult:
@@ -175,11 +177,26 @@ class PalabraAI:
                 result = await coro
                 if DEEP_DEBUG:
                     debug(diagnose_hanging_tasks())
+
+                # Ensure result is not None
+                if result is None:
+                    # This should not happen, but just in case
+                    if no_raise:
+                        return RunResult(
+                            ok=False,
+                            exc=RuntimeError("Unexpected None result"),
+                            eos=False,
+                        )
+                    raise RuntimeError("Unexpected None result from _run_with_result")
+
                 return result
+
         except BaseException as e:
             error(f"Error in PalabraAI.arun(): {e}")
+            # When no_raise=True, ALWAYS return RunResult with ok=False
             if no_raise:
                 return RunResult(ok=False, exc=e, eos=False)
+            # When no_raise=False, ALWAYS raise exception
             raise
         finally:
             if DEEP_DEBUG:
@@ -208,15 +225,16 @@ class PalabraAI:
             credentials = await rest_client.create_session()
             session_created_internally = True
 
-        manager = None
         try:
             async with asyncio.TaskGroup() as tg:
                 manager = Manager(cfg, credentials, stopper=stopper)(tg)
                 yield manager
             success("🎉🎉🎉 Translation completed 🎉🎉🎉")
 
-        except* asyncio.CancelledError:
+        except* asyncio.CancelledError as eg:
             debug("TaskGroup received CancelledError")
+            # Re-raise CancelledError
+            raise eg.exceptions[0] from eg
         except* Exception as eg:
             excs = unwrap_exceptions(eg)
             excs_wo_cancel = [
