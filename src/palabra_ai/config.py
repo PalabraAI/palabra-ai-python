@@ -568,10 +568,12 @@ class Config(BaseModel):
 
         return data
 
-    def model_dump(self, by_alias=True, exclude_none=False, **kwargs) -> dict[str, Any]:
+    def model_dump(
+        self, by_alias=True, exclude_unset=False, **kwargs
+    ) -> dict[str, Any]:
         # Get base dump
         data = super().model_dump(
-            by_alias=by_alias, exclude_none=exclude_none, **kwargs
+            by_alias=by_alias, exclude_unset=exclude_unset, **kwargs
         )
 
         # Extract source and targets
@@ -579,30 +581,38 @@ class Config(BaseModel):
         targets = data.pop("targets")
 
         # Build transcription with source_language
-        transcription = source["transcription"].copy()
+        transcription = (
+            source.get("transcription", {}).copy() if "transcription" in source else {}
+        )
         transcription["source_language"] = source["lang"]
 
         # Build translations with target_language
         translations = []
         for target in targets:
-            translation = target["translation"].copy()
+            translation = (
+                target.get("translation", {}).copy() if "translation" in target else {}
+            )
             translation["target_language"] = target["lang"]
             translations.append(translation)
 
-        # Build pipeline structure
+        # Build pipeline structure - only include fields that were explicitly set
         pipeline = {
-            "preprocessing": data.pop("preprocessing"),
             "transcription": transcription,
             "translations": translations,
-            "translation_queue_configs": data.pop("translation_queue_configs"),
-            "allowed_message_types": data.pop("allowed_message_types"),
         }
+        if "preprocessing" in data:
+            pipeline["preprocessing"] = data.pop("preprocessing")
+        if "translation_queue_configs" in data:
+            pipeline["translation_queue_configs"] = data.pop(
+                "translation_queue_configs"
+            )
+        if "allowed_message_types" in data:
+            pipeline["allowed_message_types"] = data.pop("allowed_message_types")
 
         # data.pop("input_stream", None)
         # data.pop("output_stream", None)
 
         result = {**data, **{"pipeline": pipeline}, **self.mode.model_dump()}
-
         return result
 
     def to_dict(self) -> dict[str, Any]:

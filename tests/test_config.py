@@ -12,6 +12,67 @@ from palabra_ai.lang import Language, ES, EN, FR, DE, JA, KO, BA, AZ, FIL, ZH_HA
 from palabra_ai.exc import ConfigurationError
 from palabra_ai.message import Message
 
+
+def assert_no_extra_fields(actual: dict, expected: dict, path: str = "root"):
+    """Recursively check that actual has no fields beyond expected"""
+    for key, expected_value in expected.items():
+        assert key in actual, f"Missing key {path}.{key} in actual"
+        actual_value = actual[key]
+
+        if isinstance(expected_value, dict) and isinstance(actual_value, dict):
+            assert_no_extra_fields(actual_value, expected_value, f"{path}.{key}")
+        elif isinstance(expected_value, list) and isinstance(actual_value, list):
+            assert len(actual_value) == len(expected_value), f"List length mismatch at {path}.{key}"
+            for i, (exp_item, act_item) in enumerate(zip(expected_value, actual_value)):
+                if isinstance(exp_item, dict) and isinstance(act_item, dict):
+                    assert_no_extra_fields(act_item, exp_item, f"{path}.{key}[{i}]")
+        else:
+            assert actual_value == expected_value, f"Value mismatch at {path}.{key}: {actual_value} != {expected_value}"
+
+    # Check for extra keys in actual
+    extra_keys = set(actual.keys()) - set(expected.keys())
+    assert not extra_keys, f"Extra keys in actual at {path}: {extra_keys}"
+
+
+def assert_dicts_identical(actual: dict, expected: dict, path: str = "root"):
+    """Recursively check that two dicts are absolutely identical - same keys, same values, no extras, no missing"""
+    # Check all expected keys exist in actual
+    missing_keys = set(expected.keys()) - set(actual.keys())
+    assert not missing_keys, f"Missing keys in actual at {path}: {missing_keys}"
+
+    # Check no extra keys in actual
+    extra_keys = set(actual.keys()) - set(expected.keys())
+    assert not extra_keys, f"Extra keys in actual at {path}: {extra_keys}"
+
+    # Recursively check all values
+    for key in expected.keys():
+        expected_value = expected[key]
+        actual_value = actual[key]
+        current_path = f"{path}.{key}"
+
+        # Check type match
+        assert type(actual_value) == type(expected_value), \
+            f"Type mismatch at {current_path}: {type(actual_value).__name__} != {type(expected_value).__name__}"
+
+        if isinstance(expected_value, dict):
+            assert_dicts_identical(actual_value, expected_value, current_path)
+        elif isinstance(expected_value, list):
+            assert len(actual_value) == len(expected_value), \
+                f"List length mismatch at {current_path}: {len(actual_value)} != {len(expected_value)}"
+            for i, (act_item, exp_item) in enumerate(zip(actual_value, expected_value)):
+                item_path = f"{current_path}[{i}]"
+                if isinstance(exp_item, dict):
+                    assert_dicts_identical(act_item, exp_item, item_path)
+                elif isinstance(exp_item, list):
+                    # Nested lists
+                    assert act_item == exp_item, f"List item mismatch at {item_path}"
+                else:
+                    assert act_item == exp_item, f"Value mismatch at {item_path}: {act_item} != {exp_item}"
+        else:
+            # Primitive values - check exact match
+            assert actual_value == expected_value, \
+                f"Value mismatch at {current_path}: {actual_value!r} != {expected_value!r}"
+
 def test_validate_language():
     """Test validate_language function"""
     # Test with string
@@ -521,3 +582,353 @@ def test_config_preserves_preprocessing_settings():
     # Check idempotency
     json_str2 = config2.to_json()
     assert json_str == json_str2
+
+
+def test_config_roundtrip_benchmark_no_extra_fields():
+    """Benchmark config roundtrip should return ONLY explicitly set fields"""
+    import copy
+    from palabra_ai.util.orjson import to_json
+
+    fixture_path = Path(__file__).parent / "fixtures" / "benchmark_config.json"
+    original_json = json.loads(fixture_path.read_text())
+
+    # Make a copy because Config.from_json modifies the input dict
+    original_json_copy = copy.deepcopy(original_json)
+
+    # Load
+    config = Config.from_json(original_json_copy)
+
+    # Dump with exclude_unset=True to only include explicitly set fields
+    dumped_json = json.loads(to_json(config.model_dump(exclude_unset=True)))
+
+    # Check: dump should contain ONLY fields from original, without defaults
+    assert_no_extra_fields(dumped_json, original_json)
+
+
+def test_config_roundtrip_deep_structural_identity():
+    """Deep structural identity: load→dump→load→dump, compare structure not strings"""
+    import copy
+    from palabra_ai.util.orjson import to_json
+
+    fixture_path = Path(__file__).parent / "fixtures" / "benchmark_config.json"
+    original_json = json.loads(fixture_path.read_text())
+
+    # First roundtrip
+    config1 = Config.from_json(copy.deepcopy(original_json))
+    dump1 = json.loads(to_json(config1.model_dump()))
+
+    # Second roundtrip
+    config2 = Config.from_json(copy.deepcopy(dump1))
+    dump2 = json.loads(to_json(config2.model_dump()))
+
+    # Deep comparison: dumps should be structurally identical
+    assert_dicts_identical(dump2, dump1)
+
+
+def test_config_modify_set_and_unset_fields_both():
+    """CRITICAL: modifying both set AND unset fields - both must appear in dump"""
+    import copy
+    from palabra_ai.util.orjson import to_json
+
+    # Minimal JSON: only a few fields explicitly set
+    minimal_json = {
+        "input_stream": {"content_type": "audio", "source": {"type": "ws", "sample_rate": 16000, "channels": 1}},
+        "output_stream": {"content_type": "audio", "target": {"type": "ws", "sample_rate": 24000, "channels": 1}},
+        "pipeline": {
+            "transcription": {
+                "source_language": "en",
+                "segment_confirmation_silence_threshold": 0.7,  # SET explicitly
+                # only_confirm_by_silence NOT set (will be default False)
+            },
+            "translations": [{
+                "target_language": "es",
+                "translate_partial_transcriptions": False,  # SET explicitly
+                # allowed_source_languages NOT set (will be default [])
+            }]
+        }
+    }
+
+    config = Config.from_json(copy.deepcopy(minimal_json))
+
+    # Modify SET field
+    config.source.transcription.segment_confirmation_silence_threshold = 0.8
+
+    # Modify UNSET field (was default False)
+    config.source.transcription.only_confirm_by_silence = True
+
+    # Modify SET field in translation
+    config.targets[0].translation.translate_partial_transcriptions = True
+
+    # Modify UNSET field in translation (was default [])
+    config.targets[0].translation.allowed_source_languages = ["en", "es"]
+
+    # Dump WITHOUT exclude_unset (default behavior)
+    dumped = json.loads(to_json(config.model_dump()))
+
+    # CHECK that BOTH changes are in the dump
+    assert dumped["pipeline"]["transcription"]["segment_confirmation_silence_threshold"] == 0.8, \
+        "Modified set field transcription.segment_confirmation_silence_threshold was not preserved"
+    assert dumped["pipeline"]["transcription"]["only_confirm_by_silence"] == True, \
+        "Modified unset field transcription.only_confirm_by_silence was not preserved"
+    assert dumped["pipeline"]["translations"][0]["translate_partial_transcriptions"] == True, \
+        "Modified set field translation.translate_partial_transcriptions was not preserved"
+    assert dumped["pipeline"]["translations"][0]["allowed_source_languages"] == ["en", "es"], \
+        "Modified unset field translation.allowed_source_languages was not preserved"
+
+    # Roundtrip and verify again
+    config2 = Config.from_json(copy.deepcopy(dumped))
+    assert config2.source.transcription.segment_confirmation_silence_threshold == 0.8
+    assert config2.source.transcription.only_confirm_by_silence == True
+    assert config2.targets[0].translation.translate_partial_transcriptions == True
+    assert config2.targets[0].translation.allowed_source_languages == ["en", "es"]
+
+
+def test_config_roundtrip_minimal_json():
+    """Minimal JSON roundtrip: only required fields"""
+    import copy
+    from palabra_ai.util.orjson import to_json
+
+    minimal_json = {
+        "input_stream": {"content_type": "audio", "source": {"type": "ws"}},
+        "output_stream": {"content_type": "audio", "target": {"type": "ws"}},
+        "pipeline": {
+            "transcription": {"source_language": "en"},
+            "translations": [{"target_language": "es"}]
+        }
+    }
+
+    # First roundtrip
+    config1 = Config.from_json(copy.deepcopy(minimal_json))
+    dump1 = json.loads(to_json(config1.model_dump()))
+
+    # Second roundtrip
+    config2 = Config.from_json(copy.deepcopy(dump1))
+    dump2 = json.loads(to_json(config2.model_dump()))
+
+    # Dumps should be structurally identical
+    assert_dicts_identical(dump2, dump1)
+
+    # Check basic properties preserved
+    assert config2.source.lang.code == "en"
+    assert config2.targets[0].lang.code == "es"
+
+
+def test_config_roundtrip_full_json():
+    """Full JSON roundtrip: maximum number of fields including advanced"""
+    import copy
+    from palabra_ai.util.orjson import to_json
+
+    full_json = {
+        "input_stream": {
+            "content_type": "audio",
+            "source": {"type": "ws", "format": "pcm_s16le", "sample_rate": 16000, "channels": 1}
+        },
+        "output_stream": {
+            "content_type": "audio",
+            "target": {"type": "ws", "format": "pcm_s16le", "sample_rate": 24000, "channels": 1}
+        },
+        "pipeline": {
+            "preprocessing": {
+                "enable_vad": True,
+                "vad_threshold": 0.5,
+                "vad_left_padding": 1,
+                "vad_right_padding": 1,
+                "pre_vad_denoise": False,
+                "pre_vad_dsp": True,
+                "record_tracks": [],
+                "auto_tempo": False,
+                "normalize_audio": False
+            },
+            "transcription": {
+                "source_language": "en",
+                "detectable_languages": [],
+                "asr_model": "auto",
+                "denoise": "none",
+                "allow_hotwords_glossaries": True,
+                "supress_numeral_tokens": False,
+                "diarize_speakers": False,
+                "priority": "normal",
+                "min_alignment_score": 0.2,
+                "max_alignment_cer": 0.8,
+                "segment_confirmation_silence_threshold": 0.7,
+                "only_confirm_by_silence": False,
+                "batched_inference": False,
+                "force_detect_language": False,
+                "calculate_voice_loudness": False,
+                "sentence_splitter": {
+                    "enabled": True,
+                    "splitter_model": "auto",
+                    "advanced": {
+                        "min_sentence_characters": 80,
+                        "min_sentence_seconds": 4,
+                        "min_split_interval": 0.6,
+                        "context_size": 30,
+                        "segments_after_restart": 15,
+                        "step_size": 5,
+                        "max_steps_without_eos": 3,
+                        "force_end_of_segment": 0.5
+                    }
+                },
+                "verification": {
+                    "verification_model": "auto",
+                    "allow_verification_glossaries": True,
+                    "auto_transcription_correction": False,
+                    "transcription_correction_style": None
+                },
+                "advanced": {
+                    "filler_phrases": {
+                        "enabled": False,
+                        "min_transcription_len": 40,
+                        "min_transcription_time": 3,
+                        "phrase_chance": 0.5
+                    },
+                    "ignore_languages": []
+                }
+            },
+            "translations": [{
+                "target_language": "es",
+                "allowed_source_languages": [],
+                "translation_model": "auto",
+                "allow_translation_glossaries": True,
+                "style": None,
+                "translate_partial_transcriptions": False,
+                "speech_generation": {
+                    "tts_model": "auto",
+                    "voice_cloning": False,
+                    "voice_cloning_mode": "static_10",
+                    "denoise_voice_samples": True,
+                    "voice_id": "default_low",
+                    "voice_timbre_detection": {
+                        "enabled": False,
+                        "high_timbre_voices": ["default_high"],
+                        "low_timbre_voices": ["default_low"]
+                    },
+                    "speech_tempo_auto": True,
+                    "speech_tempo_timings_factor": 0,
+                    "speech_tempo_adjustment_factor": 0.75,
+                    "advanced": {
+                        "f0_variance_factor": 1.2,
+                        "energy_variance_factor": 1.5,
+                        "with_custom_stress": True
+                    }
+                },
+                "advanced": {}
+            }],
+            "translation_queue_configs": {
+                "global": {
+                    "desired_queue_level_ms": 10000,
+                    "max_queue_level_ms": 24000,
+                    "auto_tempo": True,
+                    "min_tempo": 1.0,
+                    "max_tempo": 1.2
+                }
+            },
+            "allowed_message_types": [
+                "translated_transcription",
+                "partial_transcription",
+                "partial_translated_transcription",
+                "validated_transcription"
+            ]
+        }
+    }
+
+    # First roundtrip
+    config1 = Config.from_json(copy.deepcopy(full_json))
+    dump1 = json.loads(to_json(config1.model_dump()))
+
+    # Second roundtrip
+    config2 = Config.from_json(copy.deepcopy(dump1))
+    dump2 = json.loads(to_json(config2.model_dump()))
+
+    # Deep comparison: dumps should be structurally identical
+    assert_dicts_identical(dump2, dump1)
+
+    # Spot check some advanced fields
+    assert config2.source.transcription.sentence_splitter.advanced.context_size == 30
+    assert config2.targets[0].translation.speech_generation.advanced.f0_variance_factor == 1.2
+    assert config2.preprocessing.vad_threshold == 0.5
+
+
+def test_config_nested_modifications_preserved():
+    """Nested modifications at all levels should be preserved in roundtrip"""
+    import copy
+    from palabra_ai.util.orjson import to_json
+
+    config = Config(source=SourceLang(lang=EN), targets=[TargetLang(lang=ES)])
+
+    # Modify nested fields at different levels
+    config.preprocessing.vad_threshold = 0.6
+    config.source.transcription.segment_confirmation_silence_threshold = 0.8
+    config.source.transcription.sentence_splitter.enabled = False
+    config.source.transcription.sentence_splitter.advanced.context_size = 50
+    config.source.transcription.sentence_splitter.advanced.step_size = 10
+    config.targets[0].translation.translate_partial_transcriptions = True
+    config.targets[0].translation.speech_generation.voice_id = "custom_voice"
+    config.targets[0].translation.speech_generation.advanced.f0_variance_factor = 1.5
+    config.targets[0].translation.speech_generation.advanced.energy_variance_factor = 2.0
+    config.translation_queue_configs.global_.desired_queue_level_ms = 8000
+    config.translation_queue_configs.global_.auto_tempo = False
+
+    # Dump and reload
+    dumped = json.loads(to_json(config.model_dump()))
+    config2 = Config.from_json(copy.deepcopy(dumped))
+
+    # Verify ALL modifications preserved
+    assert config2.preprocessing.vad_threshold == 0.6
+    assert config2.source.transcription.segment_confirmation_silence_threshold == 0.8
+    assert config2.source.transcription.sentence_splitter.enabled == False
+    assert config2.source.transcription.sentence_splitter.advanced.context_size == 50
+    assert config2.source.transcription.sentence_splitter.advanced.step_size == 10
+    assert config2.targets[0].translation.translate_partial_transcriptions == True
+    assert config2.targets[0].translation.speech_generation.voice_id == "custom_voice"
+    assert config2.targets[0].translation.speech_generation.advanced.f0_variance_factor == 1.5
+    assert config2.targets[0].translation.speech_generation.advanced.energy_variance_factor == 2.0
+    assert config2.translation_queue_configs.global_.desired_queue_level_ms == 8000
+    assert config2.translation_queue_configs.global_.auto_tempo == False
+
+    # Second roundtrip should be identical
+    dumped2 = json.loads(to_json(config2.model_dump()))
+    assert_dicts_identical(dumped2, dumped)
+
+
+def test_config_null_values_preserved():
+    """Explicit null values should be preserved in roundtrip, not disappear"""
+    import copy
+    from palabra_ai.util.orjson import to_json
+
+    json_with_nulls = {
+        "input_stream": {"content_type": "audio", "source": {"type": "ws"}},
+        "output_stream": {"content_type": "audio", "target": {"type": "ws"}},
+        "pipeline": {
+            "transcription": {
+                "source_language": "en",
+                "verification": {
+                    "auto_transcription_correction": False,
+                    "transcription_correction_style": None  # Explicit null
+                }
+            },
+            "translations": [{
+                "target_language": "es",
+                "style": None  # Explicit null
+            }]
+        }
+    }
+
+    # First roundtrip
+    config1 = Config.from_json(copy.deepcopy(json_with_nulls))
+    dump1 = json.loads(to_json(config1.model_dump()))
+
+    # Check nulls are preserved
+    assert dump1["pipeline"]["transcription"]["verification"]["transcription_correction_style"] is None
+    assert dump1["pipeline"]["translations"][0]["style"] is None
+
+    # Second roundtrip
+    config2 = Config.from_json(copy.deepcopy(dump1))
+    dump2 = json.loads(to_json(config2.model_dump()))
+
+    # Nulls should still be there
+    assert dump2["pipeline"]["transcription"]["verification"]["transcription_correction_style"] is None
+    assert dump2["pipeline"]["translations"][0]["style"] is None
+
+    # Structural identity
+    assert_dicts_identical(dump2, dump1)
