@@ -3,6 +3,7 @@ import ctypes
 import io
 import wave
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Optional
 
 import numpy as np
@@ -12,6 +13,15 @@ from palabra_ai.constant import AUDIO_BUFFER_PADDING_SEC, BYTES_PER_SAMPLE
 from palabra_ai.util.logger import error
 from palabra_ai.util.orjson import from_json, to_json
 from palabra_ai.util.timing import get_perf_ts
+
+
+def save_wav(np_audio: np.typing.NDArray, output_path: Path, sr: int, ch: int):
+    """Save audio chunks to WAV file"""
+    with wave.open(str(output_path), "wb") as wav:
+        wav.setnchannels(ch)
+        wav.setframerate(sr)
+        wav.setsampwidth(BYTES_PER_SAMPLE)
+        wav.writeframes(np_audio.tobytes())
 
 
 class AudioFrame:
@@ -336,11 +346,7 @@ class AudioBuffer:
         else:
             # Default behavior: return bytes
             with io.BytesIO() as wav_file:
-                with wave.open(wav_file, "wb") as wav:
-                    wav.setnchannels(self.num_channels)
-                    wav.setframerate(self.sample_rate)
-                    wav.setsampwidth(BYTES_PER_SAMPLE)
-                    wav.writeframes(trimmed_array.tobytes())
+                save_wav(trimmed_array, wav_file, self.sample_rate, self.num_channels)
                 return wav_file.getvalue()
 
     async def write(self, frame: AudioFrame):

@@ -32,7 +32,9 @@ class WsIo(Io):
         if not raw:
             raw = frame.to_ws()
         debug(f"<- {frame} / {frame.dbg_delta=}")
-        self.init_global_start_ts()
+        if self.global_start_perf_ts is None:
+            self.init_global_start_ts()
+            frame._dbg.dawn_ts = 0.0
         await self.ws.send(raw)
 
     def new_input_frame(self) -> AudioFrame:

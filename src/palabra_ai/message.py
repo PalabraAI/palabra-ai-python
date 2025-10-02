@@ -61,13 +61,30 @@ class Dbg:
 
 @dataclass
 class IoEvent:
-    header: "Dbg"
+    head: "Dbg"
     body: str | bytes | dict | list
+    tid: str | None = field(default=None)
+    mtype: str | None = field(default=None)
 
     def __post_init__(self):
         if isinstance(self.body, bytes):
             self.body = self.body.decode("utf-8")
         self.convert_raw_to_body()
+
+        self.mtype = self.body.get("message_type")
+        if self.mtype == "output_audio_data":
+            self.tid = self.body.get("data", {}).get("transcription_id")
+        elif self.mtype in {
+            "partial_transcription",
+            "validated_transcription",
+            "translated_transcription",
+            "partial_translated_transcription",
+        }:
+            self.tid = (
+                self.body.get("data", {})
+                .get("transcription", {})
+                .get("transcription_id")
+            )
 
     def convert_raw_to_body(self):
         self.body = from_json(self.body) if self.body else None

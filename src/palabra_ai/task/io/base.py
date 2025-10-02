@@ -61,10 +61,12 @@ class Io(Task):
         return IoData(
             start_perf_ts=self.global_start_perf_ts,
             start_utc_ts=self.global_start_utc_ts,
-            input_sample_rate=self.cfg.mode.input_sample_rate,
-            output_sample_rate=self.cfg.mode.output_sample_rate,
+            in_sr=self.cfg.mode.input_sample_rate,
+            out_sr=self.cfg.mode.output_sample_rate,
+            mode=self.cfg.mode.name,
             channels=self.cfg.mode.num_channels,
             events=self.io_events,
+            count_events=len(self.io_events),
         )
 
     @property
@@ -82,7 +84,7 @@ class Io(Task):
         if self.global_start_perf_ts is None:
             self.global_start_perf_ts = get_perf_ts()
             self.global_start_utc_ts = get_utc_ts()
-            if hasattr(self, "writer") and self.writer:
+            if self.writer:
                 self.writer.start_perf_ts = self.global_start_perf_ts
 
     @abc.abstractmethod

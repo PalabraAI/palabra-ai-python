@@ -20,10 +20,12 @@ class LogData(BaseModel):
 class IoData(BaseModel):
     start_perf_ts: float
     start_utc_ts: float
-    input_sample_rate: int
-    output_sample_rate: int
+    in_sr: int  # sr = sample rate
+    out_sr: int  # sr = sample rate
+    mode: str
     channels: int
     events: list[IoEvent]
+    count_events: int
 
 
 class RunResult(BaseModel):
