@@ -5,7 +5,7 @@ from websockets.asyncio.client import connect as ws_connect
 
 from palabra_ai.audio import AudioFrame
 from palabra_ai.enum import Channel, Direction, Kind
-from palabra_ai.message import Dbg
+from palabra_ai.message import Dbg, IoEvent
 from palabra_ai.task.io.base import Io
 from palabra_ai.util.logger import debug, trace
 from palabra_ai.util.timing import get_perf_ts, get_utc_ts
@@ -28,8 +28,9 @@ class WsIo(Io):
     async def send_message(self, msg_data: bytes) -> None:
         await self.ws.send(msg_data)
 
-    async def send_frame(self, frame: AudioFrame) -> None:
-        raw = frame.to_ws()
+    async def send_frame(self, frame: AudioFrame, raw: bytes | None = None) -> None:
+        if not raw:
+            raw = frame.to_ws()
         debug(f"<- {frame} / {frame.dbg_delta=}")
         self.init_global_start_ts()
         await self.ws.send(raw)
@@ -70,6 +71,7 @@ class WsIo(Io):
                         )
                         audio_frame._dbg = _dbg
                         self.bench_audio_foq.publish(audio_frame)
+                        self.io_events.append(IoEvent(_dbg, raw_msg))
                     self.writer.q.put_nowait(audio_frame)
                 else:
                     _dbg = Dbg(
@@ -82,6 +84,7 @@ class WsIo(Io):
                     msg = Message.decode(raw_msg)
                     msg._dbg = _dbg
                     self.out_msg_foq.publish(msg)
+                    self.io_events.append(IoEvent(_dbg, raw_msg))
                     debug(f"-> {msg!r}")
                     if isinstance(msg, EosMessage):
                         self.eos_received = True

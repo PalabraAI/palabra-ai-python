@@ -55,6 +55,16 @@ class Dbg:
 
 
 @dataclass
+class IoEvent:
+    header: "Dbg"
+    raw: str | bytes
+
+    def __post_init__(self):
+        if isinstance(self.raw, bytes):
+            self.raw = self.raw.decode("utf-8")
+
+
+@dataclass
 class KnownRaw:
     type: KnownRawType
     data: str | bytes | dict | None

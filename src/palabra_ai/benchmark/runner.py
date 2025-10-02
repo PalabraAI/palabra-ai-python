@@ -275,7 +275,7 @@ class BenchmarkRunner:
             if result:
                 debug(f"Result.ok: {result.ok}")
                 debug(f"Result.exc: {result.exc}")
-                debug(f"Result.log_data: {result.log_data}")
+                # debug(f"Result.log_data: {result.log_data}")
                 debug(f"Has log_data: {result.log_data is not None}")
 
                 if result.log_data:
