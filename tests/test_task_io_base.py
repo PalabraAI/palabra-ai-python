@@ -42,10 +42,10 @@ class TestIo:
         """Create mock config"""
         config = MagicMock()
         config.mode = MagicMock()
-        config.mode.chunk_bytes = 320
-        config.mode.chunk_duration_ms = 20
-        config.mode.samples_per_channel = 160
-        config.mode.for_audio_frame = (8000, 1, 160)
+        config.mode.input_chunk_bytes = 320
+        config.mode.input_chunk_duration_ms = 20
+        config.mode.input_samples_per_channel = 160
+        config.mode.for_input_audio_frame = (8000, 1, 160)
         config.to_dict = MagicMock(return_value={"test": "config"})
         return config
 
@@ -443,8 +443,8 @@ class TestIo:
         assert io._frames_sent == 0
         assert io._total_duration_sent == 0.0
 
-        # Call ensure timing initialized
-        io._ensure_timing_initialized()
+        # Call init_global_start_ts
+        io.init_global_start_ts()
 
         # Check timing was initialized
         assert io.global_start_perf_ts is not None
@@ -598,7 +598,7 @@ class TestIo:
             reader=mock_reader,
             writer=mock_writer
         )
-        
+
         # Mock reader to return chunks then EOF
         chunks = [b"chunk1", b"chunk2", b"chunk3", None]
         mock_reader.read.side_effect = chunks
@@ -608,12 +608,9 @@ class TestIo:
 
         with patch('asyncio.sleep') as mock_sleep:
             await io.do()
-            
+
             # Should have processed 3 chunks
             assert io.push.call_count == 3
-
-            # Should have initialized timing
-            assert io.global_start_perf_ts is not None
 
             # Should have updated metrics
             assert io._frames_sent == 3

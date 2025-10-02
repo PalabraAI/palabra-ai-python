@@ -62,6 +62,7 @@ def test_run_without_loop():
     # Mock the async context manager directly to avoid coroutine creation
     with patch.object(client, 'process') as mock_process:
         mock_manager = MagicMock()
+        mock_manager.io_data = {}
         mock_manager.logger = None
         mock_async_context = AsyncMock()
         mock_async_context.__aenter__.return_value = mock_manager
@@ -250,6 +251,7 @@ async def test_process_with_credentials_creation():
 
         with patch('palabra_ai.client.Manager') as mock_manager_class:
             mock_manager = MagicMock()
+            mock_manager.io_data = {}
             mock_manager_class.return_value = MagicMock(return_value=mock_manager)
 
             with patch('asyncio.TaskGroup') as mock_tg_class:
@@ -285,6 +287,7 @@ async def test_process_with_cancelled_error():
 
         with patch('palabra_ai.client.Manager') as mock_manager_class:
             mock_manager = MagicMock()
+            mock_manager.io_data = {}
             mock_manager_class.return_value = MagicMock(return_value=mock_manager)
 
             with patch('asyncio.TaskGroup') as mock_tg_class:
@@ -317,6 +320,7 @@ async def test_process_with_exception_group():
 
         with patch('palabra_ai.client.Manager') as mock_manager_class:
             mock_manager = MagicMock()
+            mock_manager.io_data = {}
             mock_manager_class.return_value = MagicMock(return_value=mock_manager)
 
             with patch('asyncio.TaskGroup') as mock_tg_class:
@@ -367,6 +371,7 @@ async def test_process_finally_block():
 
             with patch('palabra_ai.client.Manager') as mock_manager_class:
                 mock_manager = MagicMock()
+                mock_manager.io_data = {}
                 mock_manager_class.return_value = MagicMock(return_value=mock_manager)
 
                 with patch('asyncio.TaskGroup') as mock_tg_class:
@@ -421,6 +426,7 @@ def test_run_without_signal_handlers():
 
             with patch.object(client, 'process') as mock_process:
                 mock_manager = MagicMock()
+                mock_manager.io_data = {}
                 mock_manager.task = MagicMock()
                 mock_manager.logger = None
                 mock_async_context = AsyncMock()
@@ -444,6 +450,9 @@ def test_run_async_with_manager_task_cancelled():
     async def test_coro():
         with patch.object(client, 'process') as mock_process:
             mock_manager = MagicMock()
+            mock_io = MagicMock()
+            mock_io.io_data = {"start_perf_ts": 0.0, "start_utc_ts": 0.0, "in_sr": 16000, "out_sr": 16000, "mode": "test", "channels": 1, "events": [], "count_events": 0}
+            mock_manager.io = mock_io
             # Create a future that raises CancelledError when awaited
             mock_task = asyncio.Future()
             mock_task.set_exception(asyncio.CancelledError())
@@ -472,6 +481,7 @@ def test_run_async_with_manager_error():
     async def test_coro():
         with patch.object(client, 'process') as mock_process:
             mock_manager = MagicMock()
+            mock_manager.io_data = {}
             # Create a future that raises ValueError when awaited
             mock_task = asyncio.Future()
             mock_task.set_exception(ValueError("Manager error"))
@@ -503,6 +513,9 @@ def test_run_async_with_logger_timeout():
     async def test_coro():
         with patch.object(client, 'process') as mock_process:
             mock_manager = MagicMock()
+            mock_io = MagicMock()
+            mock_io.io_data = {"start_perf_ts": 0.0, "start_utc_ts": 0.0, "in_sr": 16000, "out_sr": 16000, "mode": "test", "channels": 1, "events": [], "count_events": 0}
+            mock_manager.io = mock_io
             async def normal_task():
                 return None
             mock_manager.task = asyncio.create_task(normal_task())
@@ -533,6 +546,9 @@ def test_run_async_with_logger_exception():
     async def test_coro():
         with patch.object(client, 'process') as mock_process:
             mock_manager = MagicMock()
+            mock_io = MagicMock()
+            mock_io.io_data = {"start_perf_ts": 0.0, "start_utc_ts": 0.0, "in_sr": 16000, "out_sr": 16000, "mode": "test", "channels": 1, "events": [], "count_events": 0}
+            mock_manager.io = mock_io
             # Create a future that completes normally
             mock_task = asyncio.Future()
             mock_task.set_result(None)
@@ -903,6 +919,7 @@ async def test_run_result_eos_field_from_manager():
     mock_manager = MagicMock()
     mock_io = MagicMock()
     mock_io.eos_received = True
+    mock_io.io_data = {"start_perf_ts": 0.0, "start_utc_ts": 0.0, "in_sr": 16000, "out_sr": 16000, "mode": "test", "channels": 1, "events": [], "count_events": 0}
     mock_manager.io = mock_io
 
     # Mock logger with result
@@ -981,6 +998,7 @@ async def test_run_result_eos_field_false():
     mock_manager = MagicMock()
     mock_io = MagicMock()
     mock_io.eos_received = False
+    mock_io.io_data = {"start_perf_ts": 0.0, "start_utc_ts": 0.0, "in_sr": 16000, "out_sr": 16000, "mode": "test", "channels": 1, "events": [], "count_events": 0}
     mock_manager.io = mock_io
 
     # Mock logger with result

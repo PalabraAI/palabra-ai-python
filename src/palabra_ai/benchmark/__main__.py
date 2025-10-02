@@ -340,8 +340,7 @@ def main():
     parser.add_argument("source_lang", nargs="?", help="Source language")
     parser.add_argument("target_lang", nargs="?", help="Target language")
     parser.add_argument("--config", type=Path, help="JSON config file")
-    parser.add_argument("--output-dir", type=Path, default=Path("1Oct25"), help="Output directory")
-    parser.add_argument("--debug", action="store_true", help="Save all debug files (raw, io_data, audio, report.txt)")
+    parser.add_argument("--out", type=Path, help="Output directory for files (if not specified, only prints to console)")
 
     args = parser.parse_args()
 
@@ -350,17 +349,6 @@ def main():
         raise FileNotFoundError(f"Audio file not found: {args.audio}")
     mode = WsMode(input_chunk_duration_ms=INPUT_CHUNK_DURATION_S*1000)
 
-    if args.config:
-        import json
-        config_json = json.loads(args.config.read_text())
-        source_lang = config_json["pipeline"]["transcription"]["source_language"]
-        target_lang = config_json["pipeline"]["translations"][0]["target_language"]
-    else:
-        if not args.source_lang or not args.target_lang:
-            parser.error("source_lang and target_lang required without --config")
-        source_lang = args.source_lang
-        target_lang = args.target_lang
-
     # Get audio duration for progress tracking
     with av.open(str(audio_path)) as container:
         audio_duration = container.duration / 1000000  # convert microseconds to seconds
@@ -368,16 +356,9 @@ def main():
     # Create reader
     reader = FileReader(str(audio_path))
 
-    # Create progress bar with 7 second update interval
-    progress_bar = tqdm(
-        total=100,
-        desc=f"Processing {source_lang}→{target_lang}",
-        unit="%",
-        mininterval=7.0,
-        bar_format="{desc}: {percentage:3.0f}%|{bar}| [{elapsed}<{remaining}]"
-    )
-
+    # Create progress bar placeholder (will update desc after config loaded)
     last_timestamp = [0.0]  # mutable to allow updates in nested function
+    progress_bar = [None]  # mutable reference
 
     def on_transcription(msg):
         if hasattr(msg, 'segments') and msg.segments:
@@ -385,26 +366,55 @@ def main():
             if end_ts > last_timestamp[0]:
                 last_timestamp[0] = end_ts
                 progress_pct = min(100, (end_ts / audio_duration) * 100)
-                progress_bar.update(progress_pct - progress_bar.n)
+                if progress_bar[0]:
+                    progress_bar[0].update(progress_pct - progress_bar[0].n)
 
-    config = Config(
-        source=SourceLang(Language.get_or_create(source_lang), reader, on_transcription=on_transcription),
-        targets=[TargetLang(Language.get_or_create(target_lang), DummyWriter())],
-        benchmark=True,
-        mode=mode,
+    if args.config:
+        # Load full config from JSON
+        config = Config.from_json(args.config.read_text())
+
+        # Override benchmark-specific settings (using private attrs)
+        config.source._reader = reader
+        config.source._on_transcription = on_transcription
+        config.targets[0]._writer = DummyWriter()
+        config.benchmark = True
+
+        source_lang = config.source.lang.code
+        target_lang = config.targets[0].lang.code
+    else:
+        if not args.source_lang or not args.target_lang:
+            parser.error("source_lang and target_lang required without --config")
+        source_lang = args.source_lang
+        target_lang = args.target_lang
+
+        config = Config(
+            source=SourceLang(Language.get_or_create(source_lang), reader, on_transcription=on_transcription),
+            targets=[TargetLang(Language.get_or_create(target_lang), DummyWriter())],
+            benchmark=True,
+            mode=mode,
+        )
+
+    # Create progress bar with language info
+    progress_bar[0] = tqdm(
+        total=100,
+        desc=f"Processing {source_lang}→{target_lang}",
+        unit="%",
+        mininterval=7.0,
+        bar_format="{desc}: {percentage:3.0f}%|{bar}| [{elapsed}<{remaining}]"
     )
 
     print(f"Running benchmark: {source_lang} → {target_lang}")
-    if args.debug:
-        print(f"Debug mode: files will be saved to {args.output_dir}")
+    if args.out:
+        print(f"Files will be saved to {args.out}")
     print("-" * 60)
 
     palabra = PalabraAI()
     result = palabra.run(config, no_raise=True)
 
     # Complete and close progress bar
-    progress_bar.update(100 - progress_bar.n)
-    progress_bar.close()
+    if progress_bar[0]:
+        progress_bar[0].update(100 - progress_bar[0].n)
+        progress_bar[0].close()
 
     if not result.ok or not result.io_data:
         raise RuntimeError(f"Benchmark failed: {result.exc}")
@@ -412,7 +422,7 @@ def main():
     # Parse report
     report, in_audio_canvas, out_audio_canvas = Report.parse(result.io_data)
 
-    # Create file paths (used in report and optionally saved with --debug)
+    # Create file paths (used in report and optionally saved with --out)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     in_wav_name = f"{timestamp}_bench_in_{source_lang}.wav"
     out_wav_name = f"{timestamp}_bench_out_{target_lang}.wav"
@@ -427,9 +437,9 @@ def main():
         out_wav_name
     )
 
-    if args.debug:
-        # Debug mode: save all files
-        output_dir = args.output_dir
+    if args.out:
+        # Save all files to output directory
+        output_dir = args.out
         output_dir.mkdir(parents=True, exist_ok=True)
 
         raw_result_path = output_dir / f"{timestamp}_bench_raw_result.json"

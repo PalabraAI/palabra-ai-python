@@ -346,7 +346,11 @@ class AudioBuffer:
         else:
             # Default behavior: return bytes
             with io.BytesIO() as wav_file:
-                save_wav(trimmed_array, wav_file, self.sample_rate, self.num_channels)
+                with wave.open(wav_file, "wb") as wav:
+                    wav.setnchannels(self.num_channels)
+                    wav.setframerate(self.sample_rate)
+                    wav.setsampwidth(BYTES_PER_SAMPLE)
+                    wav.writeframes(trimmed_array.tobytes())
                 return wav_file.getvalue()
 
     async def write(self, frame: AudioFrame):
