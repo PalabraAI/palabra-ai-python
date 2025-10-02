@@ -246,7 +246,7 @@ def truncate_text(text: str, max_len: int = 25) -> str:
     remaining = len(text) - max_len
     return f"{text[:max_len]}...(+{remaining})"
 
-def format_report(report: Report, io_data: IoData, source_lang: str, target_lang: str, in_file: str, out_file: str) -> str:
+def format_report(report: Report, io_data: IoData, source_lang: str, target_lang: str, in_file: str, out_file: str, config: Config) -> str:
     """Format report as text with tables and histogram"""
     lines = []
     lines.append("=" * 80)
@@ -261,8 +261,16 @@ def format_report(report: Report, io_data: IoData, source_lang: str, target_lang
     # Input/Output info
     in_dur = f"{report.in_audio_stat.length_s:.1f}s" if report.in_audio_stat else "?.?s"
     out_dur = f"{report.out_audio_stat.length_s:.1f}s" if report.out_audio_stat else "?.?s"
-    lines.append(f"Input:  {in_file} ({source_lang})  [{in_dur}, {io_data.in_sr}hz, 16bit, PCM]")
-    lines.append(f"Output: {out_file} ({target_lang})           [{out_dur}, {io_data.out_sr}hz, 16bit, PCM]")
+    lines.append(f"Input:  [{in_dur}, {io_data.in_sr}hz, 16bit, PCM] {in_file}")
+    lines.append(f"Output: [{out_dur}, {io_data.out_sr}hz, 16bit, PCM] {out_file}")
+
+    # TTS autotempo info
+    queue_config = config.translation_queue_configs.global_ if config.translation_queue_configs else None
+    if queue_config:
+        if queue_config.auto_tempo:
+            lines.append(f"TTS autotempo: ✅ on ({queue_config.min_tempo}-{queue_config.max_tempo})")
+        else:
+            lines.append(f"TTS autotempo: ❌ off")
     lines.append("")
 
     # Metrics summary table
@@ -434,7 +442,8 @@ def main():
         source_lang,
         target_lang,
         str(audio_path),
-        out_wav_name
+        out_wav_name,
+        config
     )
 
     if args.out:
