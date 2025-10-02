@@ -58,10 +58,19 @@ class Dbg:
 class IoEvent:
     header: "Dbg"
     raw: str | bytes
+    body: dict | list = None
 
     def __post_init__(self):
         if isinstance(self.raw, bytes):
             self.raw = self.raw.decode("utf-8")
+
+    def convert_raw_to_body(self):
+        self.body = from_json(self.raw) if self.raw else None
+        if "data" in self.body and isinstance(self.body["data"], str):
+            try:
+                self.body["data"] = from_json(self.body["data"])
+            except orjson.JSONDecodeError:
+                debug("Failed to decode nested JSON in 'data' field")
 
 
 @dataclass

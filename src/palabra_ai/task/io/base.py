@@ -61,6 +61,9 @@ class Io(Task):
         return IoData(
             start_perf_ts=self.global_start_perf_ts,
             start_utc_ts=self.global_start_utc_ts,
+            input_sample_rate=self.cfg.mode.input_sample_rate,
+            output_sample_rate=self.cfg.mode.output_sample_rate,
+            channels=self.cfg.mode.num_channels,
             events=self.io_events,
         )
 
@@ -145,13 +148,6 @@ class Io(Task):
         +self.eof  # noqa
         await self.push_in_msg(EndTaskMessage())
 
-    def _ensure_timing_initialized(self):
-        """Initialize global timing on first chunk."""
-        if self.global_start_perf_ts is None:
-            self.global_start_perf_ts = time.perf_counter()
-            if hasattr(self, "writer") and self.writer:
-                self.writer.start_perf_ts = self.global_start_perf_ts
-
     def _is_behind_schedule(self) -> bool:
         """Check if we're behind the expected schedule."""
         if not self.global_start_perf_ts:
@@ -199,6 +195,11 @@ class Io(Task):
 
     async def _send_single_chunk(self, chunk: bytes):
         """Send a single chunk with precise timing."""
+        # First chunk - send immediately without timing
+        if self.global_start_perf_ts is None:
+            await self._send_chunk_immediately(chunk)
+            return
+
         chunk_duration_s = self.cfg.mode.chunk_duration_ms / 1000
         target_time, current_time, _ = self._calculate_timing_metrics()
 
