@@ -102,8 +102,9 @@ class WebrtcIo(Io):
                         Direction.OUT,
                         idx=next(self._idx),
                         num=next(self._out_audio_num),
-                        chunk_duration_ms=self.cfg.mode.chunk_duration_ms,
+                        dur_s=audio_frame.duration,
                     )
+                    audio_frame._dbg.calc_dawn_ts(self.global_start_perf_ts)
                     self.bench_audio_foq.publish(audio_frame)
                 await aio.sleep(0)
                 if self.stopper or self.eof:
@@ -123,6 +124,7 @@ class WebrtcIo(Io):
             idx=next(self._idx),
             num=next(self._out_msg_num),
         )
+        _dbg.calc_dawn_ts(self.global_start_perf_ts)
         debug(f"Received packet: {data}"[:100])
         msg = Message.decode(data.data)
         msg._dbg = _dbg

@@ -106,9 +106,9 @@ class BenchmarkRunner:
             else:
                 self.mode = mode
 
-            # Use chunk_duration_ms from config if not overridden
+            # Use dur_ms from config if not overridden
             if chunk_duration_ms is None:
-                self.chunk_duration_ms = None  # Will use config's chunk_duration_ms
+                self.chunk_duration_ms = None  # Will use config's dur_ms
             else:
                 self.chunk_duration_ms = chunk_duration_ms
         else:
@@ -223,20 +223,20 @@ class BenchmarkRunner:
                     from palabra_ai.config import IoMode
                     config.mode = IoMode.from_string(
                         self.mode,
-                        chunk_duration_ms=self.chunk_duration_ms or (10 if self.mode == "webrtc" else 100)
+                        input_chunk_duration_ms=self.chunk_duration_ms or (10 if self.mode == "webrtc" else 100)
                     )
                 elif self.chunk_duration_ms is not None:
-                    # If only chunk_duration_ms is overridden, update existing mode
+                    # If only dur_ms is overridden, update existing mode
                     from palabra_ai.config import IoMode
                     config.mode = IoMode.from_string(
                         config.mode.mode_type,
-                        chunk_duration_ms=self.chunk_duration_ms
+                        input_chunk_duration_ms=self.chunk_duration_ms
                     )
                 else:
                     # For benchmark, ensure WsMode has 100ms chunks (not the default 320ms)
                     if config.mode.mode_type == "ws":
                         from palabra_ai.config import IoMode
-                        config.mode = IoMode.from_string("ws", chunk_duration_ms=100)
+                        config.mode = IoMode.from_string("ws", input_chunk_duration_ms=100)
                 # Set benchmark-specific settings
                 config.silent = self.silent
                 config.benchmark = True
@@ -246,7 +246,7 @@ class BenchmarkRunner:
                 from palabra_ai.config import IoMode
                 io_mode = IoMode.from_string(
                     self.mode or "ws",  # default to ws
-                    chunk_duration_ms=self.chunk_duration_ms
+                    input_chunk_duration_ms=self.chunk_duration_ms
 )
 
                 # Create config from scratch

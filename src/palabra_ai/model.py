@@ -25,12 +25,6 @@ class IoData(BaseModel):
     channels: int
     events: list[IoEvent]
 
-    def convert_raw_to_body_events(self, delete_raw: bool = True) -> None:
-        for event in self.events:
-            event.convert_raw_to_body()
-            if delete_raw:
-                event.raw = None
-
 
 class RunResult(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)

@@ -105,6 +105,7 @@ class Io(Task):
             num=next(self._in_msg_num),
             idx=next(self._idx),
         )
+        msg._dbg.calc_dawn_ts(self.global_start_perf_ts)
         debug(f"Pushing message: {msg!r}")
         self.in_msg_foq.publish(msg)
 
@@ -140,7 +141,7 @@ class Io(Task):
 
     async def _read_next_chunk(self) -> bytes | None:
         """Read the next audio chunk from reader."""
-        return await self.reader.read(self.cfg.mode.chunk_bytes)
+        return await self.reader.read(self.cfg.mode.input_chunk_bytes)
 
     async def _handle_eof(self):
         """Handle end of file condition."""
@@ -152,7 +153,7 @@ class Io(Task):
         """Check if we're behind the expected schedule."""
         if not self.global_start_perf_ts:
             return False
-        chunk_duration_s = self.cfg.mode.chunk_duration_ms / 1000
+        chunk_duration_s = self.cfg.mode.input_chunk_duration_ms / 1000
         target_time = self.global_start_perf_ts + self._total_duration_sent
         current_time = time.perf_counter()
         time_behind = current_time - target_time
@@ -172,7 +173,7 @@ class Io(Task):
     async def _send_burst_chunks(self, initial_chunk: bytes):
         """Send multiple chunks in burst mode when behind schedule."""
         MAX_BURST = 20
-        chunk_duration_s = self.cfg.mode.chunk_duration_ms / 1000
+        chunk_duration_s = self.cfg.mode.input_chunk_duration_ms / 1000
 
         target_time, current_time, time_behind = self._calculate_timing_metrics()
         chunks_behind = int(time_behind / chunk_duration_s)
@@ -200,7 +201,7 @@ class Io(Task):
             await self._send_chunk_immediately(chunk)
             return
 
-        chunk_duration_s = self.cfg.mode.chunk_duration_ms / 1000
+        chunk_duration_s = self.cfg.mode.input_chunk_duration_ms / 1000
         target_time, current_time, _ = self._calculate_timing_metrics()
 
         # Calculate precise wait time
@@ -213,19 +214,19 @@ class Io(Task):
 
     async def _send_chunk_immediately(self, chunk: bytes):
         """Send a chunk and update timing metrics."""
-        chunk_duration_s = self.cfg.mode.chunk_duration_ms / 1000
+        chunk_duration_s = self.cfg.mode.input_chunk_duration_ms / 1000
         await self.push(chunk)
         self._frames_sent += 1
         self._total_duration_sent += chunk_duration_s
 
-    def new_frame(self) -> "AudioFrame":
-        return AudioFrame.create(*self.cfg.mode.for_audio_frame)
+    def new_input_frame(self) -> "AudioFrame":
+        return AudioFrame.create(*self.cfg.mode.for_input_audio_frame)
 
     async def push(self, audio_bytes: bytes) -> None:
         """Process and send audio chunks."""
-        samples_per_channel = self.cfg.mode.samples_per_channel
+        samples_per_channel = self.cfg.mode.input_samples_per_channel
         total_samples = len(audio_bytes) // BYTES_PER_SAMPLE
-        audio_frame = self.new_frame()
+        audio_frame = self.new_input_frame()
         audio_data = np.frombuffer(audio_frame.data, dtype=np.int16)
 
         for i in range(0, total_samples, samples_per_channel):
@@ -254,9 +255,10 @@ class Io(Task):
                     Direction.IN,
                     idx=next(self._idx),
                     num=next(self._in_audio_num),
-                    chunk_duration_ms=self.cfg.mode.chunk_duration_ms,
+                    dur_s=audio_frame.duration,
                     rms_db=rms_db,
                 )
+                audio_frame._dbg.calc_dawn_ts(self.global_start_perf_ts)
                 self.bench_audio_foq.publish(audio_frame)
                 raw = audio_frame.to_ws()
                 self.io_events.append(IoEvent(audio_frame._dbg, raw))

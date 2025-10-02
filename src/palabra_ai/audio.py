@@ -135,7 +135,7 @@ class AudioFrame:
         )
 
     def __repr__(self):
-        return f"🗣️<AF(s={self.samples_per_channel}, sr={self.sample_rate}, ch={self.num_channels})>"
+        return f"🗣️<AF(dur={self.duration:.3f}s, s={self.samples_per_channel}, sr={self.sample_rate}, ch={self.num_channels})>"
 
     def __bool__(self):
         """Return False if data is empty, True otherwise"""
@@ -164,7 +164,6 @@ class AudioFrame:
         raw_msg: bytes | str,
         sample_rate: int,
         num_channels: int,
-        samples_per_channel: int,
         perf_ts: float | None = None,
     ) -> Optional["AudioFrame"]:
         """Create AudioFrame from WebSocket message
@@ -207,6 +206,8 @@ class AudioFrame:
         try:
             # Decode base64 to bytes
             audio_bytes = base64.b64decode(base64_data)
+
+            samples_per_channel = len(audio_bytes) // (BYTES_PER_SAMPLE * num_channels)
 
             return cls(
                 data=audio_bytes,

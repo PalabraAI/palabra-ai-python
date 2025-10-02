@@ -181,7 +181,7 @@ def generate_text_report(analysis: Dict[str, Any], max_chunks: int = -1, show_em
     lines.append(f"Total audio chunks:      {summary['total_chunks']}")
     lines.append(f"Chunks with sound:       {summary.get('chunks_with_sound', 0)} (RMS > {summary.get('rms_threshold_db', -40.0):.1f} dB)")
     lines.append(f"Silent chunks:           {summary.get('silent_chunks', 0)} ({summary.get('silent_percentage', 0):.1f}%)")
-    lines.append(f"Chunk duration:          {summary.get('chunk_duration_ms', 100):.0f} ms")
+    lines.append(f"Chunk duration:          {summary.get('dur_ms', 100):.0f} ms")
     lines.append(f"Total duration:          {summary['total_duration']:.1f} seconds")
     lines.append(f"")
     lines.append(f"Events processed:")

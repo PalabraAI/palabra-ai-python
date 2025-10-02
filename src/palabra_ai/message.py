@@ -29,12 +29,17 @@ class Dbg:
     kind: Kind | None
     ch: Channel | None
     dir: Direction | None
+    dawn_ts: float | None = field(default=None)  # ts from global start
     perf_ts: float = field(default_factory=get_perf_ts)
     utc_ts: float = field(default_factory=get_utc_ts)
     idx: int | None = field(default=None)
     num: int | None = field(default=None)
-    chunk_duration_ms: float | None = field(default=None)
+    dur_s: float | None = field(default=None)
     rms_db: float | None = field(default=None)
+
+    def calc_dawn_ts(self, global_start_ts: float | None):
+        if global_start_ts is not None:
+            self.dawn_ts = self.perf_ts - global_start_ts
 
     @classmethod
     def empty(cls):
@@ -57,15 +62,15 @@ class Dbg:
 @dataclass
 class IoEvent:
     header: "Dbg"
-    raw: str | bytes
-    body: dict | list = None
+    body: str | bytes | dict | list
 
     def __post_init__(self):
-        if isinstance(self.raw, bytes):
-            self.raw = self.raw.decode("utf-8")
+        if isinstance(self.body, bytes):
+            self.body = self.body.decode("utf-8")
+        self.convert_raw_to_body()
 
     def convert_raw_to_body(self):
-        self.body = from_json(self.raw) if self.raw else None
+        self.body = from_json(self.body) if self.body else None
         if "data" in self.body and isinstance(self.body["data"], str):
             try:
                 self.body["data"] = from_json(self.body["data"])

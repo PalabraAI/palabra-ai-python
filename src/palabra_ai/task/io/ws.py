@@ -35,8 +35,8 @@ class WsIo(Io):
         self.init_global_start_ts()
         await self.ws.send(raw)
 
-    def new_frame(self) -> AudioFrame:
-        return AudioFrame.create(*self.cfg.mode.for_audio_frame)
+    def new_input_frame(self) -> AudioFrame:
+        return AudioFrame.create(*self.cfg.mode.for_input_audio_frame)
 
     async def ws_receiver(self):
         from palabra_ai.message import EosMessage, Message
@@ -53,7 +53,6 @@ class WsIo(Io):
                     raw_msg,
                     sample_rate=self.cfg.mode.output_sample_rate,
                     num_channels=self.cfg.mode.num_channels,
-                    samples_per_channel=self.cfg.mode.samples_per_channel,
                     perf_ts=perf_ts,
                 )
                 if audio_frame:
@@ -65,10 +64,11 @@ class WsIo(Io):
                             Direction.OUT,
                             idx=next(self._idx),
                             num=next(self._out_audio_num),
-                            chunk_duration_ms=self.cfg.mode.chunk_duration_ms,
+                            dur_s=audio_frame.duration,
                             perf_ts=perf_ts,
                             utc_ts=utc_ts,
                         )
+                        _dbg.calc_dawn_ts(self.global_start_perf_ts)
                         audio_frame._dbg = _dbg
                         self.bench_audio_foq.publish(audio_frame)
                         self.io_events.append(IoEvent(_dbg, raw_msg))
@@ -81,6 +81,7 @@ class WsIo(Io):
                         idx=next(self._idx),
                         num=next(self._out_audio_num),
                     )
+                    _dbg.calc_dawn_ts(self.global_start_perf_ts)
                     msg = Message.decode(raw_msg)
                     msg._dbg = _dbg
                     self.out_msg_foq.publish(msg)

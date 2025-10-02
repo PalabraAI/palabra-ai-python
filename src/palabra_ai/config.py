@@ -136,27 +136,27 @@ class IoMode(BaseModel):
     input_sample_rate: int
     output_sample_rate: int
     num_channels: int
-    chunk_duration_ms: int
+    input_chunk_duration_ms: int
 
     @cached_property
-    def samples_per_channel(self) -> int:
-        return int(self.input_sample_rate * (self.chunk_duration_ms / 1000))
+    def input_samples_per_channel(self) -> int:
+        return int(self.input_sample_rate * (self.input_chunk_duration_ms / 1000))
 
     @cached_property
-    def bytes_per_channel(self) -> int:
-        return self.samples_per_channel * BYTES_PER_SAMPLE
+    def input_bytes_per_channel(self) -> int:
+        return self.input_samples_per_channel * BYTES_PER_SAMPLE
 
     @cached_property
-    def chunk_samples(self) -> int:
-        return self.samples_per_channel * self.num_channels
+    def input_chunk_samples(self) -> int:
+        return self.input_samples_per_channel * self.num_channels
 
     @cached_property
-    def chunk_bytes(self) -> int:
-        return self.bytes_per_channel * self.num_channels
+    def input_chunk_bytes(self) -> int:
+        return self.input_bytes_per_channel * self.num_channels
 
     @cached_property
-    def for_audio_frame(self) -> tuple[int, int, int]:
-        return self.input_sample_rate, self.num_channels, self.samples_per_channel
+    def for_input_audio_frame(self) -> tuple[int, int, int]:
+        return self.input_sample_rate, self.num_channels, self.input_samples_per_channel
 
     @property
     def mode_type(self) -> str:
@@ -210,7 +210,7 @@ class IoMode(BaseModel):
             return WsMode(
                 input_sample_rate=source.get("sample_rate", WS_MODE_INPUT_SAMPLE_RATE),
                 num_channels=source.get("channels", WS_MODE_CHANNELS),
-                # chunk_duration_ms will use default WS_MODE_CHUNK_DURATION_MS
+                # dur_ms will use default WS_MODE_CHUNK_DURATION_MS
             )
         else:
             raise ConfigurationError(
@@ -219,7 +219,7 @@ class IoMode(BaseModel):
             )
 
     def __str__(self) -> str:
-        return f"[{self.name}: {self.input_sample_rate}Hz, {self.num_channels}ch, {self.chunk_duration_ms}ms]"
+        return f"[{self.name}: {self.input_sample_rate}Hz, {self.num_channels}ch, {self.input_chunk_duration_ms}ms]"
 
 
 class WebrtcMode(IoMode):
@@ -227,7 +227,7 @@ class WebrtcMode(IoMode):
     input_sample_rate: int = WEBRTC_MODE_INPUT_SAMPLE_RATE
     output_sample_rate: int = WEBRTC_MODE_OUTPUT_SAMPLE_RATE
     num_channels: int = WEBRTC_MODE_CHANNELS
-    chunk_duration_ms: int = WEBRTC_MODE_CHUNK_DURATION_MS
+    input_chunk_duration_ms: int = WEBRTC_MODE_CHUNK_DURATION_MS
 
     def model_dump(self, *args, **kwargs) -> dict[str, Any]:
         return {
@@ -251,7 +251,7 @@ class WsMode(IoMode):
     input_sample_rate: int = WS_MODE_INPUT_SAMPLE_RATE
     output_sample_rate: int = WS_MODE_OUTPUT_SAMPLE_RATE
     num_channels: int = WS_MODE_CHANNELS
-    chunk_duration_ms: int = WS_MODE_CHUNK_DURATION_MS
+    input_chunk_duration_ms: int = WS_MODE_CHUNK_DURATION_MS
 
     def model_dump(self, *args, **kwargs) -> dict[str, Any]:
         return {

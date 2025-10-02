@@ -129,7 +129,7 @@ def analyze_latency(messages: List[Dict[str, Any]]) -> Dict[str, Any]:
     sync_reference_segment_start = None  # segment.start of the reference transcription
     sync_reference_chunk_idx = None  # Index of the reference chunk
 
-    # Extract chunk_duration_ms from first audio message
+    # Extract dur_ms from first audio message
     chunk_duration_ms = None
 
     for msg in messages:
@@ -137,7 +137,7 @@ def analyze_latency(messages: List[Dict[str, Any]]) -> Dict[str, Any]:
         if msg.get("msg", {}).get("message_type") == "__$bench_audio_frame":
             # Extract chunk duration from first audio message
             if chunk_duration_ms is None:
-                chunk_duration_ms = msg.get("chunk_duration_ms", 100.0)
+                chunk_duration_ms = msg.get("dur_ms", 100.0)
                 if chunk_duration_ms:
                     chunk_duration_ms = float(chunk_duration_ms)
 
@@ -168,7 +168,7 @@ def analyze_latency(messages: List[Dict[str, Any]]) -> Dict[str, Any]:
     if not in_audio_chunks:
         raise ValueError("No input audio chunks found in messages")
 
-    # Use detected chunk_duration_ms or default
+    # Use detected dur_ms or default
     if chunk_duration_ms is None:
         chunk_duration_ms = 100.0  # Default fallback
 
@@ -406,7 +406,7 @@ def analyze_latency(messages: List[Dict[str, Any]]) -> Dict[str, Any]:
             "chunks_with_sound": chunks_with_sound,
             "silent_chunks": silent_chunks,
             "silent_percentage": (silent_chunks / total_in_chunks * 100) if total_in_chunks > 0 else 0,
-            "chunk_duration_ms": chunk_duration_ms,
+            "dur_ms": chunk_duration_ms,
             "rms_threshold_db": RMS_THRESHOLD_DB,
             "total_duration": total_duration,
             "chunks_with_partial": len(measurements_by_type["partial_transcription"]),

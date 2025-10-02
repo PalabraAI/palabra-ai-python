@@ -184,7 +184,7 @@ class FileReader(Reader):
             return  # Already enough data
 
         # Read a few frames to fill buffer
-        chunk_bytes = self.cfg.mode.chunk_bytes
+        chunk_bytes = self.cfg.mode.input_chunk_bytes
         frames_to_read = max(1, (needed_size - current_size) // chunk_bytes + 1)
 
         for _ in range(
