@@ -17,9 +17,11 @@ from typing import Self
 from typing import TypeVar
 
 import numpy as np
+from prettytable import PrettyTable
 
 from palabra_ai import Config, PalabraAI, SourceLang, TargetLang
 from palabra_ai.audio import save_wav
+from palabra_ai.config import WsMode
 from palabra_ai.constant import BYTES_PER_SAMPLE
 from palabra_ai.enum import Kind
 from palabra_ai.lang import Language
@@ -29,9 +31,25 @@ from palabra_ai.task.adapter.dummy import DummyWriter
 from palabra_ai.task.adapter.file import FileReader
 from palabra_ai.util.orjson import to_json
 
+INPUT_CHUNK_DURATION_S = 0.1 # 100ms
 FOCUSED = re.compile(r".+(_part_0)?$") # without part_1+ suffix
 
 T = TypeVar("T")
+
+def calculate_stats(values: list[float]) -> dict[str, float]:
+    """Calculate min, max, avg, p50, p90, p95 for a list of values"""
+    if not values:
+        return {}
+    sorted_vals = sorted(values)
+    n = len(sorted_vals)
+    return {
+        "min": sorted_vals[0],
+        "max": sorted_vals[-1],
+        "avg": sum(sorted_vals) / n,
+        "p50": sorted_vals[int(n * 0.5)],
+        "p90": sorted_vals[int(n * 0.9)],
+        "p95": sorted_vals[int(n * 0.95)],
+    }
 
 @dataclass
 class Sentence:
@@ -85,10 +103,11 @@ class AudioStat:
 
 
 @dataclass
-class Reg:
+class Report:
     sentences: dict[str, Sentence] = field(default_factory=dict) # transcription_id -> Sentence
     in_audio_stat: AudioStat | None = None
     out_audio_stat: AudioStat | None = None
+    metrics_summary: dict[str, dict[str, float]] = field(default_factory=dict) # metric_name -> {min, max, avg, p50, p90, p95}
 
     @staticmethod
     def predecessor(d: dict[float, T], x: float) -> tuple[float, T] | None:
@@ -183,9 +202,135 @@ class Reg:
                 metric_tts_playback=(playback_tts_ts - local_start_ts) if playback_tts_ts else None,
             )
 
+        # Calculate metrics summary
+        metrics_summary = {}
+        for metric_name in ["metric_partial", "metric_validated", "metric_translated", "metric_tts_api", "metric_tts_playback"]:
+            values = [getattr(s, metric_name) for s in sentences.values() if getattr(s, metric_name) is not None]
+            if values:
+                metrics_summary[metric_name] = calculate_stats(values)
 
-        return cls(sentences=sentences, in_audio_stat=in_audio_stat, out_audio_stat=out_audio_stat), in_audio_canvas, out_audio_canvas
+        return cls(sentences=sentences, in_audio_stat=in_audio_stat, out_audio_stat=out_audio_stat, metrics_summary=metrics_summary), in_audio_canvas, out_audio_canvas
 
+
+def create_histogram(values: list[float], bins: int = 20, width: int = 50) -> str:
+    """Create simple ASCII histogram"""
+    if not values:
+        return "No data"
+    min_val, max_val = min(values), max(values)
+    if min_val == max_val:
+        return f"All values: {min_val:.3f}s"
+
+    bin_width = (max_val - min_val) / bins
+    bin_counts = [0] * bins
+
+    for val in values:
+        bin_idx = min(int((val - min_val) / bin_width), bins - 1)
+        bin_counts[bin_idx] += 1
+
+    max_count = max(bin_counts)
+    lines = []
+    for i, count in enumerate(bin_counts):
+        bin_start = min_val + i * bin_width
+        bar_len = int((count / max_count) * width) if max_count > 0 else 0
+        bar = "█" * bar_len
+        lines.append(f"{bin_start:6.2f}s {bar} {count}")
+
+    return "\n".join(lines)
+
+def truncate_text(text: str, max_len: int = 25) -> str:
+    """Truncate text to max_len chars, showing remaining count"""
+    if len(text) <= max_len:
+        return text
+    remaining = len(text) - max_len
+    return f"{text[:max_len]}...(+{remaining})"
+
+def format_report(report: Report, io_data: IoData, source_lang: str, target_lang: str, in_file: str, out_file: str) -> str:
+    """Format report as text with tables and histogram"""
+    lines = []
+    lines.append("=" * 80)
+    lines.append("PALABRA AI BENCHMARK REPORT")
+    lines.append("=" * 80)
+    lines.append("")
+
+    # Mode and audio info
+    mode_name = "WebRTC" if io_data.mode == "webrtc" else "Websocket"
+    lines.append(f"Mode: {mode_name}")
+
+    # Input/Output info
+    in_dur = f"{report.in_audio_stat.length_s:.1f}s" if report.in_audio_stat else "?.?s"
+    out_dur = f"{report.out_audio_stat.length_s:.1f}s" if report.out_audio_stat else "?.?s"
+    lines.append(f"Input:  {in_file} ({source_lang})  [{in_dur}, {io_data.in_sr}hz, 16bit, PCM]")
+    lines.append(f"Output: {out_file} ({target_lang})           [{out_dur}, {io_data.out_sr}hz, 16bit, PCM]")
+    lines.append("")
+
+    # Metrics summary table
+    if report.metrics_summary:
+        lines.append("METRICS SUMMARY")
+        lines.append("-" * 80)
+        table = PrettyTable()
+        table.field_names = ["Metric", "Min", "Max", "Avg", "P50", "P90", "P95"]
+
+        metric_labels = {
+            "metric_partial": "Partial",
+            "metric_validated": "Validated",
+            "metric_translated": "Translated",
+            "metric_tts_api": "TTS API",
+            "metric_tts_playback": "TTS Playback"
+        }
+
+        for metric_name, stats in report.metrics_summary.items():
+            label = metric_labels.get(metric_name, metric_name)
+            table.add_row([
+                label,
+                f"{stats['min']:.3f}",
+                f"{stats['max']:.3f}",
+                f"{stats['avg']:.3f}",
+                f"{stats['p50']:.3f}",
+                f"{stats['p90']:.3f}",
+                f"{stats['p95']:.3f}"
+            ])
+
+        lines.append(str(table))
+        lines.append("")
+
+    # Sentences breakdown
+    if report.sentences:
+        lines.append("SENTENCES BREAKDOWN")
+        lines.append("-" * 80)
+        table = PrettyTable()
+        table.field_names = ["Start", "Validated", "Translated", "Part", "Valid", "Trans", "TTS API", "TTS Play"]
+        table.align["Validated"] = "l"
+        table.align["Translated"] = "l"
+
+        sorted_sentences = sorted(report.sentences.items(), key=lambda x: x[1].local_start_ts)
+        global_start = sorted_sentences[0][1].local_start_ts if sorted_sentences else 0
+
+        for tid, sentence in sorted_sentences:
+            start_time = sentence.local_start_ts - global_start
+            table.add_row([
+                f"{start_time:.1f}s",
+                truncate_text(sentence.validated_text),
+                truncate_text(sentence.translated_text),
+                f"{sentence.metric_partial:.2f}" if sentence.metric_partial else "-",
+                f"{sentence.metric_validated:.2f}" if sentence.metric_validated else "-",
+                f"{sentence.metric_translated:.2f}" if sentence.metric_translated else "-",
+                f"{sentence.metric_tts_api:.2f}" if sentence.metric_tts_api else "-",
+                f"{sentence.metric_tts_playback:.2f}" if sentence.metric_tts_playback else "-"
+            ])
+
+        lines.append(str(table))
+        lines.append("")
+
+    # Histogram for TTS playback
+    if "metric_tts_playback" in report.metrics_summary:
+        lines.append("TTS PLAYBACK HISTOGRAM")
+        lines.append("-" * 80)
+        playback_values = [s.metric_tts_playback for s in report.sentences.values() if s.metric_tts_playback is not None]
+        lines.append(create_histogram(playback_values))
+        lines.append("")
+
+    lines.append("=" * 80)
+    return "\n".join(lines)
 
 def main():
     parser = argparse.ArgumentParser(description="Palabra AI Benchmark - Data Collection")
@@ -194,88 +339,84 @@ def main():
     parser.add_argument("target_lang", nargs="?", help="Target language")
     parser.add_argument("--config", type=Path, help="JSON config file")
     parser.add_argument("--output-dir", type=Path, default=Path("1Oct25"), help="Output directory")
+    parser.add_argument("--debug", action="store_true", help="Save all debug files (raw, io_data, audio, report.txt)")
 
     args = parser.parse_args()
 
     audio_path = Path(args.audio)
     if not audio_path.exists():
         raise FileNotFoundError(f"Audio file not found: {args.audio}")
+    mode = WsMode(input_chunk_duration_ms=INPUT_CHUNK_DURATION_S*1000)
 
     if args.config:
-        config = Config.from_json(args.config.read_text())
-        source_lang = config.source.lang.code
-        target_lang = config.targets[0].lang.code
+        import json
+        config_json = json.loads(args.config.read_text())
+        source_lang = config_json["pipeline"]["transcription"]["source_language"]
+        target_lang = config_json["pipeline"]["translations"][0]["target_language"]
     else:
         if not args.source_lang or not args.target_lang:
             parser.error("source_lang and target_lang required without --config")
         source_lang = args.source_lang
         target_lang = args.target_lang
 
-        config = Config(
-            source=SourceLang(Language.get_or_create(source_lang), FileReader(str(audio_path))),
-            targets=[TargetLang(Language.get_or_create(target_lang), DummyWriter())],
-            benchmark=True
-        )
-
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_dir = args.output_dir
-    output_dir.mkdir(parents=True, exist_ok=True)
-    in_wav_path = output_dir / f"{timestamp}_bench_in_{source_lang}.wav"
-    out_wav_path = output_dir / f"{timestamp}_bench_out_{target_lang}.wav"
-    raw_result_path = output_dir  / f"{timestamp}_bench_raw_result.json"
-    io_data_path = output_dir / f"{timestamp}_bench_io_data.json"
-    reg_path = output_dir / f"{timestamp}_bench_reg.json"
+    config = Config(
+        source=SourceLang(Language.get_or_create(source_lang), FileReader(str(audio_path))),
+        targets=[TargetLang(Language.get_or_create(target_lang), DummyWriter())],
+        benchmark=True,
+        mode=mode,
+    )
 
     print(f"Running benchmark: {source_lang} → {target_lang}")
-    print(f"Output: {output_dir}")
+    if args.debug:
+        print(f"Debug mode: files will be saved to {args.output_dir}")
     print("-" * 60)
 
     palabra = PalabraAI()
-    result = palabra.run(config, no_raise=True, )
+    result = palabra.run(config, no_raise=True)
 
     if not result.ok or not result.io_data:
         raise RuntimeError(f"Benchmark failed: {result.exc}")
 
-    print("Collecting data...")
+    # Parse report
+    report, in_audio_canvas, out_audio_canvas = Report.parse(result.io_data)
 
-    # Save raw result
-    raw_result_path.write_bytes(
-        to_json(result.model_dump(), True)
-    )
-    print(f"✓ Saved raw result")
+    # Create file paths (used in report and optionally saved with --debug)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    in_wav_name = f"{timestamp}_bench_in_{source_lang}.wav"
+    out_wav_name = f"{timestamp}_bench_out_{target_lang}.wav"
 
-    # Save io_data summary
-    io_data_path.write_bytes(
-        to_json(result.io_data, True)
-    )
-    print(f"✓ Saved io_data summary")
-
-    # Save analyzed registry
-    reg, in_audio_canvas, out_audio_canvas = Reg.parse(result.io_data)
-    reg_path.write_bytes(
-        to_json(reg, True)
+    # Generate text report
+    report_text = format_report(
+        report,
+        result.io_data,
+        source_lang,
+        target_lang,
+        str(audio_path),
+        out_wav_name
     )
 
+    if args.debug:
+        # Debug mode: save all files
+        output_dir = args.output_dir
+        output_dir.mkdir(parents=True, exist_ok=True)
 
-    save_wav(in_audio_canvas,in_wav_path,result.io_data.in_sr,
-        result.io_data.channels
-    )
-    print(f"✓ Saved input audio")
+        raw_result_path = output_dir / f"{timestamp}_bench_raw_result.json"
+        io_data_path = output_dir / f"{timestamp}_bench_io_data.json"
+        report_path = output_dir / f"{timestamp}_bench_report.json"
+        report_txt_path = output_dir / f"{timestamp}_bench_report.txt"
+        in_wav_path = output_dir / in_wav_name
+        out_wav_path = output_dir / out_wav_name
 
-    save_wav(
-        out_audio_canvas,
-        out_wav_path,
-        result.io_data.out_sr,
-        result.io_data.channels
-    )
-    print(f"✓ Saved output audio")
+        raw_result_path.write_bytes(to_json(result.model_dump(), True))
+        io_data_path.write_bytes(to_json(result.io_data, True))
+        report_path.write_bytes(to_json(report, True))
+        report_txt_path.write_text(report_text)
 
-    print(f"\n✅ Done! Files in {output_dir}/")
-    print(f"   - benchmark_raw_result_{timestamp}.json")
-    print(f"   - benchmark_io_data_{timestamp}.json")
-    print(f"   - benchmark_reg_{timestamp}.json")
-    print(f"   - benchmark_in_{source_lang}_{timestamp}.wav")
-    print(f"   - benchmark_out_{target_lang}_{timestamp}.wav")
+        save_wav(in_audio_canvas, in_wav_path, result.io_data.in_sr, result.io_data.channels)
+        save_wav(out_audio_canvas, out_wav_path, result.io_data.out_sr, result.io_data.channels)
+
+    # Always print report to console
+    print("\n" + report_text)
 
 
 if __name__ == "__main__":
