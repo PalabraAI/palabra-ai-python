@@ -75,6 +75,7 @@ class FileReader(Reader):
                 target_rate=self.cfg.mode.input_sample_rate,
                 normalize=normalize,
                 progress_callback=progress_callback,
+                eof_silence_duration_s=self.cfg.mode.eof_silence_duration_s,
             )
             # Simple mode uses config as-is
             debug(
@@ -184,7 +185,7 @@ class FileReader(Reader):
             return  # Already enough data
 
         # Read a few frames to fill buffer
-        chunk_bytes = self.cfg.mode.chunk_bytes
+        chunk_bytes = self.cfg.mode.input_chunk_bytes
         frames_to_read = max(1, (needed_size - current_size) // chunk_bytes + 1)
 
         for _ in range(

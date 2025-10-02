@@ -1,0 +1,64 @@
+{
+  "input_stream": {
+    "content_type": "audio",
+    "source": {
+      "type": "ws",
+      "format": "pcm_s16le",
+      "sample_rate": 16000,
+      "channels": 1
+    }
+  },
+  "output_stream": {
+    "content_type": "audio",
+    "target": {
+      "type": "ws",
+      "format": "pcm_s16le",
+      "sample_rate": 24000,
+      "channels": 1
+    }
+  },
+  "pipeline": {
+    "transcription": {
+      "source_language": "en",
+      "detectable_languages": [],
+      "segment_confirmation_silence_threshold": 0.7,
+      "sentence_splitter": {
+        "enabled": true
+      },
+      "verification": {
+        "auto_transcription_correction": false,
+        "transcription_correction_style": null
+      }
+    },
+    "translations": [
+      {
+        "target_language": "es",
+        "translate_partial_transcriptions": false,
+        "speech_generation": {
+          "voice_cloning": false,
+          "voice_id": "default_low",
+          "voice_timbre_detection": {
+            "enabled": false,
+            "high_timbre_voices": ["default_high"],
+            "low_timbre_voices": ["default_low"]
+          }
+        }
+      }
+    ],
+    "translation_queue_configs": {
+      "global": {
+        "desired_queue_level_ms": 5000,
+        "max_queue_level_ms": 20000,
+        "auto_tempo": false,
+        "min_tempo": 1.2,
+        "max_tempo": 1.6
+      }
+    },
+    "allowed_message_types": [
+      "translated_transcription",
+      "partial_transcription",
+      "partial_translated_transcription",
+      "validated_transcription"
+    ]
+  }
+}

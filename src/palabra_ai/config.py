@@ -21,6 +21,7 @@ from palabra_ai.constant import (
     CONTEXT_SIZE_DEFAULT,
     DESIRED_QUEUE_LEVEL_MS_DEFAULT,
     ENERGY_VARIANCE_FACTOR_DEFAULT,
+    EOF_SILENCE_DURATION_S,
     F0_VARIANCE_FACTOR_DEFAULT,
     FORCE_END_OF_SEGMENT_DEFAULT,
     MAX_ALIGNMENT_CER_DEFAULT,
@@ -136,27 +137,28 @@ class IoMode(BaseModel):
     input_sample_rate: int
     output_sample_rate: int
     num_channels: int
-    chunk_duration_ms: int
+    input_chunk_duration_ms: int
+    eof_silence_duration_s: float = EOF_SILENCE_DURATION_S
 
     @cached_property
-    def samples_per_channel(self) -> int:
-        return int(self.input_sample_rate * (self.chunk_duration_ms / 1000))
+    def input_samples_per_channel(self) -> int:
+        return int(self.input_sample_rate * (self.input_chunk_duration_ms / 1000))
 
     @cached_property
-    def bytes_per_channel(self) -> int:
-        return self.samples_per_channel * BYTES_PER_SAMPLE
+    def input_bytes_per_channel(self) -> int:
+        return self.input_samples_per_channel * BYTES_PER_SAMPLE
 
     @cached_property
-    def chunk_samples(self) -> int:
-        return self.samples_per_channel * self.num_channels
+    def input_chunk_samples(self) -> int:
+        return self.input_samples_per_channel * self.num_channels
 
     @cached_property
-    def chunk_bytes(self) -> int:
-        return self.bytes_per_channel * self.num_channels
+    def input_chunk_bytes(self) -> int:
+        return self.input_bytes_per_channel * self.num_channels
 
     @cached_property
-    def for_audio_frame(self) -> tuple[int, int, int]:
-        return self.input_sample_rate, self.num_channels, self.samples_per_channel
+    def for_input_audio_frame(self) -> tuple[int, int, int]:
+        return self.input_sample_rate, self.num_channels, self.input_samples_per_channel
 
     @property
     def mode_type(self) -> str:
@@ -210,7 +212,7 @@ class IoMode(BaseModel):
             return WsMode(
                 input_sample_rate=source.get("sample_rate", WS_MODE_INPUT_SAMPLE_RATE),
                 num_channels=source.get("channels", WS_MODE_CHANNELS),
-                # chunk_duration_ms will use default WS_MODE_CHUNK_DURATION_MS
+                # dur_ms will use default WS_MODE_CHUNK_DURATION_MS
             )
         else:
             raise ConfigurationError(
@@ -219,7 +221,7 @@ class IoMode(BaseModel):
             )
 
     def __str__(self) -> str:
-        return f"[{self.name}: {self.input_sample_rate}Hz, {self.num_channels}ch, {self.chunk_duration_ms}ms]"
+        return f"[{self.name}: {self.input_sample_rate}Hz, {self.num_channels}ch, {self.input_chunk_duration_ms}ms]"
 
 
 class WebrtcMode(IoMode):
@@ -227,7 +229,7 @@ class WebrtcMode(IoMode):
     input_sample_rate: int = WEBRTC_MODE_INPUT_SAMPLE_RATE
     output_sample_rate: int = WEBRTC_MODE_OUTPUT_SAMPLE_RATE
     num_channels: int = WEBRTC_MODE_CHANNELS
-    chunk_duration_ms: int = WEBRTC_MODE_CHUNK_DURATION_MS
+    input_chunk_duration_ms: int = WEBRTC_MODE_CHUNK_DURATION_MS
 
     def model_dump(self, *args, **kwargs) -> dict[str, Any]:
         return {
@@ -251,7 +253,7 @@ class WsMode(IoMode):
     input_sample_rate: int = WS_MODE_INPUT_SAMPLE_RATE
     output_sample_rate: int = WS_MODE_OUTPUT_SAMPLE_RATE
     num_channels: int = WS_MODE_CHANNELS
-    chunk_duration_ms: int = WS_MODE_CHUNK_DURATION_MS
+    input_chunk_duration_ms: int = WS_MODE_CHUNK_DURATION_MS
 
     def model_dump(self, *args, **kwargs) -> dict[str, Any]:
         return {
@@ -566,10 +568,12 @@ class Config(BaseModel):
 
         return data
 
-    def model_dump(self, by_alias=True, exclude_none=False, **kwargs) -> dict[str, Any]:
+    def model_dump(
+        self, by_alias=True, exclude_unset=False, **kwargs
+    ) -> dict[str, Any]:
         # Get base dump
         data = super().model_dump(
-            by_alias=by_alias, exclude_none=exclude_none, **kwargs
+            by_alias=by_alias, exclude_unset=exclude_unset, **kwargs
         )
 
         # Extract source and targets
@@ -577,30 +581,38 @@ class Config(BaseModel):
         targets = data.pop("targets")
 
         # Build transcription with source_language
-        transcription = source["transcription"].copy()
+        transcription = (
+            source.get("transcription", {}).copy() if "transcription" in source else {}
+        )
         transcription["source_language"] = source["lang"]
 
         # Build translations with target_language
         translations = []
         for target in targets:
-            translation = target["translation"].copy()
+            translation = (
+                target.get("translation", {}).copy() if "translation" in target else {}
+            )
             translation["target_language"] = target["lang"]
             translations.append(translation)
 
-        # Build pipeline structure
+        # Build pipeline structure - only include fields that were explicitly set
         pipeline = {
-            "preprocessing": data.pop("preprocessing"),
             "transcription": transcription,
             "translations": translations,
-            "translation_queue_configs": data.pop("translation_queue_configs"),
-            "allowed_message_types": data.pop("allowed_message_types"),
         }
+        if "preprocessing" in data:
+            pipeline["preprocessing"] = data.pop("preprocessing")
+        if "translation_queue_configs" in data:
+            pipeline["translation_queue_configs"] = data.pop(
+                "translation_queue_configs"
+            )
+        if "allowed_message_types" in data:
+            pipeline["allowed_message_types"] = data.pop("allowed_message_types")
 
         # data.pop("input_stream", None)
         # data.pop("output_stream", None)
 
         result = {**data, **{"pipeline": pipeline}, **self.mode.model_dump()}
-
         return result
 
     def to_dict(self) -> dict[str, Any]:

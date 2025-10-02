@@ -29,12 +29,17 @@ class Dbg:
     kind: Kind | None
     ch: Channel | None
     dir: Direction | None
+    dawn_ts: float | None = field(default=None)  # ts from global start
     perf_ts: float = field(default_factory=get_perf_ts)
     utc_ts: float = field(default_factory=get_utc_ts)
     idx: int | None = field(default=None)
     num: int | None = field(default=None)
-    chunk_duration_ms: float | None = field(default=None)
+    dur_s: float | None = field(default=None)
     rms_db: float | None = field(default=None)
+
+    def calc_dawn_ts(self, global_start_ts: float | None):
+        if global_start_ts is not None:
+            self.dawn_ts = self.perf_ts - global_start_ts
 
     @classmethod
     def empty(cls):
@@ -52,6 +57,42 @@ class Dbg:
     @classmethod
     def now_perf_ts(cls):
         return get_perf_ts()
+
+
+@dataclass
+class IoEvent:
+    head: "Dbg"
+    body: str | bytes | dict | list
+    tid: str | None = field(default=None)
+    mtype: str | None = field(default=None)
+
+    def __post_init__(self):
+        if isinstance(self.body, bytes):
+            self.body = self.body.decode("utf-8")
+        self.convert_raw_to_body()
+
+        self.mtype = self.body.get("message_type")
+        if self.mtype == "output_audio_data":
+            self.tid = self.body.get("data", {}).get("transcription_id")
+        elif self.mtype in {
+            "partial_transcription",
+            "validated_transcription",
+            "translated_transcription",
+            "partial_translated_transcription",
+        }:
+            self.tid = (
+                self.body.get("data", {})
+                .get("transcription", {})
+                .get("transcription_id")
+            )
+
+    def convert_raw_to_body(self):
+        self.body = from_json(self.body) if self.body else None
+        if "data" in self.body and isinstance(self.body["data"], str):
+            try:
+                self.body["data"] = from_json(self.body["data"])
+            except orjson.JSONDecodeError:
+                debug("Failed to decode nested JSON in 'data' field")
 
 
 @dataclass

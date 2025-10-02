@@ -1,5 +1,8 @@
 import pytest
 import time
+import json
+import copy
+from pathlib import Path
 from dataclasses import dataclass
 from palabra_ai.message import (
     Message, KnownRaw, KnownRawType, Dbg,
@@ -8,8 +11,10 @@ from palabra_ai.message import (
     TranscriptionMessage, TranscriptionSegment, CurrentTaskMessage,
     Channel, Direction
 )
-from palabra_ai.lang import Language
+from palabra_ai.lang import Language, EN, ES
 from palabra_ai.exc import ApiError, ApiValidationError, TaskNotFoundError
+from palabra_ai.config import Config, SourceLang, TargetLang
+from palabra_ai.util.orjson import to_json
 
 
 def test_dbg_creation():
@@ -370,3 +375,108 @@ def test_message_from_detected_exception():
     )
     msg = Message.from_detected(kr)
     assert isinstance(msg, UnknownMessage)
+
+
+def assert_dicts_identical(actual: dict, expected: dict, path: str = "root"):
+    """Recursively check that two dicts are absolutely identical"""
+    missing_keys = set(expected.keys()) - set(actual.keys())
+    assert not missing_keys, f"Missing keys in actual at {path}: {missing_keys}"
+
+    extra_keys = set(actual.keys()) - set(expected.keys())
+    assert not extra_keys, f"Extra keys in actual at {path}: {extra_keys}"
+
+    for key in expected.keys():
+        expected_value = expected[key]
+        actual_value = actual[key]
+        current_path = f"{path}.{key}"
+
+        assert type(actual_value) == type(expected_value), \
+            f"Type mismatch at {current_path}: {type(actual_value).__name__} != {type(expected_value).__name__}"
+
+        if isinstance(expected_value, dict):
+            assert_dicts_identical(actual_value, expected_value, current_path)
+        elif isinstance(expected_value, list):
+            assert len(actual_value) == len(expected_value), \
+                f"List length mismatch at {current_path}: {len(actual_value)} != {len(expected_value)}"
+            for i, (act_item, exp_item) in enumerate(zip(actual_value, expected_value)):
+                item_path = f"{current_path}[{i}]"
+                if isinstance(exp_item, dict):
+                    assert_dicts_identical(act_item, exp_item, item_path)
+                elif isinstance(exp_item, list):
+                    assert act_item == exp_item, f"List item mismatch at {item_path}"
+                else:
+                    assert act_item == exp_item, f"Value mismatch at {item_path}: {act_item} != {exp_item}"
+        else:
+            assert actual_value == expected_value, \
+                f"Value mismatch at {current_path}: {actual_value!r} != {expected_value!r}"
+
+
+def test_set_task_message_from_config_basic():
+    """SetTaskMessage.from_config() should contain Config.to_dict()"""
+    config = Config(source=SourceLang(lang=EN), targets=[TargetLang(lang=ES)])
+
+    msg = SetTaskMessage.from_config(config)
+
+    assert msg.type_ == Message.Type.SET_TASK
+    assert "pipeline" in msg.data
+    assert msg.data["pipeline"]["transcription"]["source_language"] == "en"
+    assert msg.data["pipeline"]["translations"][0]["target_language"] == "es"
+
+
+def test_set_task_message_preserves_modified_fields():
+    """SetTaskMessage must contain ALL modified fields (set + unset)"""
+    minimal_json = {
+        "input_stream": {"content_type": "audio", "source": {"type": "ws", "sample_rate": 16000, "channels": 1}},
+        "output_stream": {"content_type": "audio", "target": {"type": "ws", "sample_rate": 24000, "channels": 1}},
+        "pipeline": {
+            "transcription": {
+                "source_language": "en",
+                "segment_confirmation_silence_threshold": 0.7,
+            },
+            "translations": [{
+                "target_language": "es",
+                "translate_partial_transcriptions": False,
+            }]
+        }
+    }
+
+    config = Config.from_json(copy.deepcopy(minimal_json))
+
+    # Modify SET field (was explicitly set)
+    config.source.transcription.segment_confirmation_silence_threshold = 0.8
+
+    # Modify UNSET field (was default False)
+    config.source.transcription.only_confirm_by_silence = True
+
+    msg = SetTaskMessage.from_config(config)
+
+    # CHECK that BOTH changes are in msg.data
+    assert msg.data["pipeline"]["transcription"]["segment_confirmation_silence_threshold"] == 0.8, \
+        "Modified set field was not preserved in SetTaskMessage.data"
+    assert msg.data["pipeline"]["transcription"]["only_confirm_by_silence"] == True, \
+        "Modified unset field was not preserved in SetTaskMessage.data"
+
+
+def test_set_task_message_roundtrip_with_benchmark_config():
+    """SetTaskMessage with benchmark config should preserve all fields on roundtrip"""
+    fixture_path = Path(__file__).parent / "fixtures" / "benchmark_config.json"
+    original_json = json.loads(fixture_path.read_text())
+
+    config = Config.from_json(copy.deepcopy(original_json))
+
+    # Modify some fields
+    config.translation_queue_configs.global_.auto_tempo = False
+    config.translation_queue_configs.global_.min_tempo = 1.2
+
+    msg = SetTaskMessage.from_config(config)
+
+    # Verify modifications present
+    assert msg.data["pipeline"]["translation_queue_configs"]["global"]["auto_tempo"] == False
+    assert msg.data["pipeline"]["translation_queue_configs"]["global"]["min_tempo"] == 1.2
+
+    # Roundtrip: recreate Config from message.data
+    config2 = Config.from_json(copy.deepcopy(msg.data))
+    msg2 = SetTaskMessage.from_config(config2)
+
+    # Both messages should have identical data
+    assert_dicts_identical(msg2.data, msg.data)

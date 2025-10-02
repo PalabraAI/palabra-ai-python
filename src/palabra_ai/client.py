@@ -156,6 +156,7 @@ class PalabraAI:
                     ok=ok,
                     exc=exc if not ok else None,
                     log_data=log_data,
+                    io_data=manager.io.io_data if manager.io else None,
                     eos=eos_received,
                 )
             elif ok:
@@ -163,6 +164,7 @@ class PalabraAI:
                     ok=True,
                     exc=None,
                     log_data=log_data,
+                    io_data=manager.io.io_data if manager.io else None,
                     eos=eos_received,
                 )
             else:

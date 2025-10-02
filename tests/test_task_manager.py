@@ -135,7 +135,7 @@ class TestManager:
             input_sample_rate=16000,
             output_sample_rate=16000,
             num_channels=1,
-            chunk_duration_ms=100
+            input_chunk_duration_ms=100
         )
         with pytest.raises(ConfigurationError) as exc_info:
             Manager(cfg=self.mock_config, credentials=self.mock_credentials)

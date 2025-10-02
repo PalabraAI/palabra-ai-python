@@ -22,7 +22,7 @@ def mock_config():
     config.mode.num_channels = 1
     config.mode.samples_per_channel = 160
     config.mode.chunk_duration_ms = 10
-    config.mode.for_audio_frame = (16000, 1, 160)
+    config.mode.for_input_audio_frame = (16000, 1, 160)
     config.benchmark = False
     return config
 
@@ -115,13 +115,13 @@ class TestWsIo:
             assert str(frame) in str(mock_debug.call_args[0][0])
 
     def test_new_frame(self, mock_config, mock_credentials, mock_reader, mock_writer):
-        """Test new_frame method"""
+        """Test new_input_frame method"""
         ws_io = WsIo(cfg=mock_config, credentials=mock_credentials, reader=mock_reader, writer=mock_writer)
 
         with patch('palabra_ai.audio.AudioFrame.create') as mock_create:
             mock_create.return_value = MagicMock(spec=AudioFrame)
 
-            frame = ws_io.new_frame()
+            frame = ws_io.new_input_frame()
 
             mock_create.assert_called_once_with(16000, 1, 160)
             assert frame == mock_create.return_value
@@ -177,16 +177,17 @@ class TestWsIo:
 
         with patch('palabra_ai.audio.AudioFrame.from_ws', return_value=None):
             with patch('palabra_ai.message.Message.decode', return_value=mock_msg):
-                with patch('palabra_ai.task.io.ws.debug'):
-                    with patch('palabra_ai.task.io.ws.trace'):
-                        try:
-                            await ws_io.ws_receiver()
-                        except EOFError:
-                            pass  # Expected when no more messages
+                with patch('palabra_ai.task.io.ws.IoEvent'):
+                    with patch('palabra_ai.task.io.ws.debug'):
+                        with patch('palabra_ai.task.io.ws.trace'):
+                            try:
+                                await ws_io.ws_receiver()
+                            except EOFError:
+                                pass  # Expected when no more messages
 
-                        # Check message was published
-                        ws_io.out_msg_foq.publish.assert_any_call(mock_msg)
-                        assert mock_msg._dbg is not None
+                            # Check message was published
+                            ws_io.out_msg_foq.publish.assert_any_call(mock_msg)
+                            assert mock_msg._dbg is not None
 
     @pytest.mark.asyncio
     async def test_ws_receiver_eos_message(self, mock_config, mock_credentials, mock_reader, mock_writer):
@@ -209,13 +210,14 @@ class TestWsIo:
 
         with patch('palabra_ai.audio.AudioFrame.from_ws', return_value=None):
             with patch('palabra_ai.message.Message.decode', return_value=mock_eos):
-                with patch('palabra_ai.task.io.ws.debug') as mock_debug:
-                    with patch('palabra_ai.task.io.ws.trace'):
-                        await ws_io.ws_receiver()
+                with patch('palabra_ai.task.io.ws.IoEvent'):
+                    with patch('palabra_ai.task.io.ws.debug') as mock_debug:
+                        with patch('palabra_ai.task.io.ws.trace'):
+                            await ws_io.ws_receiver()
 
-                        # Check EOF was set
-                        assert ws_io.eof.is_set()
-                        mock_debug.assert_any_call(f"EOF!!! End of stream received: {mock_eos}")
+                            # Check EOF was set
+                            assert ws_io.eof.is_set()
+                            mock_debug.assert_any_call(f"EOF!!! End of stream received: {mock_eos}")
 
     @pytest.mark.asyncio
     async def test_ws_receiver_benchmark_mode(self, mock_config, mock_credentials, mock_reader, mock_writer):
@@ -239,17 +241,18 @@ class TestWsIo:
         mock_frame = MagicMock(spec=AudioFrame)
 
         with patch('palabra_ai.audio.AudioFrame.from_ws', return_value=mock_frame):
-            with patch('palabra_ai.task.io.ws.debug'):
-                with patch('palabra_ai.task.io.ws.trace'):
-                    with patch('asyncio.to_thread', new_callable=AsyncMock, return_value=-20.0):
-                        try:
-                            await ws_io.ws_receiver()
-                        except EOFError:
-                            pass
+            with patch('palabra_ai.task.io.ws.IoEvent'):
+                with patch('palabra_ai.task.io.ws.debug'):
+                    with patch('palabra_ai.task.io.ws.trace'):
+                        with patch('asyncio.to_thread', new_callable=AsyncMock, return_value=-20.0):
+                            try:
+                                await ws_io.ws_receiver()
+                            except EOFError:
+                                pass
 
-                        # Check benchmark data was added
-                        assert mock_frame._dbg is not None
-                        ws_io.bench_audio_foq.publish.assert_called_once_with(mock_frame)
+                            # Check benchmark data was added
+                            assert mock_frame._dbg is not None
+                            ws_io.bench_audio_foq.publish.assert_called_once_with(mock_frame)
 
     @pytest.mark.asyncio
     async def test_boot(self, mock_config, mock_credentials, mock_reader, mock_writer):
@@ -343,14 +346,15 @@ class TestWsIo:
 
         with patch('palabra_ai.audio.AudioFrame.from_ws', return_value=None):
             with patch('palabra_ai.message.Message.decode', return_value=mock_eos):
-                with patch('palabra_ai.task.io.ws.debug'):
-                    with patch('palabra_ai.task.io.ws.trace'):
-                        await ws_io.ws_receiver()
+                with patch('palabra_ai.task.io.ws.IoEvent'):
+                    with patch('palabra_ai.task.io.ws.debug'):
+                        with patch('palabra_ai.task.io.ws.trace'):
+                            await ws_io.ws_receiver()
 
-                        # Check eos_received was set to True
-                        assert ws_io.eos_received is True
-                        # Check EOF was also set
-                        assert ws_io.eof.is_set()
+                            # Check eos_received was set to True
+                            assert ws_io.eos_received is True
+                            # Check EOF was also set
+                            assert ws_io.eof.is_set()
 
     @pytest.mark.asyncio
     async def test_ws_receiver_eof_exception_sets_flag(self, mock_config, mock_credentials, mock_reader, mock_writer):

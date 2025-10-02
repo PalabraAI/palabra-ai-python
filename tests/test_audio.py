@@ -30,7 +30,7 @@ def test_audio_frame_creation_with_bytes():
     assert np.array_equal(frame.data, data_array)
 
 def test_audio_frame_samples_per_channel_auto():
-    """Test AudioFrame auto-calculates samples_per_channel when None"""
+    """Test AudioFrame auto-calculates input_samples_per_channel when None"""
     data = np.array([1, 2, 3, 4, 5, 6, 7, 8], dtype=np.int16)
 
     # With 2 channels, should get 4 samples per channel
@@ -160,7 +160,7 @@ def test_audio_frame_from_ws_valid():
         }
     })
 
-    frame = AudioFrame.from_ws(ws_msg, 16000, 1, 4)
+    frame = AudioFrame.from_ws(ws_msg, 16000, 1)
 
     assert frame is not None
     assert frame.sample_rate == 16000
@@ -185,7 +185,7 @@ def test_audio_frame_from_ws_with_perf_ts():
     })
 
     custom_perf_ts = 12345.678
-    frame = AudioFrame.from_ws(ws_msg, 16000, 1, 4, perf_ts=custom_perf_ts)
+    frame = AudioFrame.from_ws(ws_msg, 16000, 1, perf_ts=custom_perf_ts)
 
     assert frame is not None
     assert frame.perf_ts == custom_perf_ts
@@ -206,7 +206,7 @@ def test_audio_frame_from_ws_string_data():
         }).decode()
     })
 
-    frame = AudioFrame.from_ws(ws_msg, 16000, 1, 2)
+    frame = AudioFrame.from_ws(ws_msg, 16000, 1)
 
     assert frame is not None
     assert np.array_equal(frame.data, np.array([1, 2], dtype=np.int16))
@@ -218,22 +218,22 @@ def test_audio_frame_from_ws_invalid_type():
         "data": {"data": "test"}
     })
 
-    frame = AudioFrame.from_ws(ws_msg, 16000, 1, 4)
+    frame = AudioFrame.from_ws(ws_msg, 16000, 1)
     assert frame is None
 
 def test_audio_frame_from_ws_not_json():
     """Test from_ws with non-JSON input"""
-    frame = AudioFrame.from_ws(123, 16000, 1, 4)
+    frame = AudioFrame.from_ws(123, 16000, 1)
     assert frame is None
 
 def test_audio_frame_from_ws_str_without_type():
     """Test from_ws with string not containing output_audio_data"""
-    frame = AudioFrame.from_ws("some random string", 16000, 1, 4)
+    frame = AudioFrame.from_ws("some random string", 16000, 1)
     assert frame is None
 
 def test_audio_frame_from_ws_bytes_without_type():
     """Test from_ws with bytes not containing output_audio_data"""
-    frame = AudioFrame.from_ws(b"some random bytes", 16000, 1, 4)
+    frame = AudioFrame.from_ws(b"some random bytes", 16000, 1)
     assert frame is None
 
 def test_audio_frame_from_ws_missing_data():
@@ -242,7 +242,7 @@ def test_audio_frame_from_ws_missing_data():
         "message_type": "output_audio_data"
     })
 
-    frame = AudioFrame.from_ws(ws_msg, 16000, 1, 4)
+    frame = AudioFrame.from_ws(ws_msg, 16000, 1)
     assert frame is None
 
 def test_audio_frame_from_ws_missing_inner_data():
@@ -252,7 +252,7 @@ def test_audio_frame_from_ws_missing_inner_data():
         "data": {}
     })
 
-    frame = AudioFrame.from_ws(ws_msg, 16000, 1, 4)
+    frame = AudioFrame.from_ws(ws_msg, 16000, 1)
     assert frame is None
 
 def test_audio_frame_from_ws_invalid_base64():
@@ -263,7 +263,7 @@ def test_audio_frame_from_ws_invalid_base64():
     })
 
     with patch('palabra_ai.audio.error') as mock_error:
-        frame = AudioFrame.from_ws(ws_msg, 16000, 1, 4)
+        frame = AudioFrame.from_ws(ws_msg, 16000, 1)
         assert frame is None
         mock_error.assert_called_once()
 
