@@ -932,3 +932,42 @@ def test_config_null_values_preserved():
 
     # Structural identity
     assert_dicts_identical(dump2, dump1)
+
+
+def test_config_to_dict_includes_all_modifications():
+    """Config.to_dict() must include ALL modifications (set and unset fields)"""
+    from palabra_ai.util.orjson import to_json
+
+    config = Config(source=SourceLang(lang=EN), targets=[TargetLang(lang=ES)])
+
+    # Modify fields at various levels
+    config.preprocessing.vad_threshold = 0.6
+    config.preprocessing.auto_tempo = True
+    config.source.transcription.segment_confirmation_silence_threshold = 0.85
+    config.source.transcription.only_confirm_by_silence = True
+    config.targets[0].translation.translate_partial_transcriptions = True
+    config.translation_queue_configs.global_.desired_queue_level_ms = 8000
+
+    # Get dict (to_dict() calls model_dump() without exclude_unset)
+    data = config.to_dict()
+
+    # Should include ALL modifications (both set and unset fields)
+    assert data["pipeline"]["preprocessing"]["vad_threshold"] == 0.6
+    assert data["pipeline"]["preprocessing"]["auto_tempo"] == True
+    assert data["pipeline"]["transcription"]["segment_confirmation_silence_threshold"] == 0.85
+    assert data["pipeline"]["transcription"]["only_confirm_by_silence"] == True
+    assert data["pipeline"]["translations"][0]["translate_partial_transcriptions"] == True
+    assert data["pipeline"]["translation_queue_configs"]["global"]["desired_queue_level_ms"] == 8000
+
+    # Verify it's JSON serializable
+    json_str = to_json(data).decode("utf-8")
+    assert len(json_str) > 0
+
+    # Roundtrip should preserve everything
+    config2 = Config.from_json(json.loads(json_str))
+    assert config2.preprocessing.vad_threshold == 0.6
+    assert config2.preprocessing.auto_tempo == True
+    assert config2.source.transcription.segment_confirmation_silence_threshold == 0.85
+    assert config2.source.transcription.only_confirm_by_silence == True
+    assert config2.targets[0].translation.translate_partial_transcriptions == True
+    assert config2.translation_queue_configs.global_.desired_queue_level_ms == 8000
