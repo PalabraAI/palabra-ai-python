@@ -16,8 +16,10 @@ from typing import Mapping
 from typing import Self
 from typing import TypeVar
 
+import av
 import numpy as np
 from prettytable import PrettyTable
+from tqdm import tqdm
 
 from palabra_ai import Config, PalabraAI, SourceLang, TargetLang
 from palabra_ai.audio import save_wav
@@ -359,8 +361,34 @@ def main():
         source_lang = args.source_lang
         target_lang = args.target_lang
 
+    # Get audio duration for progress tracking
+    with av.open(str(audio_path)) as container:
+        audio_duration = container.duration / 1000000  # convert microseconds to seconds
+
+    # Create reader
+    reader = FileReader(str(audio_path))
+
+    # Create progress bar with 7 second update interval
+    progress_bar = tqdm(
+        total=100,
+        desc=f"Processing {source_lang}→{target_lang}",
+        unit="%",
+        mininterval=7.0,
+        bar_format="{desc}: {percentage:3.0f}%|{bar}| [{elapsed}<{remaining}]"
+    )
+
+    last_timestamp = [0.0]  # mutable to allow updates in nested function
+
+    def on_transcription(msg):
+        if hasattr(msg, 'segments') and msg.segments:
+            end_ts = msg.segments[-1].end
+            if end_ts > last_timestamp[0]:
+                last_timestamp[0] = end_ts
+                progress_pct = min(100, (end_ts / audio_duration) * 100)
+                progress_bar.update(progress_pct - progress_bar.n)
+
     config = Config(
-        source=SourceLang(Language.get_or_create(source_lang), FileReader(str(audio_path))),
+        source=SourceLang(Language.get_or_create(source_lang), reader, on_transcription=on_transcription),
         targets=[TargetLang(Language.get_or_create(target_lang), DummyWriter())],
         benchmark=True,
         mode=mode,
@@ -373,6 +401,10 @@ def main():
 
     palabra = PalabraAI()
     result = palabra.run(config, no_raise=True)
+
+    # Complete and close progress bar
+    progress_bar.update(100 - progress_bar.n)
+    progress_bar.close()
 
     if not result.ok or not result.io_data:
         raise RuntimeError(f"Benchmark failed: {result.exc}")
