@@ -29,13 +29,13 @@ def test_serialize_language():
 
 def test_io_mode():
     """Test IoMode properties"""
-    mode = IoMode(name="test", input_sample_rate=48000, output_sample_rate=48000, num_channels=2, chunk_duration_ms=20)
+    mode = IoMode(name="test", input_sample_rate=48000, output_sample_rate=48000, num_channels=2, input_chunk_duration_ms=20)
 
-    assert mode.samples_per_channel == 960  # 48000 * 0.02
-    assert mode.bytes_per_channel == 1920  # 960 * 2
-    assert mode.chunk_samples == 1920  # 960 * 2
-    assert mode.chunk_bytes == 3840  # 1920 * 2
-    assert mode.for_audio_frame == (48000, 2, 960)
+    assert mode.input_samples_per_channel == 960  # 48000 * 0.02
+    assert mode.input_bytes_per_channel == 1920  # 960 * 2
+    assert mode.input_chunk_samples == 1920  # 960 * 2
+    assert mode.input_chunk_bytes == 3840  # 1920 * 2
+    assert mode.for_input_audio_frame == (48000, 2, 960)
     assert str(mode) == "[test: 48000Hz, 2ch, 20ms]"
 
 def test_webrtc_mode():
@@ -44,7 +44,7 @@ def test_webrtc_mode():
     assert mode.name == "webrtc"
     assert mode.input_sample_rate == 48000
     assert mode.num_channels == 1
-    assert mode.chunk_duration_ms == 320
+    assert mode.input_chunk_duration_ms == 320
 
     dump = mode.model_dump()
     assert dump["input_stream"]["source"]["type"] == "webrtc"
@@ -56,7 +56,7 @@ def test_ws_mode():
     assert mode.name == "ws"
     assert mode.input_sample_rate == 16000
     assert mode.num_channels == 1
-    assert mode.chunk_duration_ms == 320
+    assert mode.input_chunk_duration_ms == 320
 
     dump = mode.model_dump()
     assert dump["input_stream"]["source"]["type"] == "ws"
@@ -87,8 +87,8 @@ def test_io_mode_from_string():
     assert ws_mode.name == "ws"
 
     # Test with custom parameters
-    custom_mode = IoMode.from_string("ws", chunk_duration_ms=100)
-    assert custom_mode.chunk_duration_ms == 100
+    custom_mode = IoMode.from_string("ws", input_chunk_duration_ms=100)
+    assert custom_mode.input_chunk_duration_ms == 100
 
     # Test error for invalid mode
     with pytest.raises(ConfigurationError) as exc_info:
@@ -336,7 +336,7 @@ def test_config_round_trip_ws_mode():
     config1 = Config(
         source=SourceLang(lang=ES),
         targets=[TargetLang(lang=EN)],
-        mode=WsMode(input_sample_rate=16000, output_sample_rate=24000, num_channels=1, chunk_duration_ms=100)
+        mode=WsMode(input_sample_rate=16000, output_sample_rate=24000, num_channels=1, input_chunk_duration_ms=100)
     )
 
     # Serialize to JSON string
@@ -355,7 +355,7 @@ def test_config_round_trip_ws_mode():
     assert isinstance(config2.mode, WsMode)
     assert config2.mode.input_sample_rate == 16000
     assert config2.mode.num_channels == 1
-    assert config2.mode.chunk_duration_ms == 320  # Default for WsMode
+    assert config2.mode.input_chunk_duration_ms == 320  # Default for WsMode
 
     # Check languages preserved
     assert config2.source.lang.code == "es"
@@ -460,7 +460,7 @@ def test_config_from_api_json():
     assert isinstance(config.mode, WsMode)
     assert config.mode.input_sample_rate == 16000
     assert config.mode.num_channels == 1
-    assert config.mode.chunk_duration_ms == 320  # Default for WsMode
+    assert config.mode.input_chunk_duration_ms == 320  # Default for WsMode
 
     # Check languages
     assert config.source.lang.code == "es"

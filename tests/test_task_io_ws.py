@@ -115,13 +115,13 @@ class TestWsIo:
             assert str(frame) in str(mock_debug.call_args[0][0])
 
     def test_new_frame(self, mock_config, mock_credentials, mock_reader, mock_writer):
-        """Test new_frame method"""
+        """Test new_input_frame method"""
         ws_io = WsIo(cfg=mock_config, credentials=mock_credentials, reader=mock_reader, writer=mock_writer)
 
         with patch('palabra_ai.audio.AudioFrame.create') as mock_create:
             mock_create.return_value = MagicMock(spec=AudioFrame)
 
-            frame = ws_io.new_frame()
+            frame = ws_io.new_input_frame()
 
             mock_create.assert_called_once_with(16000, 1, 160)
             assert frame == mock_create.return_value

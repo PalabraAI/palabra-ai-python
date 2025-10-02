@@ -308,6 +308,7 @@ def simple_preprocess_audio_file(
     target_rate: int,
     normalize: bool = False,
     progress_callback=None,
+    eof_silence_duration_s: float = 0.0,
 ) -> tuple[bytes, dict]:
     """Simple preprocessing: load with librosa/PyAV, resample only if not 16kHz."""
     debug(f"Simple preprocessing audio file {file_path}...")
@@ -356,6 +357,17 @@ def simple_preprocess_audio_file(
 
     # Convert back to bytes
     audio_int16 = (audio_array * np.iinfo(np.int16).max).astype(np.int16)
+
+    # Add silence padding at the end
+    if eof_silence_duration_s > 0:
+        silence_samples = int(eof_silence_duration_s * final_rate)
+        audio_int16 = np.concatenate(
+            [audio_int16, np.zeros(silence_samples, dtype=np.int16)]
+        )
+        debug(
+            f"Added {eof_silence_duration_s}s ({silence_samples} samples) of silence padding"
+        )
+
     processed_data = audio_int16.tobytes()
 
     if progress_callback:

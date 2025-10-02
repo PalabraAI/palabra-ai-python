@@ -123,7 +123,7 @@ class TestIo:
             assert "Pushing message" in str(mock_debug.call_args)
 
     def test_new_frame(self, mock_config, mock_credentials, mock_reader, mock_writer):
-        """Test new_frame method"""
+        """Test new_input_frame method"""
         io = ConcreteIo(
             cfg=mock_config,
             credentials=mock_credentials,
@@ -131,7 +131,7 @@ class TestIo:
             writer=mock_writer
         )
 
-        frame = io.new_frame()
+        frame = io.new_input_frame()
 
         assert isinstance(frame, AudioFrame)
         assert frame.sample_rate == 8000
@@ -439,7 +439,7 @@ class TestIo:
         )
 
         # Ensure timing not initialized
-        assert io._global_start_ts is None
+        assert io.global_start_perf_ts is None
         assert io._frames_sent == 0
         assert io._total_duration_sent == 0.0
 
@@ -447,12 +447,12 @@ class TestIo:
         io._ensure_timing_initialized()
 
         # Check timing was initialized
-        assert io._global_start_ts is not None
-        assert isinstance(io._global_start_ts, float)
-        assert io._global_start_ts > 0
+        assert io.global_start_perf_ts is not None
+        assert isinstance(io.global_start_perf_ts, float)
+        assert io.global_start_perf_ts > 0
 
         # Check writer was updated
-        assert mock_writer.start_perf_ts == io._global_start_ts
+        assert mock_writer.start_perf_ts == io.global_start_perf_ts
 
     @pytest.mark.asyncio
     async def test_single_chunk_timing_precision(self, mock_config, mock_credentials, mock_reader, mock_writer):
@@ -468,7 +468,7 @@ class TestIo:
         chunk = b"test_chunk"
 
         # Initialize timing slightly in the past to force a wait
-        io._global_start_ts = time.perf_counter() - 0.001  # 1ms ago
+        io.global_start_perf_ts = time.perf_counter() - 0.001  # 1ms ago
         io._frames_sent = 0
         io._total_duration_sent = 0.0
 
@@ -499,7 +499,7 @@ class TestIo:
         )
 
         # Initialize timing from past to simulate being behind
-        io._global_start_ts = time.perf_counter() - 1.0  # 1 second ago
+        io.global_start_perf_ts = time.perf_counter() - 1.0  # 1 second ago
         io._frames_sent = 0
         io._total_duration_sent = 0.0  # Should have sent 50 chunks by now (1000ms / 20ms)
 
@@ -524,7 +524,7 @@ class TestIo:
         io._read_next_chunk = AsyncMock(return_value=b"next_chunk")
 
         # Initialize timing to be significantly behind (500ms behind = 25 chunks)
-        io._global_start_ts = time.perf_counter() - 0.5
+        io.global_start_perf_ts = time.perf_counter() - 0.5
         io._frames_sent = 0
         io._total_duration_sent = 0.0
 
@@ -554,7 +554,7 @@ class TestIo:
         io._read_next_chunk = AsyncMock(return_value=b"next_chunk")
 
         # Initialize timing to be very far behind (2 seconds = 100 chunks)
-        io._global_start_ts = time.perf_counter() - 2.0
+        io.global_start_perf_ts = time.perf_counter() - 2.0
         io._frames_sent = 0
         io._total_duration_sent = 0.0
 
@@ -575,7 +575,7 @@ class TestIo:
 
         # Set known timing state
         start_time = time.perf_counter()
-        io._global_start_ts = start_time
+        io.global_start_perf_ts = start_time
         io._total_duration_sent = 0.1  # 100ms sent
 
         target_time, current_time, time_behind = io._calculate_timing_metrics()
@@ -613,7 +613,7 @@ class TestIo:
             assert io.push.call_count == 3
 
             # Should have initialized timing
-            assert io._global_start_ts is not None
+            assert io.global_start_perf_ts is not None
 
             # Should have updated metrics
             assert io._frames_sent == 3
@@ -637,7 +637,7 @@ class TestIo:
 
         # Initialize timing
         start_time = time.perf_counter()
-        io._global_start_ts = start_time
+        io.global_start_perf_ts = start_time
         io._frames_sent = 0
         io._total_duration_sent = 0.0
 

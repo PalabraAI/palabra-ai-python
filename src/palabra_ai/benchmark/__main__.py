@@ -152,7 +152,7 @@ class Report:
     def parse(cls, io_data: IoData) -> Self:
         playback_pos = 0.0
         sentences = {}
-        focused = [e for e in io_data.events if e.tid and FOCUSED.fullmatch(e.tid)]
+        focused = [e for e in sorted(io_data.events, key=lambda x: x.head.idx) if e.tid and FOCUSED.fullmatch(e.tid)]
         focused_by_tid = defaultdict(list)
         for fe in focused:
             focused_by_tid[fe.tid].append(fe)
@@ -167,7 +167,7 @@ class Report:
         for tid, fes in focused_by_tid.items():
             mtypes = {}
             for fe in fes:
-                if not fe.mtype in mtypes:
+                if fe.mtype not in mtypes:
                     mtypes[fe.mtype] = fe
             # mtypes = {e.mtype:e for e in reversed(fes)} # first event of each type
             partial = mtypes.get("partial_transcription")

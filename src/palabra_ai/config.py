@@ -21,6 +21,7 @@ from palabra_ai.constant import (
     CONTEXT_SIZE_DEFAULT,
     DESIRED_QUEUE_LEVEL_MS_DEFAULT,
     ENERGY_VARIANCE_FACTOR_DEFAULT,
+    EOF_SILENCE_DURATION_S,
     F0_VARIANCE_FACTOR_DEFAULT,
     FORCE_END_OF_SEGMENT_DEFAULT,
     MAX_ALIGNMENT_CER_DEFAULT,
@@ -137,6 +138,7 @@ class IoMode(BaseModel):
     output_sample_rate: int
     num_channels: int
     input_chunk_duration_ms: int
+    eof_silence_duration_s: float = EOF_SILENCE_DURATION_S
 
     @cached_property
     def input_samples_per_channel(self) -> int:

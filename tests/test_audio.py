@@ -30,7 +30,7 @@ def test_audio_frame_creation_with_bytes():
     assert np.array_equal(frame.data, data_array)
 
 def test_audio_frame_samples_per_channel_auto():
-    """Test AudioFrame auto-calculates samples_per_channel when None"""
+    """Test AudioFrame auto-calculates input_samples_per_channel when None"""
     data = np.array([1, 2, 3, 4, 5, 6, 7, 8], dtype=np.int16)
 
     # With 2 channels, should get 4 samples per channel
