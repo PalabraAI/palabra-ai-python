@@ -107,6 +107,20 @@ class TestBufferReader:
             mock_debug.assert_called_once()
             assert "EOF reached" in str(mock_debug.call_args[0][0])
 
+    @pytest.mark.asyncio
+    async def test_empty_buffer_immediate_eof(self):
+        """Test that empty buffer immediately returns EOF without crashing"""
+        empty_buffer = io.BytesIO(b"")
+        reader = BufferReader(buffer=empty_buffer)
+        reader.ready = TaskEvent()
+        +reader.ready
+
+        # Reading from empty buffer should return None and set EOF
+        data = await reader.read(100)
+        assert data is None
+        assert reader.eof.is_set()
+        assert reader._position == 0
+
 
 class TestBufferWriter:
     """Test BufferWriter class"""

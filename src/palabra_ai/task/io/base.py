@@ -59,8 +59,8 @@ class Io(Task):
     @property
     def io_data(self) -> IoData:
         return IoData(
-            start_perf_ts=self.global_start_perf_ts,
-            start_utc_ts=self.global_start_utc_ts,
+            start_perf_ts=self.global_start_perf_ts or 0.0,
+            start_utc_ts=self.global_start_utc_ts or 0.0,
             in_sr=self.cfg.mode.input_sample_rate,
             out_sr=self.cfg.mode.output_sample_rate,
             mode=self.cfg.mode.name,
