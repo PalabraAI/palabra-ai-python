@@ -14,7 +14,7 @@ from palabra_ai.internal.rest import PalabraRESTClient, SessionCredentials
 from palabra_ai.model import RunResult
 from palabra_ai.task.base import TaskEvent
 from palabra_ai.task.manager import Manager
-from palabra_ai.util.logger import debug, error, success
+from palabra_ai.util.logger import debug, error, exception, success
 
 
 @dataclass
@@ -79,7 +79,7 @@ class PalabraAI:
             debug("Received keyboard interrupt (Ctrl+C)")
             return None
         except BaseException as e:
-            error(f"An error occurred during execution: {e}")
+            exception("An error occurred during execution")
             if no_raise:
                 return RunResult(ok=False, exc=e, eos=False)
             raise e
@@ -118,7 +118,7 @@ class PalabraAI:
                 debug("Manager task was cancelled")
                 exc = e
             except BaseException as e:
-                error(f"Error in manager task: {e}")
+                exception("Error in manager task")
                 exc = e
 
             # CRITICAL: Always try to get log_data from logger
@@ -144,8 +144,8 @@ class PalabraAI:
                             )
                         except Exception as e:
                             debug(f"Failed to get log_data from logger.exit(): {e}")
-            except Exception as e:
-                error(f"Failed to retrieve log_data: {e}")
+            except Exception:
+                exception("Failed to retrieve log_data")
 
             # Check if EOS was received (only relevant for WS)
             eos_received = manager.io.eos_received if manager.io else False
@@ -194,7 +194,7 @@ class PalabraAI:
                 return result
 
         except BaseException as e:
-            error(f"Error in PalabraAI.arun(): {e}")
+            exception("Error in PalabraAI.arun()")
             # When no_raise=True, ALWAYS return RunResult with ok=False
             if no_raise:
                 return RunResult(ok=False, exc=e, eos=False)
@@ -242,8 +242,10 @@ class PalabraAI:
             excs_wo_cancel = [
                 e for e in excs if not isinstance(e, asyncio.CancelledError)
             ]
-            for e in excs:
-                error(f"Unhandled exception: {e}")
+            if excs_wo_cancel:
+                exception(
+                    f"Unhandled exception in TaskGroup: {len(excs_wo_cancel)} error(s)"
+                )
             if not excs_wo_cancel:
                 raise excs[0] from eg
             raise excs_wo_cancel[0] from eg
@@ -257,7 +259,7 @@ class PalabraAI:
                     success(f"Successfully deleted session {credentials.id}")
                 except TimeoutError:
                     error(f"Timeout deleting session {credentials.id}")
-                except Exception as e:
-                    error(f"Failed to delete session {credentials.id}: {e}")
+                except Exception:
+                    exception(f"Failed to delete session {credentials.id}")
 
             debug(diagnose_hanging_tasks())
