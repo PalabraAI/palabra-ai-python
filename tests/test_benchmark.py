@@ -383,3 +383,53 @@ def test_benchmark_handles_cancelled_error():
                                         assert f"Full logs (all {len(log_entries)} entries)" in output
                                         # Check that first entry was printed (would not be if only last 100)
                                         assert "Entry 0: Log line 0" in output
+
+
+def test_sysinfo_contains_command():
+    """Test that sysinfo.json contains command line information"""
+    from palabra_ai.benchmark.__main__ import main
+    from pathlib import Path
+    import tempfile
+    import json
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir = Path(tmpdir)
+
+        with patch('sys.argv', ['benchmark', 'test.wav', 'en', 'es', '--out', str(output_dir)]):
+            with patch('palabra_ai.benchmark.__main__.Path') as mock_path_class:
+                def path_side_effect(path_str):
+                    if 'test.wav' in str(path_str):
+                        mock_path = MagicMock()
+                        mock_path.exists.return_value = True
+                        return mock_path
+                    return Path(path_str)
+                mock_path_class.side_effect = path_side_effect
+
+                with patch('av.open'):
+                    # Main should save sysinfo immediately
+                    try:
+                        main()
+                    except Exception:
+                        pass  # We expect it to fail, just checking sysinfo was saved
+
+                    # Check that sysinfo file was created
+                    sysinfo_files = list(output_dir.glob("*_bench_sysinfo.json"))
+                    assert len(sysinfo_files) >= 1, f"Expected sysinfo file, found {len(sysinfo_files)}"
+
+                    # Check content
+                    sysinfo = json.loads(sysinfo_files[0].read_text())
+                    assert "command" in sysinfo
+                    assert "argv" in sysinfo
+                    assert "cwd" in sysinfo
+                    assert "benchmark" in sysinfo["command"]
+                    assert isinstance(sysinfo["argv"], list)
+
+
+def test_manager_has_graceful_completion_flag():
+    """Test that Manager class has _graceful_completion flag"""
+    from palabra_ai.task.manager import Manager
+    from dataclasses import fields
+
+    # Check that Manager dataclass has _graceful_completion field
+    field_names = {f.name for f in fields(Manager)}
+    assert '_graceful_completion' in field_names, "Manager should have _graceful_completion field"

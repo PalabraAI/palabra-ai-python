@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import bisect
 import re
+import sys
 import traceback
 import wave
 from base64 import b64decode
@@ -248,6 +249,27 @@ def truncate_text(text: str, max_len: int = 25) -> str:
     remaining = len(text) - max_len
     return f"{text[:max_len]}...(+{remaining})"
 
+def flatten_dict_to_paths(d: dict | list, prefix: str = "") -> list[tuple[str, Any]]:
+    """Flatten nested dict/list to materialized paths like ('a.b.c', value)"""
+    result = []
+
+    if isinstance(d, dict):
+        for key, value in d.items():
+            new_prefix = f"{prefix}.{key}" if prefix else key
+            if isinstance(value, (dict, list)):
+                result.extend(flatten_dict_to_paths(value, new_prefix))
+            else:
+                result.append((new_prefix, value))
+    elif isinstance(d, list):
+        for i, value in enumerate(d):
+            new_prefix = f"{prefix}.{i}"
+            if isinstance(value, (dict, list)):
+                result.extend(flatten_dict_to_paths(value, new_prefix))
+            else:
+                result.append((new_prefix, value))
+
+    return result
+
 def format_report(report: Report, io_data: IoData, source_lang: str, target_lang: str, in_file: str, out_file: str, config: Config) -> str:
     """Format report as text with tables and histogram"""
     lines = []
@@ -273,6 +295,23 @@ def format_report(report: Report, io_data: IoData, source_lang: str, target_lang
             lines.append(f"TTS autotempo: ✅ on ({queue_config.min_tempo}-{queue_config.max_tempo})")
         else:
             lines.append(f"TTS autotempo: ❌ off")
+
+    # CONFIG - exact same dict that goes to SetTaskMessage
+    lines.append("")
+    lines.append("CONFIG (sent to set_task)")
+    lines.append("-" * 80)
+    config_dict = config.to_dict()  # Same as SetTaskMessage.from_config uses!
+    config_paths = flatten_dict_to_paths(config_dict)
+
+    table = PrettyTable()
+    table.field_names = ["Key", "Value"]
+    table.align["Key"] = "l"
+    table.align["Value"] = "l"
+
+    for key, value in config_paths:
+        table.add_row([key, value])
+
+    lines.append(str(table))
     lines.append("")
 
     # Metrics summary table
@@ -374,8 +413,12 @@ def main():
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
             # Save sysinfo immediately at startup
+            sysinfo = get_system_info()
+            sysinfo["command"] = " ".join(sys.argv)
+            sysinfo["argv"] = sys.argv
+            sysinfo["cwd"] = str(Path.cwd())
             sysinfo_path = output_dir / f"{timestamp}_bench_sysinfo.json"
-            sysinfo_path.write_bytes(to_json(get_system_info(), True))
+            sysinfo_path.write_bytes(to_json(sysinfo, True))
 
         # Get audio duration for progress tracking
         with av.open(str(audio_path)) as container:
@@ -425,6 +468,11 @@ def main():
         if output_dir and timestamp:
             config.debug = True
             config.log_file = str(output_dir / f"{timestamp}_bench.log")
+
+            # Save exact config that goes to set_task (SetTaskMessage.from_config uses to_dict)
+            config_dict = config.to_dict()
+            config_path = output_dir / f"{timestamp}_bench_config.json"
+            config_path.write_bytes(to_json(config_dict, True))
 
         # Create progress bar with language info
         progress_bar[0] = tqdm(
@@ -550,20 +598,46 @@ def main():
         print("\n" + report_text)
 
     except Exception as e:
+        # Capture traceback IMMEDIATELY - must be done in except block!
+        tb_string = traceback.format_exc()
+
         # Print full traceback to console
         print(f"\n{'='*80}")
         print("BENCHMARK CRASHED - FULL TRACEBACK:")
         print(f"{'='*80}\n")
-        traceback.print_exc()
+        print(tb_string)
 
         # Save error to file if output directory exists
         if output_dir and timestamp:
             try:
                 error_file = output_dir / f"{timestamp}_bench_error.txt"
-                error_file.write_text(f"Benchmark Error:\n\n{traceback.format_exc()}")
+                error_file.write_text(f"Benchmark Error:\n\n{tb_string}")
                 print(f"\nError details saved to: {error_file}")
             except Exception as save_error:
                 print(f"Failed to save error file: {save_error}")
+
+        # Try to save partial report/audio even on error (for debugging)
+        if output_dir and timestamp and result and result.io_data:
+            try:
+                print("\nAttempting to save partial results for debugging...")
+
+                # Try to parse report
+                report, in_audio, out_audio = Report.parse(result.io_data)
+
+                # Save report files
+                report_path = output_dir / f"{timestamp}_bench_report_partial.json"
+                report_path.write_bytes(to_json(report, True))
+                print(f"✓ Partial report saved to: {report_path}")
+
+                # Save audio (always when --out is specified)
+                in_wav = output_dir / f"{timestamp}_bench_in_partial.wav"
+                out_wav = output_dir / f"{timestamp}_bench_out_partial.wav"
+                save_wav(in_audio, in_wav, result.io_data.in_sr, result.io_data.channels)
+                save_wav(out_audio, out_wav, result.io_data.out_sr, result.io_data.channels)
+                print(f"✓ Partial audio saved: {in_wav.name}, {out_wav.name}")
+
+            except Exception as save_err:
+                print(f"Could not save partial results: {save_err}")
 
         # Re-raise the exception
         raise

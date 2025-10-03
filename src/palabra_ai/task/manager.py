@@ -50,6 +50,7 @@ class Manager(Task):
     _debug_mode: bool = field(default=True, init=False)
     _transcriptions_shown: set = field(default_factory=set, init=False)
     _show_banner_loop: asyncio.Task | None = field(default=None, init=False)
+    _graceful_completion: bool = field(default=False, init=False)
 
     def __post_init__(self):
         self.stat = Stat(manager=self, cfg=self.cfg)
@@ -215,6 +216,7 @@ class Manager(Task):
                     debug(f"🔚 {self.name}.do() sleep cancelled, exiting...")
                 debug(f"🔚 {self.name}.do() received EOF or stopper, exiting...")
                 success("🏁 Done! ⏻ Shutting down...")
+                self._graceful_completion = True
                 break
         +self.stopper  # noqa
         await self.graceful_exit()
@@ -247,7 +249,9 @@ class Manager(Task):
         try:
             await asyncio.wait_for(task._task, timeout=timeout)
         except TimeoutError:
-            exception(f"Cancelling {task.name} due to shutdown timeout")
+            # TimeoutError during graceful shutdown is expected for some tasks (e.g. WebSocket)
+            # Only log as warning, not error
+            warning(f"{task.name} shutdown timeout ({timeout}s) - cancelling task")
             task._task.cancel()
             try:
                 await task._task

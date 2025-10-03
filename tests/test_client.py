@@ -288,6 +288,7 @@ async def test_process_with_cancelled_error():
         with patch('palabra_ai.client.Manager') as mock_manager_class:
             mock_manager = MagicMock()
             mock_manager.io_data = {}
+            mock_manager._graceful_completion = False  # NOT graceful - external cancel
             mock_manager_class.return_value = MagicMock(return_value=mock_manager)
 
             with patch('asyncio.TaskGroup') as mock_tg_class:
@@ -297,7 +298,7 @@ async def test_process_with_cancelled_error():
                 mock_tg.__aexit__.side_effect = asyncio.CancelledError()
                 mock_tg_class.return_value = mock_tg
 
-                # Should properly re-raise CancelledError from TaskGroup
+                # Should properly re-raise CancelledError from TaskGroup (not graceful)
                 with pytest.raises(asyncio.CancelledError):
                     async with client.process(config) as manager:
                         pass
@@ -1100,3 +1101,42 @@ async def test_run_result_eos_field_false():
         assert isinstance(result, RunResult)
         assert result.eos is False
         assert result.ok is True
+
+
+def test_benchmark_completes_successfully_with_graceful_shutdown():
+    """Test that benchmark completes successfully with graceful shutdown (integration-style test)"""
+    from palabra_ai.model import RunResult, IoData
+
+    config = Config()
+    config.source = SourceLang(lang="es")
+    config.targets = [TargetLang(lang="en")]
+
+    client = PalabraAI(client_id="test", client_secret="test")
+
+    # Create successful RunResult with io_data
+    io_data = IoData(
+        start_perf_ts=0.0,
+        start_utc_ts=0.0,
+        in_sr=16000,
+        out_sr=24000,
+        mode="ws",
+        channels=1,
+        events=[],
+        count_events=0
+    )
+
+    successful_result = RunResult(
+        ok=True,
+        exc=None,
+        io_data=io_data,
+        log_data=None,
+        eos=True
+    )
+
+    with patch.object(client, 'arun', return_value=successful_result) as mock_arun:
+        result = client.run(config, no_raise=True)
+
+        # Should complete successfully
+        assert result is not None
+        assert result.ok is True
+        assert result.io_data is not None

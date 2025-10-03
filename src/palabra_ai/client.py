@@ -234,9 +234,14 @@ class PalabraAI:
             success("🎉🎉🎉 Translation completed 🎉🎉🎉")
 
         except* asyncio.CancelledError as eg:
-            debug("TaskGroup received CancelledError")
-            # Re-raise CancelledError
-            raise eg.exceptions[0] from eg
+            # Check if this was graceful completion (internal shutdown)
+            if manager._graceful_completion:
+                debug("Graceful completion detected - not propagating CancelledError")
+                # Don't re-raise - this is expected graceful shutdown
+            else:
+                # External cancellation (Ctrl+C, timeout, error)
+                debug("External cancellation - propagating CancelledError")
+                raise eg.exceptions[0] from eg
         except* Exception as eg:
             excs = unwrap_exceptions(eg)
             excs_wo_cancel = [

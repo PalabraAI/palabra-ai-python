@@ -7,6 +7,7 @@ from itertools import count
 from typing import TYPE_CHECKING
 
 import numpy as np
+from websockets.exceptions import ConnectionClosed
 
 from palabra_ai.audio import AudioFrame
 from palabra_ai.constant import BOOT_TIMEOUT, BYTES_PER_SAMPLE, SLEEP_INTERVAL_LONG
@@ -120,8 +121,17 @@ class Io(Task):
                     return
                 raw = to_json(msg)
                 debug(f"<- {raw[0:30]} / {msg.dbg_delta=}")
-                await self.send_message(raw)
-                self.io_events.append(IoEvent(msg._dbg, raw))
+                try:
+                    await self.send_message(raw)
+                    self.io_events.append(IoEvent(msg._dbg, raw))
+                except Exception as e:
+                    # Connection closed during shutdown is OK
+                    if isinstance(e, ConnectionClosed):
+                        debug(
+                            f"Connection closed while sending message (OK during shutdown): {e}"
+                        )
+                        return
+                    raise
 
     async def do(self):
         """Main processing loop - read audio chunks and push them."""
