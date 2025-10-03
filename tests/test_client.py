@@ -481,7 +481,10 @@ def test_run_async_with_manager_error():
     async def test_coro():
         with patch.object(client, 'process') as mock_process:
             mock_manager = MagicMock()
-            mock_manager.io_data = {}
+            mock_io = MagicMock()
+            mock_io.io_data = {"start_perf_ts": 0.0, "start_utc_ts": 0.0, "in_sr": 16000, "out_sr": 16000, "mode": "test", "channels": 1, "events": [], "count_events": 0}
+            mock_io.eos_received = False
+            mock_manager.io = mock_io
             # Create a future that raises ValueError when awaited
             mock_task = asyncio.Future()
             mock_task.set_exception(ValueError("Manager error"))
@@ -494,12 +497,12 @@ def test_run_async_with_manager_error():
             mock_process.return_value.__aenter__.return_value = mock_manager
             mock_process.return_value.__aexit__.return_value = None
 
-            with patch('palabra_ai.client.error') as mock_error:
+            with patch('palabra_ai.client.exception') as mock_exception:
                 result = await client.arun(config, no_raise=True)
                 assert result.ok is False
                 assert isinstance(result.exc, ValueError)
                 assert result.log_data is None
-                mock_error.assert_any_call("Error in manager task: Manager error")
+                mock_exception.assert_any_call("Error in manager task")
 
     asyncio.run(test_coro())
 
@@ -581,11 +584,11 @@ def test_run_async_with_process_error():
         with patch.object(client, 'process') as mock_process:
             mock_process.side_effect = RuntimeError("Process error")
 
-            with patch('palabra_ai.client.error') as mock_error:
+            with patch('palabra_ai.client.exception') as mock_exception:
                 result = await client.arun(config, no_raise=True)
                 assert result.ok is False
                 assert isinstance(result.exc, RuntimeError)
-                mock_error.assert_called_with("Error in PalabraAI.arun(): Process error")
+                mock_exception.assert_called_with("Error in PalabraAI.arun()")
     asyncio.run(test_coro())
 
 # Tests for new arun() method
@@ -904,6 +907,79 @@ def test_run_and_arun_integration():
                 mock_loop.run_until_complete.assert_called_once()
                 # Result should be the same as what arun() would return
                 assert result == expected_result
+
+
+def test_client_uses_exception_for_manager_errors():
+    """Test that client.py uses exception() instead of error() for manager errors"""
+    config = Config()
+    config.source = SourceLang(lang="es")
+
+    client = PalabraAI(client_id="test", client_secret="test")
+
+    async def test_coro():
+        with patch.object(client, 'process') as mock_process:
+            mock_manager = MagicMock()
+            mock_manager.io = MagicMock()
+            mock_manager.io.io_data = {}
+            mock_manager.io.eos_received = False
+            mock_task = asyncio.Future()
+            mock_task.set_exception(ValueError("Manager error"))
+            mock_manager.task = mock_task
+            mock_manager.logger = MagicMock()
+            mock_manager.logger._task = MagicMock()
+            mock_manager.logger._task.done.return_value = True
+            mock_manager.logger.result = None
+            mock_process.return_value.__aenter__.return_value = mock_manager
+            mock_process.return_value.__aexit__.return_value = None
+
+            with patch('palabra_ai.client.exception') as mock_exception:
+                result = await client.arun(config, no_raise=True)
+                # Should use exception() for logging with traceback
+                mock_exception.assert_any_call("Error in manager task")
+                assert result.ok is False
+
+    asyncio.run(test_coro())
+
+
+def test_client_uses_exception_for_arun_errors():
+    """Test that client.py uses exception() for arun errors"""
+    config = Config()
+    config.source = SourceLang(lang="es")
+
+    client = PalabraAI(client_id="test", client_secret="test")
+
+    async def test_coro():
+        with patch.object(client, 'process') as mock_process:
+            mock_process.side_effect = RuntimeError("Process error")
+
+            with patch('palabra_ai.client.exception') as mock_exception:
+                result = await client.arun(config, no_raise=True)
+                # Should use exception() for logging with traceback
+                mock_exception.assert_called_once_with("Error in PalabraAI.arun()")
+                assert result.ok is False
+
+    asyncio.run(test_coro())
+
+
+def test_client_uses_exception_for_run_errors():
+    """Test that run() uses exception() for errors"""
+    config = Config()
+    config.source = SourceLang(lang="es")
+
+    client = PalabraAI(client_id="test", client_secret="test")
+
+    with patch('asyncio.new_event_loop') as mock_new_loop, \
+         patch('asyncio.set_event_loop') as mock_set_loop:
+
+        mock_loop = MagicMock()
+        mock_loop.run_until_complete.side_effect = ValueError("Test error")
+        mock_new_loop.return_value = mock_loop
+
+        with patch('palabra_ai.client.exception') as mock_exception:
+            result = client.run(config, no_raise=True)
+            # Should use exception() for logging with traceback
+            mock_exception.assert_called_once_with("An error occurred during execution")
+            assert result.ok is False
 
 
 @pytest.mark.asyncio

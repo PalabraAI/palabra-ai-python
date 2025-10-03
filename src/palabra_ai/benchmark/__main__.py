@@ -424,7 +424,11 @@ def main():
         progress_bar[0].close()
 
     if not result.ok or not result.io_data:
-        raise RuntimeError(f"Benchmark failed: {result.exc}")
+        if result.exc:
+            exc_type = type(result.exc).__name__
+            exc_msg = str(result.exc) if str(result.exc) else "(no message)"
+            raise RuntimeError(f"Benchmark failed: {exc_type}: {exc_msg}") from result.exc
+        raise RuntimeError("Benchmark failed: no io_data")
 
     # Parse report
     report, in_audio_canvas, out_audio_canvas = Report.parse(result.io_data)
