@@ -5,7 +5,7 @@ from websockets.asyncio.client import connect as ws_connect
 
 from palabra_ai.audio import AudioFrame
 from palabra_ai.enum import Channel, Direction, Kind
-from palabra_ai.message import Dbg, IoEvent
+from palabra_ai.message import Dbg, EosMessage, IoEvent, Message
 from palabra_ai.task.io.base import Io
 from palabra_ai.util.logger import debug, trace
 from palabra_ai.util.timing import get_perf_ts, get_utc_ts
@@ -34,17 +34,20 @@ class WsIo(Io):
         debug(f"<- {frame} / {frame.dbg_delta=}")
         if self.global_start_perf_ts is None:
             self.init_global_start_ts()
-            frame._dbg.dawn_ts = 0.0
+            if hasattr(frame, "_dbg") and frame._dbg:
+                frame._dbg.dawn_ts = 0.0
         await self.ws.send(raw)
 
     def new_input_frame(self) -> AudioFrame:
         return AudioFrame.create(*self.cfg.mode.for_input_audio_frame)
 
     async def ws_receiver(self):
-        from palabra_ai.message import EosMessage, Message
-
         try:
             async for raw_msg in self.ws:
+                # Check for cancellation/stopper eagerly
+                if self.stopper:
+                    debug("ws_receiver: stopper detected, exiting")
+                    break
                 perf_ts = get_perf_ts()
                 utc_ts = get_utc_ts()
                 if self.stopper or raw_msg is None:
@@ -115,6 +118,12 @@ class WsIo(Io):
 
     async def exit(self):
         """Clean up WebSocket connection"""
-        if self._ws_cm and self.ws:
-            await self._ws_cm.__aexit__(None, None, None)
+        # Websocket should already be closed in do(), just cleanup context manager
+        if self._ws_cm:
+            try:
+                await self._ws_cm.__aexit__(None, None, None)
+                debug(f"{self.name}: WebSocket context manager cleaned up")
+            except Exception as e:
+                debug(f"{self.name}: Error exiting websocket context: {e}")
+
         self.ws = None

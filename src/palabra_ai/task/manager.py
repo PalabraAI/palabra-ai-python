@@ -22,7 +22,7 @@ from palabra_ai.task.io.base import Io
 from palabra_ai.task.logger import Logger
 from palabra_ai.task.stat import Stat
 from palabra_ai.task.transcription import Transcription
-from palabra_ai.util.logger import debug, success, warning
+from palabra_ai.util.logger import debug, exception, success, warning
 
 
 @dataclass
@@ -50,6 +50,7 @@ class Manager(Task):
     _debug_mode: bool = field(default=True, init=False)
     _transcriptions_shown: set = field(default_factory=set, init=False)
     _show_banner_loop: asyncio.Task | None = field(default=None, init=False)
+    _graceful_completion: bool = field(default=False, init=False)
 
     def __post_init__(self):
         self.stat = Stat(manager=self, cfg=self.cfg)
@@ -215,6 +216,7 @@ class Manager(Task):
                     debug(f"🔚 {self.name}.do() sleep cancelled, exiting...")
                 debug(f"🔚 {self.name}.do() received EOF or stopper, exiting...")
                 success("🏁 Done! ⏻ Shutting down...")
+                self._graceful_completion = True
                 break
         +self.stopper  # noqa
         await self.graceful_exit()
@@ -247,7 +249,9 @@ class Manager(Task):
         try:
             await asyncio.wait_for(task._task, timeout=timeout)
         except TimeoutError:
-            debug(f"🔧 {self.name}.shutdown_task() {task.name} shutdown timeout!")
+            # TimeoutError during graceful shutdown is expected for some tasks (e.g. WebSocket)
+            # Only log as warning, not error
+            warning(f"{task.name} shutdown timeout ({timeout}s) - cancelling task")
             task._task.cancel()
             try:
                 await task._task
@@ -256,7 +260,7 @@ class Manager(Task):
         except asyncio.CancelledError:
             debug(f"🔧 {self.name}.shutdown_task() {task.name} shutdown cancelled!")
         except Exception as e:
-            debug(f"🔧 {self.name}.shutdown_task() {task.name} shutdown error: {e}")
+            exception(f"Cancelling {task.name} due to shutdown error: {e}")
             task._task.cancel()
             try:
                 await task._task
@@ -317,8 +321,8 @@ class Manager(Task):
                 debug(f"🔧 {self.name}.writer_mercy() writer shutdown timeout!")
                 attempt += 1
                 if attempt >= max_attempts:
-                    debug(
-                        f"🔧 {self.name}.writer_mercy() max attempts reached, cancelling writer!"
+                    exception(
+                        f"Cancelling writer {self.writer.name} due to max shutdown attempts ({max_attempts}) reached"
                     )
                     self.writer._task.cancel()
                     try:
