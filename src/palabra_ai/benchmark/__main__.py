@@ -1,8 +1,10 @@
 """Palabra AI Benchmark - Data Collection Only"""
 
 import argparse
+import asyncio
 import bisect
 import re
+import traceback
 import wave
 from base64 import b64decode
 from collections import defaultdict
@@ -31,6 +33,7 @@ from palabra_ai.model import IoData
 from palabra_ai.task.adapter.dummy import DummyWriter
 from palabra_ai.task.adapter.file import FileReader
 from palabra_ai.util.orjson import to_json
+from palabra_ai.util.sysinfo import get_system_info
 
 INPUT_CHUNK_DURATION_S = 0.1 # 100ms
 FOCUSED = re.compile(r".+(_part_0)?$") # without part_1+ suffix
@@ -351,126 +354,219 @@ def main():
 
     args = parser.parse_args()
 
-    audio_path = Path(args.audio)
-    if not audio_path.exists():
-        raise FileNotFoundError(f"Audio file not found: {args.audio}")
-    mode = WsMode(input_chunk_duration_ms=INPUT_CHUNK_DURATION_S*1000)
+    # Initialize variables for error handling
+    output_dir = None
+    timestamp = None
+    result = None
+    config = None
+    progress_bar = [None]
 
-    # Get audio duration for progress tracking
-    with av.open(str(audio_path)) as container:
-        audio_duration = container.duration / 1000000  # convert microseconds to seconds
+    try:
+        audio_path = Path(args.audio)
+        if not audio_path.exists():
+            raise FileNotFoundError(f"Audio file not found: {args.audio}")
+        mode = WsMode(input_chunk_duration_ms=INPUT_CHUNK_DURATION_S*1000)
 
-    # Create reader
-    reader = FileReader(str(audio_path))
+        # Setup output directory and timestamp if --out is specified
+        if args.out:
+            output_dir = args.out
+            output_dir.mkdir(parents=True, exist_ok=True)
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    # Create progress bar placeholder (will update desc after config loaded)
-    last_timestamp = [0.0]  # mutable to allow updates in nested function
-    progress_bar = [None]  # mutable reference
+            # Save sysinfo immediately at startup
+            sysinfo_path = output_dir / f"{timestamp}_bench_sysinfo.json"
+            sysinfo_path.write_bytes(to_json(get_system_info(), True))
 
-    def on_transcription(msg):
-        if hasattr(msg, 'segments') and msg.segments:
-            end_ts = msg.segments[-1].end
-            if end_ts > last_timestamp[0]:
-                last_timestamp[0] = end_ts
-                progress_pct = min(100, (end_ts / audio_duration) * 100)
-                if progress_bar[0]:
-                    progress_bar[0].update(progress_pct - progress_bar[0].n)
+        # Get audio duration for progress tracking
+        with av.open(str(audio_path)) as container:
+            audio_duration = container.duration / 1000000  # convert microseconds to seconds
 
-    if args.config:
-        # Load full config from JSON
-        config = Config.from_json(args.config.read_text())
+        # Create reader
+        reader = FileReader(str(audio_path))
 
-        # Override benchmark-specific settings (using private attrs)
-        config.source._reader = reader
-        config.source._on_transcription = on_transcription
-        config.targets[0]._writer = DummyWriter()
-        config.benchmark = True
+        # Create progress bar placeholder (will update desc after config loaded)
+        last_timestamp = [0.0]  # mutable to allow updates in nested function
 
-        source_lang = config.source.lang.code
-        target_lang = config.targets[0].lang.code
-    else:
-        if not args.source_lang or not args.target_lang:
-            parser.error("source_lang and target_lang required without --config")
-        source_lang = args.source_lang
-        target_lang = args.target_lang
+        def on_transcription(msg):
+            if hasattr(msg, 'segments') and msg.segments:
+                end_ts = msg.segments[-1].end
+                if end_ts > last_timestamp[0]:
+                    last_timestamp[0] = end_ts
+                    progress_pct = min(100, (end_ts / audio_duration) * 100)
+                    if progress_bar[0]:
+                        progress_bar[0].update(progress_pct - progress_bar[0].n)
 
-        config = Config(
-            source=SourceLang(Language.get_or_create(source_lang), reader, on_transcription=on_transcription),
-            targets=[TargetLang(Language.get_or_create(target_lang), DummyWriter())],
-            benchmark=True,
-            mode=mode,
+        if args.config:
+            # Load full config from JSON
+            config = Config.from_json(args.config.read_text())
+
+            # Override benchmark-specific settings (using private attrs)
+            config.source._reader = reader
+            config.source._on_transcription = on_transcription
+            config.targets[0]._writer = DummyWriter()
+            config.benchmark = True
+
+            source_lang = config.source.lang.code
+            target_lang = config.targets[0].lang.code
+        else:
+            if not args.source_lang or not args.target_lang:
+                parser.error("source_lang and target_lang required without --config")
+            source_lang = args.source_lang
+            target_lang = args.target_lang
+
+            config = Config(
+                source=SourceLang(Language.get_or_create(source_lang), reader, on_transcription=on_transcription),
+                targets=[TargetLang(Language.get_or_create(target_lang), DummyWriter())],
+                benchmark=True,
+                mode=mode,
+            )
+
+        # Enable debug mode and logging when --out is specified
+        if output_dir and timestamp:
+            config.debug = True
+            config.log_file = str(output_dir / f"{timestamp}_bench.log")
+
+        # Create progress bar with language info
+        progress_bar[0] = tqdm(
+            total=100,
+            desc=f"Processing {source_lang}→{target_lang}",
+            unit="%",
+            mininterval=7.0,
+            bar_format="{desc}: {percentage:3.0f}%|{bar}| [{elapsed}<{remaining}]"
         )
 
-    # Create progress bar with language info
-    progress_bar[0] = tqdm(
-        total=100,
-        desc=f"Processing {source_lang}→{target_lang}",
-        unit="%",
-        mininterval=7.0,
-        bar_format="{desc}: {percentage:3.0f}%|{bar}| [{elapsed}<{remaining}]"
-    )
+        print(f"Running benchmark: {source_lang} → {target_lang}")
+        if args.out:
+            print(f"Files will be saved to {args.out}")
+        print("-" * 60)
 
-    print(f"Running benchmark: {source_lang} → {target_lang}")
-    if args.out:
-        print(f"Files will be saved to {args.out}")
-    print("-" * 60)
+        palabra = PalabraAI()
+        result = palabra.run(config, no_raise=True)
 
-    palabra = PalabraAI()
-    result = palabra.run(config, no_raise=True)
+        # Save RunResult in debug mode when --out is specified
+        if output_dir and timestamp:
+            try:
+                result_debug_path = output_dir / f"{timestamp}_bench_runresult_debug.json"
+                result_debug_path.write_bytes(to_json(result.model_dump(), True))
+            except Exception as e:
+                # If serialization fails, save error info
+                error_path = output_dir / f"{timestamp}_bench_runresult_error.txt"
+                error_path.write_text(
+                    f"Failed to serialize RunResult: {e}\n\n"
+                    f"RunResult repr:\n{repr(result)}\n\n"
+                    f"Exception: {result.exc if result else 'N/A'}"
+                )
 
-    # Complete and close progress bar
-    if progress_bar[0]:
-        progress_bar[0].update(100 - progress_bar[0].n)
-        progress_bar[0].close()
+        # Complete and close progress bar
+        if progress_bar[0]:
+            progress_bar[0].update(100 - progress_bar[0].n)
+            progress_bar[0].close()
 
-    if not result.ok or not result.io_data:
-        if result.exc:
-            exc_type = type(result.exc).__name__
-            exc_msg = str(result.exc) if str(result.exc) else "(no message)"
-            raise RuntimeError(f"Benchmark failed: {exc_type}: {exc_msg}") from result.exc
-        raise RuntimeError("Benchmark failed: no io_data")
+        if not result.ok or not result.io_data:
+            if result.exc:
+                exc_type = type(result.exc).__name__
+                exc_msg = str(result.exc) or "(no message)"
 
-    # Parse report
-    report, in_audio_canvas, out_audio_canvas = Report.parse(result.io_data)
+                # Special handling for CancelledError
+                if isinstance(result.exc, asyncio.CancelledError):
+                    print(f"\n{'='*80}")
+                    print(f"BENCHMARK WAS CANCELLED")
+                    print(f"{'='*80}\n")
+                    print("This usually means:")
+                    print("  - User interrupted with Ctrl+C")
+                    print("  - Task was cancelled by timeout")
+                    print("  - Internal cancellation due to error\n")
+                else:
+                    print(f"\n{'='*80}")
+                    print(f"BENCHMARK FAILED: {exc_type}: {exc_msg}")
+                    print(f"{'='*80}\n")
 
-    # Create file paths (used in report and optionally saved with --out)
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    in_wav_name = f"{timestamp}_bench_in_{source_lang}.wav"
-    out_wav_name = f"{timestamp}_bench_out_{target_lang}.wav"
+                # Print more logs (100 instead of 50)
+                if result.log_data and result.log_data.logs:
+                    print("Last 100 log entries:")
+                    for log_line in result.log_data.logs[-100:]:
+                        print(log_line, end='')
+                    print()
 
-    # Generate text report
-    report_text = format_report(
-        report,
-        result.io_data,
-        source_lang,
-        target_lang,
-        str(audio_path),
-        out_wav_name,
-        config
-    )
+                # Print traceback from exception if available
+                if hasattr(result.exc, '__traceback__') and result.exc.__traceback__:
+                    print("\nOriginal exception traceback:")
+                    traceback.print_exception(type(result.exc), result.exc, result.exc.__traceback__)
+                    print()
 
-    if args.out:
-        # Save all files to output directory
-        output_dir = args.out
-        output_dir.mkdir(parents=True, exist_ok=True)
+                raise RuntimeError(f"Benchmark failed: {exc_type}: {exc_msg}") from result.exc
+            raise RuntimeError("Benchmark failed: no io_data")
 
-        raw_result_path = output_dir / f"{timestamp}_bench_raw_result.json"
-        io_data_path = output_dir / f"{timestamp}_bench_io_data.json"
-        report_path = output_dir / f"{timestamp}_bench_report.json"
-        report_txt_path = output_dir / f"{timestamp}_bench_report.txt"
-        in_wav_path = output_dir / in_wav_name
-        out_wav_path = output_dir / out_wav_name
+        # Parse report
+        report, in_audio_canvas, out_audio_canvas = Report.parse(result.io_data)
 
-        raw_result_path.write_bytes(to_json(result.model_dump(), True))
-        io_data_path.write_bytes(to_json(result.io_data, True))
-        report_path.write_bytes(to_json(report, True))
-        report_txt_path.write_text(report_text)
+        # Create file paths (used in report and optionally saved with --out)
+        if not timestamp:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        in_wav_name = f"{timestamp}_bench_in_{source_lang}.wav"
+        out_wav_name = f"{timestamp}_bench_out_{target_lang}.wav"
 
-        save_wav(in_audio_canvas, in_wav_path, result.io_data.in_sr, result.io_data.channels)
-        save_wav(out_audio_canvas, out_wav_path, result.io_data.out_sr, result.io_data.channels)
+        # Generate text report
+        report_text = format_report(
+            report,
+            result.io_data,
+            source_lang,
+            target_lang,
+            str(audio_path),
+            out_wav_name,
+            config
+        )
 
-    # Always print report to console
-    print("\n" + report_text)
+        if args.out:
+            # Save all files to output directory
+            if not output_dir:
+                output_dir = args.out
+                output_dir.mkdir(parents=True, exist_ok=True)
+
+            raw_result_path = output_dir / f"{timestamp}_bench_raw_result.json"
+            io_data_path = output_dir / f"{timestamp}_bench_io_data.json"
+            report_path = output_dir / f"{timestamp}_bench_report.json"
+            report_txt_path = output_dir / f"{timestamp}_bench_report.txt"
+            in_wav_path = output_dir / in_wav_name
+            out_wav_path = output_dir / out_wav_name
+
+            raw_result_path.write_bytes(to_json(result.model_dump(), True))
+            io_data_path.write_bytes(to_json(result.io_data, True))
+            report_path.write_bytes(to_json(report, True))
+            report_txt_path.write_text(report_text)
+
+            save_wav(in_audio_canvas, in_wav_path, result.io_data.in_sr, result.io_data.channels)
+            save_wav(out_audio_canvas, out_wav_path, result.io_data.out_sr, result.io_data.channels)
+
+        # Always print report to console
+        print("\n" + report_text)
+
+    except Exception as e:
+        # Print full traceback to console
+        print(f"\n{'='*80}")
+        print("BENCHMARK CRASHED - FULL TRACEBACK:")
+        print(f"{'='*80}\n")
+        traceback.print_exc()
+
+        # Save error to file if output directory exists
+        if output_dir and timestamp:
+            try:
+                error_file = output_dir / f"{timestamp}_bench_error.txt"
+                error_file.write_text(f"Benchmark Error:\n\n{traceback.format_exc()}")
+                print(f"\nError details saved to: {error_file}")
+            except Exception as save_error:
+                print(f"Failed to save error file: {save_error}")
+
+        # Re-raise the exception
+        raise
+
+    finally:
+        # Always try to close progress bar
+        if progress_bar[0]:
+            try:
+                progress_bar[0].close()
+            except Exception:
+                pass
 
 
 if __name__ == "__main__":
