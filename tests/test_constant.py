@@ -79,7 +79,7 @@ def test_tts_constants():
 
 def test_queue_config_constants():
     """Test queue config constants"""
-    assert constant.DESIRED_QUEUE_LEVEL_MS_DEFAULT == 10000
+    assert constant.DESIRED_QUEUE_LEVEL_MS_DEFAULT == 5000
     assert constant.MAX_QUEUE_LEVEL_MS_DEFAULT == 24000
 
 
