@@ -4,7 +4,6 @@ import argparse
 import bisect
 import re
 import wave
-from audioop import byteswap
 from base64 import b64decode
 from collections import defaultdict
 from dataclasses import dataclass
