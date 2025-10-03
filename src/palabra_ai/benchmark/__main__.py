@@ -475,18 +475,26 @@ def main():
                     print("This usually means:")
                     print("  - User interrupted with Ctrl+C")
                     print("  - Task was cancelled by timeout")
-                    print("  - Internal cancellation due to error\n")
+                    print("  - Internal cancellation due to error")
+                    print("  - One of the subtasks failed and caused cascade cancellation\n")
+
+                    # For CancelledError, show ALL logs to understand what happened
+                    if result.log_data and result.log_data.logs:
+                        print(f"Full logs (all {len(result.log_data.logs)} entries):")
+                        for log_line in result.log_data.logs:
+                            print(log_line, end='')
+                        print()
                 else:
                     print(f"\n{'='*80}")
                     print(f"BENCHMARK FAILED: {exc_type}: {exc_msg}")
                     print(f"{'='*80}\n")
 
-                # Print more logs (100 instead of 50)
-                if result.log_data and result.log_data.logs:
-                    print("Last 100 log entries:")
-                    for log_line in result.log_data.logs[-100:]:
-                        print(log_line, end='')
-                    print()
+                    # For other errors, show last 100
+                    if result.log_data and result.log_data.logs:
+                        print("Last 100 log entries:")
+                        for log_line in result.log_data.logs[-100:]:
+                            print(log_line, end='')
+                        print()
 
                 # Print traceback from exception if available
                 if hasattr(result.exc, '__traceback__') and result.exc.__traceback__:

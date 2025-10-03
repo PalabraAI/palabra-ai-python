@@ -115,7 +115,7 @@ class PalabraAI:
                 await manager.task
                 ok = True
             except asyncio.CancelledError as e:
-                debug("Manager task was cancelled")
+                exception("Manager task was cancelled")
                 exc = e
             except BaseException as e:
                 exception("Error in manager task")

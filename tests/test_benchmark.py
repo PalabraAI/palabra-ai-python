@@ -307,11 +307,21 @@ def test_benchmark_handles_cancelled_error():
     import asyncio
     from pathlib import Path
     import tempfile
+    from io import StringIO
+    import sys
 
     # Create CancelledError with traceback
     cancelled_exc = asyncio.CancelledError()
 
-    # Create log data with some context
+    # Create log data with many entries to test "all logs" output
+    log_entries = [f"Entry {i}: Log line {i}\n" for i in range(200)]
+    log_entries.extend([
+        "2025-10-03 15:10:43.128 | SUCCESS  | Starting...\n",
+        "2025-10-03 15:10:47.623 | INFO     | Processing...\n",
+        "2025-10-03 15:10:50.090 | ERROR    | Something went wrong\n",
+        "2025-10-03 15:10:50.327 | INFO     | Cancelling...\n",
+    ])
+
     log_data = LogData(
         version="1.0.0",
         sysinfo={"platform": "test"},
@@ -321,12 +331,7 @@ def test_benchmark_handles_cancelled_error():
         log_file="test.log",
         trace_file="",
         debug=True,
-        logs=[
-            "2025-10-03 15:10:43.128 | SUCCESS  | Starting...\n",
-            "2025-10-03 15:10:47.623 | INFO     | Processing...\n",
-            "2025-10-03 15:10:50.090 | ERROR    | Something went wrong\n",
-            "2025-10-03 15:10:50.327 | INFO     | Cancelling...\n",
-        ]
+        logs=log_entries
     )
 
     failed_result = RunResult(ok=False, exc=cancelled_exc, io_data=None, log_data=log_data)
@@ -353,8 +358,11 @@ def test_benchmark_handles_cancelled_error():
                         with patch('palabra_ai.benchmark.__main__.FileReader'):
                             with patch('palabra_ai.benchmark.__main__.tqdm'):
                                 with patch('palabra_ai.benchmark.__main__.get_system_info', return_value={"test": "info"}):
+                                    # Capture stdout to check that ALL logs are printed
+                                    captured_output = StringIO()
                                     try:
-                                        main()
+                                        with patch('sys.stdout', captured_output):
+                                            main()
                                         assert False, "main() should have raised RuntimeError"
                                     except RuntimeError as e:
                                         assert "CancelledError" in str(e)
@@ -366,3 +374,12 @@ def test_benchmark_handles_cancelled_error():
                                         # Check that error file was saved
                                         error_files = list(output_dir.glob("*_bench_error.txt"))
                                         assert len(error_files) >= 1, f"Expected error file, found {len(error_files)}"
+
+                                        # Check that output mentions "cascade cancellation"
+                                        output = captured_output.getvalue()
+                                        assert "cascade cancellation" in output, "Should mention cascade cancellation"
+
+                                        # Check that ALL logs were printed (not just last 100)
+                                        assert f"Full logs (all {len(log_entries)} entries)" in output
+                                        # Check that first entry was printed (would not be if only last 100)
+                                        assert "Entry 0: Log line 0" in output

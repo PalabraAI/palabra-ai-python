@@ -22,7 +22,7 @@ from palabra_ai.task.io.base import Io
 from palabra_ai.task.logger import Logger
 from palabra_ai.task.stat import Stat
 from palabra_ai.task.transcription import Transcription
-from palabra_ai.util.logger import debug, success, warning
+from palabra_ai.util.logger import debug, exception, success, warning
 
 
 @dataclass
@@ -247,7 +247,7 @@ class Manager(Task):
         try:
             await asyncio.wait_for(task._task, timeout=timeout)
         except TimeoutError:
-            debug(f"🔧 {self.name}.shutdown_task() {task.name} shutdown timeout!")
+            exception(f"Cancelling {task.name} due to shutdown timeout")
             task._task.cancel()
             try:
                 await task._task
@@ -256,7 +256,7 @@ class Manager(Task):
         except asyncio.CancelledError:
             debug(f"🔧 {self.name}.shutdown_task() {task.name} shutdown cancelled!")
         except Exception as e:
-            debug(f"🔧 {self.name}.shutdown_task() {task.name} shutdown error: {e}")
+            exception(f"Cancelling {task.name} due to shutdown error: {e}")
             task._task.cancel()
             try:
                 await task._task
@@ -317,8 +317,8 @@ class Manager(Task):
                 debug(f"🔧 {self.name}.writer_mercy() writer shutdown timeout!")
                 attempt += 1
                 if attempt >= max_attempts:
-                    debug(
-                        f"🔧 {self.name}.writer_mercy() max attempts reached, cancelling writer!"
+                    exception(
+                        f"Cancelling writer {self.writer.name} due to max shutdown attempts ({max_attempts}) reached"
                     )
                     self.writer._task.cancel()
                     try:
