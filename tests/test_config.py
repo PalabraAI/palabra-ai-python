@@ -222,7 +222,7 @@ def test_translation():
 def test_queue_configs():
     """Test QueueConfigs with alias"""
     qc = QueueConfigs()
-    assert qc.global_.desired_queue_level_ms == 10000
+    assert qc.global_.desired_queue_level_ms == 5000
     assert qc.global_.max_queue_level_ms == 24000
     assert qc.global_.auto_tempo is True
 
