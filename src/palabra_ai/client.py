@@ -115,8 +115,14 @@ class PalabraAI:
                 await manager.task
                 ok = True
             except asyncio.CancelledError as e:
-                exception("Manager task was cancelled")
-                exc = e
+                # Check if this is graceful shutdown or external cancellation
+                if manager._graceful_completion:
+                    debug("Manager task cancelled during graceful shutdown")
+                    ok = True  # Graceful shutdown is successful completion
+                    # exc remains None - not an error
+                else:
+                    exception("Manager task was cancelled")
+                    exc = e
             except BaseException as e:
                 exception("Error in manager task")
                 exc = e
