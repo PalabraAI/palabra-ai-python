@@ -380,3 +380,81 @@ class TestWsIo:
             assert ws_io.eos_received is True
             # Check EOF was also set
             assert ws_io.eof.is_set()
+
+    @pytest.mark.asyncio
+    async def test_send_frame_uses_raw_when_provided(self, mock_config, mock_credentials, mock_reader, mock_writer):
+        """Test send_frame uses provided raw without calling frame.to_ws()"""
+        ws_io = WsIo(cfg=mock_config, credentials=mock_credentials, reader=mock_reader, writer=mock_writer)
+        ws_io.ws = AsyncMock()
+
+        # Mock frame
+        frame = MagicMock(spec=AudioFrame)
+        frame.to_ws = MagicMock(return_value=b"should_not_be_called")
+
+        # Provide raw bytes
+        raw_bytes = b"provided_raw_data"
+
+        with patch('palabra_ai.task.io.ws.debug'):
+            await ws_io.send_frame(frame, raw=raw_bytes)
+
+        # frame.to_ws() should NOT be called (optimization)
+        frame.to_ws.assert_not_called()
+
+        # ws.send() should be called with provided raw
+        ws_io.ws.send.assert_called_once_with(raw_bytes)
+
+    @pytest.mark.asyncio
+    async def test_send_frame_converts_when_raw_not_provided(self, mock_config, mock_credentials, mock_reader, mock_writer):
+        """Test send_frame calls frame.to_ws() when raw not provided"""
+        ws_io = WsIo(cfg=mock_config, credentials=mock_credentials, reader=mock_reader, writer=mock_writer)
+        ws_io.ws = AsyncMock()
+
+        # Mock frame
+        frame = MagicMock(spec=AudioFrame)
+        converted_bytes = b"converted_data"
+        frame.to_ws = MagicMock(return_value=converted_bytes)
+
+        with patch('palabra_ai.task.io.ws.debug'):
+            await ws_io.send_frame(frame, raw=None)
+
+        # frame.to_ws() should be called
+        frame.to_ws.assert_called_once()
+
+        # ws.send() should be called with converted data
+        ws_io.ws.send.assert_called_once_with(converted_bytes)
+
+    @pytest.mark.asyncio
+    async def test_push_benchmark_mode_passes_raw(self, mock_config, mock_credentials, mock_reader, mock_writer):
+        """Test push() in benchmark mode passes raw to send_frame()"""
+        import numpy as np
+
+        mock_config.mode.input_samples_per_channel = 160
+        mock_config.mode.for_input_audio_frame = (16000, 1, 160)
+        mock_config.benchmark = True
+
+        ws_io = WsIo(cfg=mock_config, credentials=mock_credentials, reader=mock_reader, writer=mock_writer)
+        ws_io._idx = iter(range(100))
+        ws_io._in_audio_num = iter(range(100))
+        ws_io.bench_audio_foq = MagicMock()
+
+        # Mock send_frame to capture arguments
+        ws_io.send_frame = AsyncMock()
+
+        # Create audio bytes
+        audio_bytes = np.random.randint(-32768, 32767, 160, dtype=np.int16).tobytes()
+
+        with patch('palabra_ai.task.io.ws.IoEvent'):
+            with patch('asyncio.to_thread', new_callable=AsyncMock, return_value=-20.0):
+                await ws_io.push(audio_bytes)
+
+        # send_frame should be called once
+        assert ws_io.send_frame.call_count == 1
+
+        # Check that raw parameter is NOT None (benchmark mode optimization)
+        call_args = ws_io.send_frame.call_args
+        frame_arg = call_args[0][0]
+        raw_arg = call_args[0][1] if len(call_args[0]) > 1 else call_args[1].get('raw')
+
+        # raw should be bytes (not None) in benchmark mode
+        assert raw_arg is not None
+        assert isinstance(raw_arg, bytes)
