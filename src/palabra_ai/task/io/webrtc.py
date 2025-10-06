@@ -142,7 +142,7 @@ class WebrtcIo(Io):
     async def send_message(self, msg_data: bytes) -> None:
         await self.room.local_participant.publish_data(msg_data, reliable=True)
 
-    async def send_frame(self, frame: AudioFrame) -> None:
+    async def send_frame(self, frame: AudioFrame, raw: bytes | None = None) -> None:
         self.init_global_start_ts()
         return await self.in_audio_source.capture_frame(frame.to_rtc())
 

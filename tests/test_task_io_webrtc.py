@@ -124,3 +124,33 @@ class TestWebrtcIo:
             # Test that name can be set and retrieved (may have [T] prefix)
             io.name = "test_webrtc_io"
             assert "test_webrtc_io" in io.name
+
+    @pytest.mark.asyncio
+    async def test_send_frame_with_raw_parameter(self, mock_config, mock_credentials, mock_reader, mock_writer):
+        """Test send_frame accepts raw parameter (called from base.push())"""
+        import numpy as np
+
+        mock_config.mode.input_samples_per_channel = 160
+        mock_config.mode.for_input_audio_frame = (8000, 1, 160)
+        mock_config.benchmark = True
+
+        with patch('palabra_ai.task.io.webrtc.rtc.Room'):
+            io = WebrtcIo(
+                cfg=mock_config,
+                credentials=mock_credentials,
+                reader=mock_reader,
+                writer=mock_writer
+            )
+
+            # Mock audio source
+            mock_audio_source = AsyncMock()
+            io.in_audio_source = mock_audio_source
+
+            # Create audio bytes (160 samples * 2 bytes)
+            audio_bytes = np.random.randint(-32768, 32767, 160, dtype=np.int16).tobytes()
+
+            # This should call send_frame(audio_frame, raw) internally
+            await io.push(audio_bytes)
+
+            # Verify send_frame was called (it will be called via push)
+            assert mock_audio_source.capture_frame.call_count > 0
