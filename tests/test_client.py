@@ -442,7 +442,7 @@ def test_run_without_signal_handlers():
                 mock_loop.close.assert_called_once()
 
 def test_run_async_with_manager_task_cancelled():
-    """Test _run_with_result when manager task is cancelled"""
+    """Test _run_with_result when manager task is cancelled (external cancellation)"""
     config = Config()
     config.source = SourceLang(lang="es")
 
@@ -451,6 +451,7 @@ def test_run_async_with_manager_task_cancelled():
     async def test_coro():
         with patch.object(client, 'process') as mock_process:
             mock_manager = MagicMock()
+            mock_manager._graceful_completion = False  # External cancellation, not graceful
             mock_io = MagicMock()
             mock_io.io_data = {"start_perf_ts": 0.0, "start_utc_ts": 0.0, "in_sr": 16000, "out_sr": 16000, "mode": "test", "channels": 1, "events": [], "count_events": 0}
             mock_manager.io = mock_io
@@ -1140,3 +1141,150 @@ def test_benchmark_completes_successfully_with_graceful_shutdown():
         assert result is not None
         assert result.ok is True
         assert result.io_data is not None
+
+
+@pytest.mark.asyncio
+async def test_manager_cancelled_graceful_shutdown():
+    """Test that graceful shutdown (manager._graceful_completion=True) does NOT log ERROR"""
+    config = Config()
+    config.source = SourceLang(lang="es")
+    config.targets = [TargetLang(lang="en")]
+
+    client = PalabraAI(client_id="test", client_secret="test")
+
+    with patch.object(client, 'process') as mock_process:
+        # Create manager with graceful completion flag
+        mock_manager = MagicMock()
+        mock_manager._graceful_completion = True  # GRACEFUL shutdown
+        mock_io = MagicMock()
+        mock_io.io_data = {"start_perf_ts": 0.0, "start_utc_ts": 0.0, "in_sr": 16000, "out_sr": 16000, "mode": "ws", "channels": 1, "events": [], "count_events": 0}
+        mock_io.eos_received = True
+        mock_manager.io = mock_io
+
+        # Manager task raises CancelledError (normal during graceful shutdown)
+        mock_task = asyncio.Future()
+        mock_task.set_exception(asyncio.CancelledError())
+        mock_manager.task = mock_task
+
+        mock_manager.logger = MagicMock()
+        mock_manager.logger._task = MagicMock()
+        mock_manager.logger._task.done.return_value = True
+        mock_manager.logger.result = None
+
+        mock_process.return_value.__aenter__.return_value = mock_manager
+        mock_process.return_value.__aexit__.return_value = None
+
+        with patch('palabra_ai.client.exception') as mock_exception, \
+             patch('palabra_ai.client.debug') as mock_debug:
+
+            result = await client.arun(config, no_raise=True)
+
+            # CRITICAL: Should NOT log as ERROR for graceful shutdown
+            # Check that exception() was NOT called with "Manager task was cancelled"
+            exception_calls = [call[0][0] for call in mock_exception.call_args_list]
+            assert "Manager task was cancelled" not in exception_calls, \
+                "Graceful shutdown should NOT log 'Manager task was cancelled' as ERROR"
+
+            # Should use debug() instead
+            debug_calls = [call[0][0] for call in mock_debug.call_args_list]
+            # We expect some debug message about graceful completion
+
+            # After fix: graceful shutdown should return ok=True, not False!
+            assert result.ok is True, "Graceful shutdown should have ok=True"
+            assert result.exc is None, "Graceful shutdown should have exc=None"
+
+
+@pytest.mark.asyncio
+async def test_manager_cancelled_external():
+    """Test that external cancellation (manager._graceful_completion=False) DOES log ERROR"""
+    config = Config()
+    config.source = SourceLang(lang="es")
+    config.targets = [TargetLang(lang="en")]
+
+    client = PalabraAI(client_id="test", client_secret="test")
+
+    with patch.object(client, 'process') as mock_process:
+        # Create manager WITHOUT graceful completion flag
+        mock_manager = MagicMock()
+        mock_manager._graceful_completion = False  # EXTERNAL cancellation
+        mock_io = MagicMock()
+        mock_io.io_data = {"start_perf_ts": 0.0, "start_utc_ts": 0.0, "in_sr": 16000, "out_sr": 16000, "mode": "ws", "channels": 1, "events": [], "count_events": 0}
+        mock_io.eos_received = False
+        mock_manager.io = mock_io
+
+        # Manager task raises CancelledError (external - Ctrl+C, timeout, error)
+        mock_task = asyncio.Future()
+        mock_task.set_exception(asyncio.CancelledError())
+        mock_manager.task = mock_task
+
+        mock_manager.logger = MagicMock()
+        mock_manager.logger._task = MagicMock()
+        mock_manager.logger._task.done.return_value = True
+        mock_manager.logger.result = None
+
+        mock_process.return_value.__aenter__.return_value = mock_manager
+        mock_process.return_value.__aexit__.return_value = None
+
+        with patch('palabra_ai.client.exception') as mock_exception:
+            result = await client.arun(config, no_raise=True)
+
+            # CRITICAL: SHOULD log as ERROR for external cancellation
+            mock_exception.assert_any_call("Manager task was cancelled")
+
+            # Result should indicate cancellation happened
+            assert result.ok is False
+            assert isinstance(result.exc, asyncio.CancelledError)
+
+
+@pytest.mark.asyncio
+async def test_graceful_shutdown_returns_ok_true():
+    """
+    Test that graceful shutdown (manager._graceful_completion=True) returns ok=True.
+    This is THE BUG we're fixing - graceful shutdown should NOT be treated as error!
+    """
+    config = Config()
+    config.source = SourceLang(lang="es")
+    config.targets = [TargetLang(lang="en")]
+
+    client = PalabraAI(client_id="test", client_secret="test")
+
+    with patch.object(client, 'process') as mock_process:
+        # Create manager with graceful completion flag
+        mock_manager = MagicMock()
+        mock_manager._graceful_completion = True  # GRACEFUL shutdown - normal EOF completion
+        mock_io = MagicMock()
+        mock_io.io_data = {
+            "start_perf_ts": 0.0,
+            "start_utc_ts": 0.0,
+            "in_sr": 16000,
+            "out_sr": 16000,
+            "mode": "ws",
+            "channels": 1,
+            "events": [],
+            "count_events": 0
+        }
+        mock_io.eos_received = True  # EOS was received - normal completion
+        mock_manager.io = mock_io
+
+        # Manager task raises CancelledError (due to shutdown_task timeout, but it's graceful)
+        mock_task = asyncio.Future()
+        mock_task.set_exception(asyncio.CancelledError())
+        mock_manager.task = mock_task
+
+        mock_manager.logger = MagicMock()
+        mock_manager.logger._task = MagicMock()
+        mock_manager.logger._task.done.return_value = True
+        mock_manager.logger.result = None
+
+        mock_process.return_value.__aenter__.return_value = mock_manager
+        mock_process.return_value.__aexit__.return_value = None
+
+        result = await client.arun(config, no_raise=True)
+
+        # CRITICAL: Graceful shutdown should return ok=True!
+        # This is normal completion - FileReader reached EOF, everything worked correctly
+        assert result is not None, "Result should not be None"
+        assert result.ok is True, "Graceful shutdown should have ok=True, not False!"
+        assert result.exc is None, "Graceful shutdown should have exc=None, not CancelledError!"
+        assert result.io_data is not None, "Should have io_data from successful run"
+        assert result.eos is True, "Should have eos=True since it was graceful completion"
