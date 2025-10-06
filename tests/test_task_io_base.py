@@ -19,7 +19,7 @@ class ConcreteIo(Io):
     def channel(self) -> Channel:
         return Channel.WS
 
-    async def send_frame(self, frame) -> None:
+    async def send_frame(self, frame: AudioFrame, raw: bytes | None = None) -> None:
         pass
 
     async def send_message(self, msg_data: bytes) -> None:
