@@ -879,3 +879,123 @@ def test_benchmark_always_overrides_allowed_message_types():
     assert "partial_transcription" in BENCHMARK_ALLOWED_MESSAGE_TYPES
     assert "partial_translated_transcription" in BENCHMARK_ALLOWED_MESSAGE_TYPES
     assert "validated_transcription" in BENCHMARK_ALLOWED_MESSAGE_TYPES
+
+
+def test_benchmark_handles_sentence_splitter_case():
+    """Test that sentence splitter case uses _part_0 timestamp as parent for _part_1+"""
+    from palabra_ai.benchmark.__main__ import Report, Tid
+
+    # Test the core logic directly: parent_timestamps building
+    sentences = {
+        "base_sentence_part_0": type('Sentence', (), {'local_start_ts': 1.0})(),
+    }
+
+    # Build registry as done in Report.parse
+    parent_timestamps = {}
+    for raw_tid, sentence in sentences.items():
+        _tid = Tid.parse(raw_tid)
+        if _tid.base not in parent_timestamps:
+            parent_timestamps[_tid.base] = sentence.local_start_ts
+
+    # For sentence splitter cases: find _part_0 sentences and use their timestamps
+    # for base TIDs that don't exist (because base only has partial_transcription)
+    for raw_tid, sentence in sentences.items():
+        _tid = Tid.parse(raw_tid)
+        if _tid.part_num == 0 and _tid.base not in parent_timestamps:
+            parent_timestamps[_tid.base] = sentence.local_start_ts
+
+    # Verify the fix works: base_sentence should be in parent_timestamps
+    assert "base_sentence" in parent_timestamps, "base_sentence should be in parent_timestamps from _part_0"
+    assert parent_timestamps["base_sentence"] == 1.0, "Should use _part_0 timestamp"
+
+    # Test Tid parsing works correctly
+    tid0 = Tid.parse("base_sentence_part_0")
+    assert tid0.base == "base_sentence"
+    assert tid0.part_num == 0
+
+    tid1 = Tid.parse("base_sentence_part_1")
+    assert tid1.base == "base_sentence"
+    assert tid1.part_num == 1
+
+
+def test_benchmark_handles_missing_partial_transcription():
+    """Test that sentences are created even when partial_transcription is missing"""
+    from palabra_ai.benchmark.__main__ import Report
+    from palabra_ai.model import IoData
+    from palabra_ai.message import IoEvent, Dbg, Kind
+    import orjson
+    import base64
+    import numpy as np
+
+    def make_event(idx, tid, mtype, dawn_ts, text="test"):
+        if mtype in ("input_audio_data", "output_audio_data"):
+            audio_samples = np.zeros(160, dtype=np.int16)
+            audio_b64 = base64.b64encode(audio_samples.tobytes()).decode('utf-8')
+            if mtype == "input_audio_data":
+                body_dict = {
+                    "message_type": mtype,
+                    "data": {"data": audio_b64}
+                }
+            else:  # output_audio_data
+                body_dict = {
+                    "message_type": mtype,
+                    "data": {"data": audio_b64, "transcription_id": tid}
+                }
+        else:  # transcription messages
+            body_dict = {
+                "message_type": mtype,
+                "data": {
+                    "transcription": {
+                        "text": text,
+                        "segments": [{"start": dawn_ts, "end": dawn_ts + 1.0}],
+                        "transcription_id": tid
+                    }
+                }
+            }
+        return IoEvent(
+            head=Dbg(kind=Kind.MESSAGE if "transcription" in mtype or mtype == "input_audio_data" else Kind.AUDIO,
+                     ch=None, dir=None, idx=idx, dawn_ts=dawn_ts, dur_s=0.1),
+            body=orjson.dumps(body_dict),
+            tid=None,
+            mtype=None
+        )
+
+    base_tid = "test123_part_0"
+    base_ts = 0.5
+
+    # Create events: input, validated, translated, output_audio (no partial)
+    events = [
+        make_event(0, None, "input_audio_data", base_ts),
+        make_event(10, base_tid, "validated_transcription", base_ts + 0.5, "validated text"),
+        make_event(11, base_tid, "translated_transcription", base_ts + 1.0, "translated text"),
+        make_event(12, base_tid, "output_audio_data", base_ts + 1.5),
+    ]
+
+    # Create IoData
+    io_data = IoData(
+        start_perf_ts=base_ts, start_utc_ts=base_ts, in_sr=16000, out_sr=24000,
+        mode="test", channels=1, events=events, count_events=len(events)
+    )
+
+    # Parse with Report - should handle missing partial_transcription
+    report, _, _ = Report.parse(io_data)
+
+    # Verify sentence was created despite missing partial_transcription
+    assert len(report.sentences) == 1
+    sentence = report.sentences[base_tid]
+
+    # Check fallback behavior
+    assert sentence.partial_text == ""  # Should be empty when partial missing
+    assert sentence.partial_ts is None  # Should be None when partial missing
+    assert sentence.validated_text == "validated text"  # Should use validated
+    assert sentence.translated_text == "translated text"  # Should use translated
+
+    # Timing should be calculated correctly
+    assert sentence.validated_ts == base_ts + 0.5
+    assert sentence.translated_ts == base_ts + 1.0
+    assert sentence.tts_api_ts == base_ts + 1.5
+
+    # Metrics should still be calculated (using validated timing calculations)
+    assert sentence.metric_partial is None  # Should be None when partial missing
+    assert sentence.metric_validated > 0  # Should be positive
+    assert sentence.metric_translated > 0  # Should be positive

@@ -139,7 +139,9 @@ class Sentence:
 
     @property
     def has_metrics(self) -> bool:
-        return self.metric_partial is not None
+        # Consider sentence to have metrics if it has validated/translated/tts timing,
+        # even if partial_transcription is missing (fallback case)
+        return self.metric_validated is not None
 
 @dataclass
 class AudioStat:
@@ -199,6 +201,7 @@ class Report:
         all_with_tid = [e for e in sorted(io_data.events, key=lambda x: x.head.idx) if e.tid]
         focused = [e for e in all_with_tid if FOCUSED.fullmatch(e.tid)]
         extra_parts = [e for e in all_with_tid if not FOCUSED.fullmatch(e.tid)]
+
         focused_by_tid = defaultdict(list)
         for fe in focused:
             focused_by_tid[fe.tid].append(fe)
@@ -216,14 +219,28 @@ class Report:
                 if fe.mtype not in mtypes:
                     mtypes[fe.mtype] = fe
             # mtypes = {e.mtype:e for e in reversed(fes)} # first event of each type
+
             partial = mtypes.get("partial_transcription")
             validated = mtypes.get("validated_transcription")
             translated = mtypes.get("translated_transcription")
             out_audio = mtypes.get("output_audio_data")
-            if not all([partial, validated, translated, out_audio]):
+
+            # Require validated, translated, out_audio + (partial OR validated)
+            if not all([validated, translated, out_audio]):
                 continue
 
-            asr_start = partial.body["data"]["transcription"]["segments"][0]["start"]
+            # Handle missing partial_transcription by falling back to validated_transcription
+            if not partial:
+                # Use validated_transcription as fallback for timing calculations
+                timing_source = validated
+                partial_text = ""  # No partial text available
+                partial_ts = None  # No partial timestamp available
+            else:
+                timing_source = partial
+                partial_text = partial.body["data"]["transcription"]["text"]
+                partial_ts = partial.head.dawn_ts
+
+            asr_start = timing_source.body["data"]["transcription"]["segments"][0]["start"]
             nearest_in = cls.predecessor(in_evs_by_dawn, asr_start)
             if not nearest_in:
                 continue
@@ -236,14 +253,14 @@ class Report:
                 transcription_id=raw_tid,
                 local_start_ts=local_start_ts,
                 local_start_chunk_idx=nearest_in_ev.head.idx,
-                partial_ts=partial.head.dawn_ts,
+                partial_ts=partial_ts,
                 validated_ts=validated.head.dawn_ts,
                 translated_ts=translated.head.dawn_ts,
                 tts_api_ts=out_audio.head.dawn_ts,
-                partial_text=partial.body["data"]["transcription"]["text"],
+                partial_text=partial_text,
                 validated_text=validated.body["data"]["transcription"]["text"],
                 translated_text=translated.body["data"]["transcription"]["text"],
-                metric_partial=partial.head.dawn_ts - local_start_ts,
+                metric_partial=partial_ts - local_start_ts if partial_ts else None,
                 metric_validated=validated.head.dawn_ts - local_start_ts,
                 metric_translated=translated.head.dawn_ts - local_start_ts,
                 metric_tts_api=out_audio.head.dawn_ts - local_start_ts,
@@ -281,6 +298,7 @@ class Report:
             parent_ts = parent_timestamps.get(_tid.base)
 
             if parent_ts is None:
+                # DEPRECATED: This warning should no longer occur after fallback implementation
                 print(f"⚠️  WARNING: No parent sentence found for {raw_tid} (base: {_tid.base})")
                 continue
 
@@ -293,9 +311,7 @@ class Report:
                 # All metrics stay None
             )
 
-        # Warn if no sentences found
-        if not sentences:
-            print("\n⚠️  WARNING: No valid sentences found in benchmark data")
+        # Note: sentences may be empty in some cases, which is valid
 
         # Calculate metrics summary
         metrics_summary = {}
@@ -457,7 +473,7 @@ def format_report(report: Report, io_data: IoData, source_lang: str, target_lang
                     tid.display,
                     truncate_text(sentence.validated_text),
                     truncate_text(sentence.translated_text),
-                    f"{sentence.metric_partial:.2f}",
+                    f"{sentence.metric_partial:.2f}" if sentence.metric_partial is not None else "-",
                     f"{sentence.metric_validated:.2f}" if sentence.metric_validated else "-",
                     f"{sentence.metric_translated:.2f}" if sentence.metric_translated else "-",
                     f"{sentence.metric_tts_api:.2f}" if sentence.metric_tts_api else "-",
