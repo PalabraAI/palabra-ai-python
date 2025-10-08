@@ -30,7 +30,7 @@ from palabra_ai.config import WsMode
 from palabra_ai.constant import BYTES_PER_SAMPLE
 from palabra_ai.enum import Kind
 from palabra_ai.lang import Language
-from palabra_ai.message import IoEvent
+from palabra_ai.message import IoEvent, Message
 from palabra_ai.model import IoData
 from palabra_ai.task.adapter.dummy import DummyWriter
 from palabra_ai.task.adapter.file import FileReader
@@ -39,6 +39,9 @@ from palabra_ai.util.sysinfo import get_system_info
 
 INPUT_CHUNK_DURATION_S = 0.1 # 100ms
 FOCUSED = re.compile(r"^(?!.*_part_[1-9]\d*).*$") # without part_1+ suffix
+
+# Benchmark always uses all message types for complete data collection
+BENCHMARK_ALLOWED_MESSAGE_TYPES = [mt.value for mt in Message.ALLOWED_TYPES]
 
 T = TypeVar("T")
 
@@ -549,6 +552,7 @@ def main():
             config.source._on_transcription = on_transcription
             config.targets[0]._writer = DummyWriter()
             config.benchmark = True
+            config.allowed_message_types = BENCHMARK_ALLOWED_MESSAGE_TYPES
 
             source_lang = config.source.lang.code
             target_lang = config.targets[0].lang.code
@@ -563,6 +567,7 @@ def main():
                 targets=[TargetLang(Language.get_or_create(target_lang), DummyWriter())],
                 benchmark=True,
                 mode=mode,
+                allowed_message_types=BENCHMARK_ALLOWED_MESSAGE_TYPES,
             )
 
         # Enable debug mode and logging when --out is specified

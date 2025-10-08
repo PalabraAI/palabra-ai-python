@@ -861,3 +861,21 @@ def test_sentence_has_metrics():
     )
     assert sentence_with_metrics.has_metrics is True
     assert sentence_with_metrics.metric_partial == 0.5
+
+
+def test_benchmark_always_overrides_allowed_message_types():
+    """Test that benchmark always uses BENCHMARK_ALLOWED_MESSAGE_TYPES regardless of config"""
+    from palabra_ai.benchmark.__main__ import BENCHMARK_ALLOWED_MESSAGE_TYPES
+    from palabra_ai.message import Message
+
+    # Verify the constant contains all expected types
+    expected = {mt.value for mt in Message.ALLOWED_TYPES}
+    actual = set(BENCHMARK_ALLOWED_MESSAGE_TYPES)
+    assert actual == expected
+
+    # Verify it includes all required types
+    assert "pipeline_timings" in BENCHMARK_ALLOWED_MESSAGE_TYPES
+    assert "translated_transcription" in BENCHMARK_ALLOWED_MESSAGE_TYPES
+    assert "partial_transcription" in BENCHMARK_ALLOWED_MESSAGE_TYPES
+    assert "partial_translated_transcription" in BENCHMARK_ALLOWED_MESSAGE_TYPES
+    assert "validated_transcription" in BENCHMARK_ALLOWED_MESSAGE_TYPES
