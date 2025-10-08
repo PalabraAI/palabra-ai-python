@@ -11,7 +11,8 @@ services:
       - .env
     # Override CMD to pass arguments from command line
     # Usage: docker-compose run benchmark --config DNA.json --out ./results DNA.wav
-    entrypoint: ["sh", "-c", "uv sync --frozen && uv run python -m palabra_ai.benchmark \"$@\"", "--"]
+    # Note: $$@ is special syntax for docker-compose v1 compatibility
+    entrypoint: sh -c 'uv sync --frozen && uv run python -m palabra_ai.benchmark "$$@"' --
 
 volumes:
   palabra-venv:
