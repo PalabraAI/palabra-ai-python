@@ -391,6 +391,12 @@ def test_config_allowed_message_types():
     assert allowed == expected
 
 
+def test_config_pipeline_timings_enabled_by_default():
+    """Test that pipeline_timings is enabled by default"""
+    config = Config()
+    assert "pipeline_timings" in config.allowed_message_types
+
+
 def test_config_round_trip_ws_mode():
     """Test that Config with WsMode survives round-trip serialization"""
     # Create config with WsMode
