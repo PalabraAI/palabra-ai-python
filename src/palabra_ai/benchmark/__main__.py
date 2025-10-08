@@ -41,6 +41,16 @@ FOCUSED = re.compile(r"^(?!.*_part_[1-9]\d*).*$") # without part_1+ suffix
 
 T = TypeVar("T")
 
+def get_base_tid(tid: str) -> str:
+    """Extract base transcription_id without _part_N suffix
+
+    Examples:
+        sentence_2_part_0 -> sentence_2
+        sentence_2_part_1 -> sentence_2
+        sentence_1 -> sentence_1
+    """
+    return re.sub(r'_part_\d+$', '', tid)
+
 def calculate_stats(values: list[float]) -> dict[str, float]:
     """Calculate min, max, avg, p50, p90, p95 for a list of values"""
     if not values:
@@ -209,6 +219,13 @@ class Report:
                 metric_tts_playback=(playback_tts_ts - local_start_ts) if playback_tts_ts else None,
             )
 
+        # Build registry of base_tid -> local_start_ts for parent sentences
+        parent_timestamps = {}
+        for tid, sentence in sentences.items():
+            base_tid = get_base_tid(tid)
+            if base_tid not in parent_timestamps:
+                parent_timestamps[base_tid] = sentence.local_start_ts
+
         # Process extra_parts (_part_1+) - text only, no metrics
         extra_parts_by_tid = defaultdict(list)
         for ep in extra_parts:
@@ -223,15 +240,30 @@ class Report:
             validated = mtypes.get("validated_transcription")
             translated = mtypes.get("translated_transcription")
 
-            if validated and translated:
-                sentences[tid] = Sentence(
-                    transcription_id=tid,
-                    local_start_ts=0.0,  # dummy value, will not be shown
-                    local_start_chunk_idx=0,  # dummy value
-                    validated_text=validated.body["data"]["transcription"]["text"],
-                    translated_text=translated.body["data"]["transcription"]["text"],
-                    # All metrics stay None - this is the key difference
-                )
+            # Show what we have - need at least one of validated or translated
+            if not validated and not translated:
+                continue
+
+            # Get parent timestamp for proper sorting
+            base_tid = get_base_tid(tid)
+            parent_ts = parent_timestamps.get(base_tid)
+
+            if parent_ts is None:
+                print(f"⚠️  WARNING: No parent sentence found for {tid} (base: {base_tid})")
+                continue
+
+            sentences[tid] = Sentence(
+                transcription_id=tid,
+                local_start_ts=parent_ts,  # Use parent's timestamp for sorting
+                local_start_chunk_idx=0,  # Not used for extra_parts
+                validated_text=validated.body["data"]["transcription"]["text"] if validated else "",
+                translated_text=translated.body["data"]["transcription"]["text"] if translated else "",
+                # All metrics stay None
+            )
+
+        # Warn if no sentences found
+        if not sentences:
+            print("\n⚠️  WARNING: No valid sentences found in benchmark data")
 
         # Calculate metrics summary
         metrics_summary = {}

@@ -611,3 +611,166 @@ def test_benchmark_parse_handles_part_suffixes():
     # Should only have 2 values (sentence_1 and sentence_2_part_0)
     partial_count = len([s for s in report.sentences.values() if s.metric_partial is not None])
     assert partial_count == 2, f"Expected 2 sentences with metrics, got {partial_count}"
+
+    # Check proper sorting - _part_1+ should use parent timestamp and be grouped with parent
+    sorted_sentences = sorted(report.sentences.items(), key=lambda x: x[1].local_start_ts)
+    sorted_tids = [tid for tid, _ in sorted_sentences]
+
+    # sentence_2_part_0, sentence_2_part_1, sentence_2_part_2 should all use same parent timestamp
+    s2p0 = report.sentences["sentence_2_part_0"]
+    s2p1 = report.sentences["sentence_2_part_1"]
+    s2p2 = report.sentences["sentence_2_part_2"]
+
+    # All should have same local_start_ts (from parent)
+    assert s2p0.local_start_ts == s2p1.local_start_ts, "sentence_2_part_1 should use parent timestamp"
+    assert s2p0.local_start_ts == s2p2.local_start_ts, "sentence_2_part_2 should use parent timestamp"
+
+
+def test_benchmark_parse_handles_partial_extra_parts():
+    """Test that _part_1+ with only validated or only translated are shown"""
+    from palabra_ai.benchmark.__main__ import Report
+    from palabra_ai.message import IoEvent, Dbg
+    from palabra_ai.model import IoData
+    from palabra_ai.enum import Kind
+    import orjson
+    import base64
+    import numpy as np
+
+    base_ts = 0.0
+
+    def make_event(idx, tid, mtype, dawn_ts, text="test"):
+        if mtype in ("input_audio_data", "output_audio_data"):
+            audio_samples = np.zeros(160, dtype=np.int16)
+            audio_b64 = base64.b64encode(audio_samples.tobytes()).decode('utf-8')
+            body_dict = {
+                "message_type": mtype,
+                "data": {"data": audio_b64, "transcription_id": tid} if mtype == "output_audio_data" else {"data": audio_b64}
+            }
+        else:
+            body_dict = {
+                "message_type": mtype,
+                "data": {
+                    "transcription": {
+                        "text": text,
+                        "segments": [{"start": dawn_ts, "end": dawn_ts + 1.0}],
+                        "transcription_id": tid
+                    }
+                }
+            }
+
+        return IoEvent(
+            head=Dbg(kind=Kind.MESSAGE if "transcription" in mtype or mtype == "input_audio_data" else Kind.AUDIO,
+                     ch=None, dir=None, idx=idx, dawn_ts=dawn_ts, dur_s=0.1),
+            body=orjson.dumps(body_dict),
+            tid=None,
+            mtype=None
+        )
+
+    events = [
+        make_event(0, None, "input_audio_data", base_ts),
+
+        # Parent sentence
+        make_event(10, "s1_part_0", "partial_transcription", base_ts + 0.5, "Parent"),
+        make_event(11, "s1_part_0", "validated_transcription", base_ts + 0.6, "Parent"),
+        make_event(12, "s1_part_0", "translated_transcription", base_ts + 0.7, "Padre"),
+        make_event(13, "s1_part_0", "output_audio_data", base_ts + 0.8),
+
+        # Only validated
+        make_event(20, "s1_part_1", "validated_transcription", base_ts + 1.0, "Only validated"),
+
+        # Only translated
+        make_event(30, "s1_part_2", "translated_transcription", base_ts + 1.5, "Solo traducido"),
+    ]
+
+    io_data = IoData(
+        start_perf_ts=base_ts,
+        start_utc_ts=base_ts,
+        in_sr=16000,
+        out_sr=24000,
+        mode="ws",
+        channels=1,
+        events=events,
+        count_events=len(events)
+    )
+
+    report, _, _ = Report.parse(io_data)
+
+    assert len(report.sentences) == 3, f"Expected 3 sentences, got {len(report.sentences)}"
+
+    # Check s1_part_1 (only validated)
+    s1p1 = report.sentences["s1_part_1"]
+    assert s1p1.validated_text == "Only validated"
+    assert s1p1.translated_text == ""
+    assert s1p1.metric_partial is None
+
+    # Check s1_part_2 (only translated)
+    s1p2 = report.sentences["s1_part_2"]
+    assert s1p2.validated_text == ""
+    assert s1p2.translated_text == "Solo traducido"
+    assert s1p2.metric_partial is None
+
+
+def test_benchmark_parse_handles_orphan_extra_parts():
+    """Test that _part_1+ without parent prints warning and is skipped"""
+    from palabra_ai.benchmark.__main__ import Report
+    from palabra_ai.message import IoEvent, Dbg
+    from palabra_ai.model import IoData
+    from palabra_ai.enum import Kind
+    from io import StringIO
+    import sys
+    import orjson
+
+    base_ts = 0.0
+
+    def make_event(idx, tid, mtype, dawn_ts, text="test"):
+        body_dict = {
+            "message_type": mtype,
+            "data": {
+                "transcription": {
+                    "text": text,
+                    "segments": [{"start": dawn_ts, "end": dawn_ts + 1.0}],
+                    "transcription_id": tid
+                }
+            }
+        }
+        return IoEvent(
+            head=Dbg(kind=Kind.MESSAGE, ch=None, dir=None, idx=idx, dawn_ts=dawn_ts, dur_s=0.1),
+            body=orjson.dumps(body_dict),
+            tid=None,
+            mtype=None
+        )
+
+    events = [
+        # Orphan _part_1 without parent
+        make_event(10, "orphan_part_1", "validated_transcription", base_ts + 0.5, "Orphan"),
+        make_event(11, "orphan_part_1", "translated_transcription", base_ts + 0.6, "Huerfano"),
+    ]
+
+    io_data = IoData(
+        start_perf_ts=base_ts,
+        start_utc_ts=base_ts,
+        in_sr=16000,
+        out_sr=24000,
+        mode="ws",
+        channels=1,
+        events=events,
+        count_events=len(events)
+    )
+
+    # Capture stdout to check for warning
+    captured = StringIO()
+    old_stdout = sys.stdout
+    try:
+        sys.stdout = captured
+        report, _, _ = Report.parse(io_data)
+        sys.stdout = old_stdout
+    finally:
+        sys.stdout = old_stdout
+
+    # Should be skipped
+    assert "orphan_part_1" not in report.sentences
+
+    # Should print warning
+    output = captured.getvalue()
+    assert "WARNING" in output
+    assert "No parent sentence found for orphan_part_1" in output
