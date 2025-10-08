@@ -570,8 +570,8 @@ def test_config_preserves_preprocessing_settings():
     config1.preprocessing.vad_threshold = 0.7
     config1.preprocessing.auto_tempo = True
 
-    # Round trip
-    json_str = config1.to_json()
+    # Round trip - need full=True because config was created via __init__ and then modified
+    json_str = config1.to_json(full=True)
     config2 = Config.from_json(json_str)
 
     # Check preprocessing preserved
@@ -579,8 +579,8 @@ def test_config_preserves_preprocessing_settings():
     assert config2.preprocessing.vad_threshold == 0.7
     assert config2.preprocessing.auto_tempo == True
 
-    # Check idempotency
-    json_str2 = config2.to_json()
+    # Check idempotency - full=True on both sides
+    json_str2 = config2.to_json(full=True)
     assert json_str == json_str2
 
 
@@ -934,8 +934,90 @@ def test_config_null_values_preserved():
     assert_dicts_identical(dump2, dump1)
 
 
+def test_config_minimal_stays_minimal():
+    """Minimal config from benchmark should stay minimal in to_dict() roundtrip"""
+    import copy
+    from palabra_ai.util.orjson import to_json
+
+    # This is the EXACT minimal config user provided (en→ru with delta1, auto_tempo: true)
+    minimal_json = {
+        "input_stream": {
+            "content_type": "audio",
+            "source": {
+                "type": "ws",
+                "format": "pcm_s16le",
+                "sample_rate": 16000,
+                "channels": 1
+            }
+        },
+        "output_stream": {
+            "content_type": "audio",
+            "target": {
+                "type": "ws",
+                "format": "pcm_s16le",
+                "sample_rate": 24000,
+                "channels": 1
+            }
+        },
+        "pipeline": {
+            "transcription": {
+                "source_language": "en",
+                "detectable_languages": [],
+                "segment_confirmation_silence_threshold": 0.7,
+                "sentence_splitter": {
+                    "enabled": False
+                },
+                "verification": {
+                    "auto_transcription_correction": False,
+                    "transcription_correction_style": None
+                }
+            },
+            "translations": [
+                {
+                    "target_language": "ru",
+                    "translation_model": "delta1",
+                    "translate_partial_transcriptions": False,
+                    "speech_generation": {
+                        "voice_cloning": False,
+                        "voice_id": "default_low",
+                        "voice_timbre_detection": {
+                            "enabled": False,
+                            "high_timbre_voices": ["default_high"],
+                            "low_timbre_voices": ["default_low"]
+                        }
+                    }
+                }
+            ],
+            "translation_queue_configs": {
+                "global": {
+                    "desired_queue_level_ms": 5000,
+                    "max_queue_level_ms": 20000,
+                    "auto_tempo": True,
+                    "min_tempo": 1.15,
+                    "max_tempo": 1.45
+                }
+            },
+            "allowed_message_types": [
+                "translated_transcription",
+                "partial_transcription",
+                "partial_translated_transcription",
+                "validated_transcription"
+            ]
+        }
+    }
+
+    # Load config
+    config = Config.from_json(copy.deepcopy(minimal_json))
+
+    # to_dict() with default full=False should return ONLY explicitly set fields (minimal)
+    dumped = config.to_dict()
+
+    # Should be identical to input (no extra defaults added)
+    assert_dicts_identical(dumped, minimal_json)
+
+
 def test_config_to_dict_includes_all_modifications():
-    """Config.to_dict() must include ALL modifications (set and unset fields)"""
+    """Config.to_dict(full=True) must include ALL modifications (set and unset fields)"""
     from palabra_ai.util.orjson import to_json
 
     config = Config(source=SourceLang(lang=EN), targets=[TargetLang(lang=ES)])
@@ -948,8 +1030,8 @@ def test_config_to_dict_includes_all_modifications():
     config.targets[0].translation.translate_partial_transcriptions = True
     config.translation_queue_configs.global_.desired_queue_level_ms = 8000
 
-    # Get dict (to_dict() calls model_dump() without exclude_unset)
-    data = config.to_dict()
+    # Get dict - need full=True because config was created via __init__ and then modified
+    data = config.to_dict(full=True)
 
     # Should include ALL modifications (both set and unset fields)
     assert data["pipeline"]["preprocessing"]["vad_threshold"] == 0.6
@@ -963,7 +1045,7 @@ def test_config_to_dict_includes_all_modifications():
     json_str = to_json(data).decode("utf-8")
     assert len(json_str) > 0
 
-    # Roundtrip should preserve everything
+    # Roundtrip should preserve everything (from_json → to_dict(full=True))
     config2 = Config.from_json(json.loads(json_str))
     assert config2.preprocessing.vad_threshold == 0.6
     assert config2.preprocessing.auto_tempo == True

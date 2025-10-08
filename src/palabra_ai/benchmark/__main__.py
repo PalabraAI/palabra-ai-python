@@ -492,7 +492,7 @@ def main():
         result = palabra.run(config, no_raise=True)
 
         # Save RunResult in debug mode when --out is specified
-        if output_dir and timestamp:
+        if output_dir and timestamp and result is not None:
             try:
                 result_debug_path = output_dir / f"{timestamp}_bench_runresult_debug.json"
                 result_debug_path.write_bytes(to_json(result.model_dump(), True))
@@ -510,7 +510,14 @@ def main():
             progress_bar[0].update(100 - progress_bar[0].n)
             progress_bar[0].close()
 
-        if not result.ok or not result.io_data:
+        if result is None or not result.ok or not result.io_data:
+            if result is None:
+                print(f"\n{'='*80}")
+                print("BENCHMARK INTERRUPTED BY USER (Ctrl+C)")
+                print(f"{'='*80}\n")
+                print("The benchmark was interrupted before completion.")
+                print("No results were generated.")
+                return
             if result.exc:
                 exc_type = type(result.exc).__name__
                 exc_msg = str(result.exc) or "(no message)"

@@ -615,11 +615,31 @@ class Config(BaseModel):
         result = {**data, **{"pipeline": pipeline}, **self.mode.model_dump()}
         return result
 
-    def to_dict(self) -> dict[str, Any]:
-        return self.model_dump()
+    def to_dict(self, full: bool = False) -> dict[str, Any]:
+        """
+        Convert config to dict.
 
-    def to_json(self) -> str:
-        return to_json(self.model_dump()).decode("utf-8")
+        Args:
+            full: If False (default), return only explicitly set fields (exclude_unset=True).
+                  If True, return all fields including defaults (exclude_unset=False).
+
+        Note: When config is created via __init__ and then modified, use full=True
+              to include all modifications.
+        """
+        return self.model_dump(exclude_unset=not full)
+
+    def to_json(self, full: bool = False) -> str:
+        """
+        Convert config to JSON string.
+
+        Args:
+            full: If False (default), return only explicitly set fields (exclude_unset=True).
+                  If True, return all fields including defaults (exclude_unset=False).
+
+        Note: When config is created via __init__ and then modified, use full=True
+              to include all modifications.
+        """
+        return to_json(self.to_dict(full=full)).decode("utf-8")
 
     @classmethod
     def from_dict(cls, data: dict) -> Config:

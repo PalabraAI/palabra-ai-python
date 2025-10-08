@@ -433,3 +433,45 @@ def test_manager_has_graceful_completion_flag():
     # Check that Manager dataclass has _graceful_completion field
     field_names = {f.name for f in fields(Manager)}
     assert '_graceful_completion' in field_names, "Manager should have _graceful_completion field"
+
+
+def test_benchmark_handles_result_none():
+    """Test that benchmark handles result=None (Ctrl+C) without AttributeError"""
+    from palabra_ai.benchmark.__main__ import main
+    from pathlib import Path
+    import tempfile
+    from io import StringIO
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir = Path(tmpdir)
+
+        with patch('palabra_ai.benchmark.__main__.PalabraAI') as mock_palabra_class:
+            mock_palabra = MagicMock()
+            # Simulate KeyboardInterrupt returning None
+            mock_palabra.run.return_value = None
+            mock_palabra_class.return_value = mock_palabra
+
+            with patch('sys.argv', ['benchmark', 'dummy.wav', 'en', 'es', '--out', str(output_dir)]):
+                with patch('palabra_ai.benchmark.__main__.Path') as mock_path_class:
+                    def path_side_effect(path_str):
+                        if 'dummy.wav' in str(path_str):
+                            mock_path = MagicMock()
+                            mock_path.exists.return_value = True
+                            return mock_path
+                        return Path(path_str)
+                    mock_path_class.side_effect = path_side_effect
+
+                    with patch('av.open'):
+                        with patch('palabra_ai.benchmark.__main__.FileReader'):
+                            with patch('palabra_ai.benchmark.__main__.tqdm'):
+                                with patch('palabra_ai.benchmark.__main__.get_system_info', return_value={"test": "info"}):
+                                    captured_output = StringIO()
+                                    with patch('sys.stdout', captured_output):
+                                        # Should NOT raise AttributeError
+                                        main()  # Should return gracefully, not raise
+
+                                    output = captured_output.getvalue()
+                                    # Check that appropriate message was printed
+                                    assert "INTERRUPTED BY USER" in output
+                                    assert "Ctrl+C" in output
+                                    assert "No results were generated" in output
