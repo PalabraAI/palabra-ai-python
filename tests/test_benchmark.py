@@ -475,3 +475,139 @@ def test_benchmark_handles_result_none():
                                     assert "INTERRUPTED BY USER" in output
                                     assert "Ctrl+C" in output
                                     assert "No results were generated" in output
+
+
+def test_benchmark_parse_handles_part_suffixes():
+    """Test that _part_0 gets metrics but _part_1+ only gets text"""
+    from palabra_ai.benchmark.__main__ import Report
+    from palabra_ai.message import IoEvent, Dbg
+    from palabra_ai.model import IoData
+    from palabra_ai.enum import Kind
+    from datetime import datetime
+
+    # Create mock events for different tid patterns
+    base_ts = 0.0  # Use relative timestamps starting from 0
+
+    def make_event(idx, tid, mtype, dawn_ts, text="test"):
+        import orjson
+        import base64
+        import numpy as np
+
+        # Create dummy audio data (empty PCM samples)
+        if mtype in ("input_audio_data", "output_audio_data"):
+            audio_samples = np.zeros(160, dtype=np.int16)  # 10ms @ 16khz
+            audio_b64 = base64.b64encode(audio_samples.tobytes()).decode('utf-8')
+
+            if mtype == "input_audio_data":
+                body_dict = {
+                    "message_type": mtype,
+                    "data": {"data": audio_b64}
+                }
+            else:  # output_audio_data
+                body_dict = {
+                    "message_type": mtype,
+                    "data": {"data": audio_b64, "transcription_id": tid}
+                }
+        else:  # transcription messages
+            body_dict = {
+                "message_type": mtype,
+                "data": {
+                    "transcription": {
+                        "text": text,
+                        "segments": [{"start": dawn_ts, "end": dawn_ts + 1.0}],
+                        "transcription_id": tid
+                    }
+                }
+            }
+
+        body_bytes = orjson.dumps(body_dict)
+
+        return IoEvent(
+            head=Dbg(kind=Kind.MESSAGE if "transcription" in mtype or mtype == "input_audio_data" else Kind.AUDIO,
+                     ch=None, dir=None, idx=idx, dawn_ts=dawn_ts, dur_s=0.1),
+            body=body_bytes,
+            tid=None,
+            mtype=None
+        )
+
+    events = [
+        # Input audio events
+        make_event(0, None, "input_audio_data", base_ts),
+        make_event(1, None, "input_audio_data", base_ts + 0.1),
+        make_event(2, None, "input_audio_data", base_ts + 0.2),
+
+        # sentence_1 (no _part suffix) - should have metrics
+        make_event(10, "sentence_1", "partial_transcription", base_ts + 0.5, "Hello"),
+        make_event(11, "sentence_1", "validated_transcription", base_ts + 0.6, "Hello"),
+        make_event(12, "sentence_1", "translated_transcription", base_ts + 0.7, "Hola"),
+        make_event(13, "sentence_1", "output_audio_data", base_ts + 0.8),
+
+        # sentence_2_part_0 - should have metrics
+        make_event(20, "sentence_2_part_0", "partial_transcription", base_ts + 1.0, "World"),
+        make_event(21, "sentence_2_part_0", "validated_transcription", base_ts + 1.1, "World"),
+        make_event(22, "sentence_2_part_0", "translated_transcription", base_ts + 1.2, "Mundo"),
+        make_event(23, "sentence_2_part_0", "output_audio_data", base_ts + 1.3),
+
+        # sentence_2_part_1 - should NOT have metrics, only text
+        make_event(30, "sentence_2_part_1", "validated_transcription", base_ts + 1.5, "Part one"),
+        make_event(31, "sentence_2_part_1", "translated_transcription", base_ts + 1.6, "Parte uno"),
+
+        # sentence_2_part_2 - should NOT have metrics, only text
+        make_event(40, "sentence_2_part_2", "validated_transcription", base_ts + 2.0, "Part two"),
+        make_event(41, "sentence_2_part_2", "translated_transcription", base_ts + 2.1, "Parte dos"),
+    ]
+
+    io_data = IoData(
+        start_perf_ts=base_ts,
+        start_utc_ts=base_ts,
+        in_sr=16000,
+        out_sr=24000,
+        mode="ws",
+        channels=1,
+        events=events,
+        count_events=len(events)
+    )
+
+    # Parse the report
+    report, _, _ = Report.parse(io_data)
+
+    # Check that we have all 4 sentences
+    assert len(report.sentences) == 4, f"Expected 4 sentences, got {len(report.sentences)}"
+
+    # sentence_1 should have metrics
+    s1 = report.sentences["sentence_1"]
+    assert s1.metric_partial is not None, "sentence_1 should have metric_partial"
+    assert s1.metric_validated is not None, "sentence_1 should have metric_validated"
+    assert s1.metric_translated is not None, "sentence_1 should have metric_translated"
+    assert s1.validated_text == "Hello"
+    assert s1.translated_text == "Hola"
+
+    # sentence_2_part_0 should have metrics
+    s2p0 = report.sentences["sentence_2_part_0"]
+    assert s2p0.metric_partial is not None, "sentence_2_part_0 should have metric_partial"
+    assert s2p0.metric_validated is not None, "sentence_2_part_0 should have metric_validated"
+    assert s2p0.metric_translated is not None, "sentence_2_part_0 should have metric_translated"
+    assert s2p0.validated_text == "World"
+    assert s2p0.translated_text == "Mundo"
+
+    # sentence_2_part_1 should NOT have metrics, only text
+    s2p1 = report.sentences["sentence_2_part_1"]
+    assert s2p1.metric_partial is None, "sentence_2_part_1 should NOT have metric_partial"
+    assert s2p1.metric_validated is None, "sentence_2_part_1 should NOT have metric_validated"
+    assert s2p1.metric_translated is None, "sentence_2_part_1 should NOT have metric_translated"
+    assert s2p1.validated_text == "Part one"
+    assert s2p1.translated_text == "Parte uno"
+
+    # sentence_2_part_2 should NOT have metrics, only text
+    s2p2 = report.sentences["sentence_2_part_2"]
+    assert s2p2.metric_partial is None, "sentence_2_part_2 should NOT have metric_partial"
+    assert s2p2.metric_validated is None, "sentence_2_part_2 should NOT have metric_validated"
+    assert s2p2.metric_translated is None, "sentence_2_part_2 should NOT have metric_translated"
+    assert s2p2.validated_text == "Part two"
+    assert s2p2.translated_text == "Parte dos"
+
+    # Check that metrics_summary only includes sentences WITH metrics
+    assert "metric_partial" in report.metrics_summary
+    # Should only have 2 values (sentence_1 and sentence_2_part_0)
+    partial_count = len([s for s in report.sentences.values() if s.metric_partial is not None])
+    assert partial_count == 2, f"Expected 2 sentences with metrics, got {partial_count}"

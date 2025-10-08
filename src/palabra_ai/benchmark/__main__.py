@@ -37,7 +37,7 @@ from palabra_ai.util.orjson import to_json
 from palabra_ai.util.sysinfo import get_system_info
 
 INPUT_CHUNK_DURATION_S = 0.1 # 100ms
-FOCUSED = re.compile(r".+(_part_0)?$") # without part_1+ suffix
+FOCUSED = re.compile(r"^(?!.*_part_[1-9]\d*).*$") # without part_1+ suffix
 
 T = TypeVar("T")
 
@@ -155,7 +155,9 @@ class Report:
     def parse(cls, io_data: IoData) -> Self:
         playback_pos = 0.0
         sentences = {}
-        focused = [e for e in sorted(io_data.events, key=lambda x: x.head.idx) if e.tid and FOCUSED.fullmatch(e.tid)]
+        all_with_tid = [e for e in sorted(io_data.events, key=lambda x: x.head.idx) if e.tid]
+        focused = [e for e in all_with_tid if FOCUSED.fullmatch(e.tid)]
+        extra_parts = [e for e in all_with_tid if not FOCUSED.fullmatch(e.tid)]
         focused_by_tid = defaultdict(list)
         for fe in focused:
             focused_by_tid[fe.tid].append(fe)
@@ -206,6 +208,30 @@ class Report:
                 metric_tts_api=out_audio.head.dawn_ts - local_start_ts,
                 metric_tts_playback=(playback_tts_ts - local_start_ts) if playback_tts_ts else None,
             )
+
+        # Process extra_parts (_part_1+) - text only, no metrics
+        extra_parts_by_tid = defaultdict(list)
+        for ep in extra_parts:
+            extra_parts_by_tid[ep.tid].append(ep)
+
+        for tid, eps in extra_parts_by_tid.items():
+            mtypes = {}
+            for ep in eps:
+                if ep.mtype not in mtypes:
+                    mtypes[ep.mtype] = ep
+
+            validated = mtypes.get("validated_transcription")
+            translated = mtypes.get("translated_transcription")
+
+            if validated and translated:
+                sentences[tid] = Sentence(
+                    transcription_id=tid,
+                    local_start_ts=0.0,  # dummy value, will not be shown
+                    local_start_chunk_idx=0,  # dummy value
+                    validated_text=validated.body["data"]["transcription"]["text"],
+                    translated_text=translated.body["data"]["transcription"]["text"],
+                    # All metrics stay None - this is the key difference
+                )
 
         # Calculate metrics summary
         metrics_summary = {}
@@ -357,17 +383,28 @@ def format_report(report: Report, io_data: IoData, source_lang: str, target_lang
         global_start = sorted_sentences[0][1].local_start_ts if sorted_sentences else 0
 
         for tid, sentence in sorted_sentences:
-            start_time = sentence.local_start_ts - global_start
-            table.add_row([
-                f"{start_time:.1f}s",
-                truncate_text(sentence.validated_text),
-                truncate_text(sentence.translated_text),
-                f"{sentence.metric_partial:.2f}" if sentence.metric_partial else "-",
-                f"{sentence.metric_validated:.2f}" if sentence.metric_validated else "-",
-                f"{sentence.metric_translated:.2f}" if sentence.metric_translated else "-",
-                f"{sentence.metric_tts_api:.2f}" if sentence.metric_tts_api else "-",
-                f"{sentence.metric_tts_playback:.2f}" if sentence.metric_tts_playback else "-"
-            ])
+            has_metrics = sentence.metric_partial is not None
+
+            if has_metrics:
+                start_time = sentence.local_start_ts - global_start
+                table.add_row([
+                    f"{start_time:.1f}s",
+                    truncate_text(sentence.validated_text),
+                    truncate_text(sentence.translated_text),
+                    f"{sentence.metric_partial:.2f}",
+                    f"{sentence.metric_validated:.2f}" if sentence.metric_validated else "-",
+                    f"{sentence.metric_translated:.2f}" if sentence.metric_translated else "-",
+                    f"{sentence.metric_tts_api:.2f}" if sentence.metric_tts_api else "-",
+                    f"{sentence.metric_tts_playback:.2f}" if sentence.metric_tts_playback else "-"
+                ])
+            else:
+                # Text-only row for extra_parts (_part_1+)
+                table.add_row([
+                    "",  # no start time
+                    truncate_text(sentence.validated_text),
+                    truncate_text(sentence.translated_text),
+                    "", "", "", "", ""  # no metrics
+                ])
 
         lines.append(str(table))
         lines.append("")
