@@ -15,6 +15,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 from typing import Mapping
+from typing import NamedTuple
 from typing import Self
 from typing import TypeVar
 
@@ -41,15 +42,38 @@ FOCUSED = re.compile(r"^(?!.*_part_[1-9]\d*).*$") # without part_1+ suffix
 
 T = TypeVar("T")
 
-def get_base_tid(tid: str) -> str:
-    """Extract base transcription_id without _part_N suffix
+class Tid(NamedTuple):
+    """Parsed transcription ID with base and optional part number"""
+    base: str
+    part_num: int | None
 
-    Examples:
-        sentence_2_part_0 -> sentence_2
-        sentence_2_part_1 -> sentence_2
-        sentence_1 -> sentence_1
-    """
-    return re.sub(r'_part_\d+$', '', tid)
+    @property
+    def display(self) -> str:
+        """Format for display: base[N] if has part_num, else just base"""
+        if self.part_num is not None:
+            return f"{self.base}[{self.part_num}]"
+        return self.base
+
+    @property
+    def raw(self) -> str:
+        """Reconstruct original raw transcription_id"""
+        if self.part_num is not None:
+            return f"{self.base}_part_{self.part_num}"
+        return self.base
+
+    @classmethod
+    def parse(cls, raw_tid: str) -> "Tid":
+        """Parse raw transcription_id into base and part_num
+
+        Examples:
+            sentence_1 -> Tid(base='sentence_1', part_num=None)
+            sentence_2_part_0 -> Tid(base='sentence_2', part_num=0)
+            sentence_2_part_1 -> Tid(base='sentence_2', part_num=1)
+        """
+        match = re.search(r'^(.+)_part_(\d+)$', raw_tid)
+        if match:
+            return cls(base=match.group(1), part_num=int(match.group(2)))
+        return cls(base=raw_tid, part_num=None)
 
 def calculate_stats(values: list[float]) -> dict[str, float]:
     """Calculate min, max, avg, p50, p90, p95 for a list of values"""
@@ -109,6 +133,10 @@ class Sentence:
     partial_text: str = ""
     validated_text: str = ""
     translated_text: str = ""
+
+    @property
+    def has_metrics(self) -> bool:
+        return self.metric_partial is not None
 
 @dataclass
 class AudioStat:
@@ -179,7 +207,7 @@ class Report:
         in_audio_canvas, in_audio_stat = cls.playback(in_evs, io_data.in_sr, io_data.channels)
         out_audio_canvas, out_audio_stat = cls.playback(out_evs, io_data.out_sr, io_data.channels)
 
-        for tid, fes in focused_by_tid.items():
+        for raw_tid, fes in focused_by_tid.items():
             mtypes = {}
             for fe in fes:
                 if fe.mtype not in mtypes:
@@ -199,10 +227,10 @@ class Report:
             _, nearest_in_ev = nearest_in
             local_start_ts = nearest_in_ev.head.dawn_ts
 
-            playback_tts_ts = out_audio_stat.tids_with_actual_tts_playback.get(tid)
+            playback_tts_ts = out_audio_stat.tids_with_actual_tts_playback.get(raw_tid)
 
-            sentences[tid] = Sentence(
-                transcription_id=tid,
+            sentences[raw_tid] = Sentence(
+                transcription_id=raw_tid,
                 local_start_ts=local_start_ts,
                 local_start_chunk_idx=nearest_in_ev.head.idx,
                 partial_ts=partial.head.dawn_ts,
@@ -221,17 +249,18 @@ class Report:
 
         # Build registry of base_tid -> local_start_ts for parent sentences
         parent_timestamps = {}
-        for tid, sentence in sentences.items():
-            base_tid = get_base_tid(tid)
-            if base_tid not in parent_timestamps:
-                parent_timestamps[base_tid] = sentence.local_start_ts
+        for raw_tid, sentence in sentences.items():
+            _tid = Tid.parse(raw_tid)
+            if _tid.base not in parent_timestamps:
+                parent_timestamps[_tid.base] = sentence.local_start_ts
 
         # Process extra_parts (_part_1+) - text only, no metrics
         extra_parts_by_tid = defaultdict(list)
         for ep in extra_parts:
             extra_parts_by_tid[ep.tid].append(ep)
 
-        for tid, eps in extra_parts_by_tid.items():
+        # EXTRA SENTENCES (no metrics, just text)
+        for raw_tid, eps in extra_parts_by_tid.items():
             mtypes = {}
             for ep in eps:
                 if ep.mtype not in mtypes:
@@ -245,15 +274,15 @@ class Report:
                 continue
 
             # Get parent timestamp for proper sorting
-            base_tid = get_base_tid(tid)
-            parent_ts = parent_timestamps.get(base_tid)
+            _tid = Tid.parse(raw_tid)
+            parent_ts = parent_timestamps.get(_tid.base)
 
             if parent_ts is None:
-                print(f"⚠️  WARNING: No parent sentence found for {tid} (base: {base_tid})")
+                print(f"⚠️  WARNING: No parent sentence found for {raw_tid} (base: {_tid.base})")
                 continue
 
-            sentences[tid] = Sentence(
-                transcription_id=tid,
+            sentences[raw_tid] = Sentence(
+                transcription_id=raw_tid,
                 local_start_ts=parent_ts,  # Use parent's timestamp for sorting
                 local_start_chunk_idx=0,  # Not used for extra_parts
                 validated_text=validated.body["data"]["transcription"]["text"] if validated else "",
@@ -268,7 +297,7 @@ class Report:
         # Calculate metrics summary
         metrics_summary = {}
         for metric_name in ["metric_partial", "metric_validated", "metric_translated", "metric_tts_api", "metric_tts_playback"]:
-            values = [getattr(s, metric_name) for s in sentences.values() if getattr(s, metric_name) is not None]
+            values = [getattr(s, metric_name) for s in sentences.values() if s.has_metrics and getattr(s, metric_name) is not None]
             if values:
                 metrics_summary[metric_name] = calculate_stats(values)
 
@@ -407,20 +436,22 @@ def format_report(report: Report, io_data: IoData, source_lang: str, target_lang
         lines.append("SENTENCES BREAKDOWN")
         lines.append("-" * 80)
         table = PrettyTable()
-        table.field_names = ["Start", "Validated", "Translated", "Part", "Valid", "Trans", "TTS API", "TTS Play"]
+        table.field_names = ["Start", "ID", "Validated", "Translated", "Part", "Valid", "Trans", "TTS API", "TTS Play"]
+        table.align["ID"] = "l"
         table.align["Validated"] = "l"
         table.align["Translated"] = "l"
 
         sorted_sentences = sorted(report.sentences.items(), key=lambda x: x[1].local_start_ts)
         global_start = sorted_sentences[0][1].local_start_ts if sorted_sentences else 0
 
-        for tid, sentence in sorted_sentences:
-            has_metrics = sentence.metric_partial is not None
+        for raw_tid, sentence in sorted_sentences:
+            tid = Tid.parse(raw_tid)
 
-            if has_metrics:
+            if sentence.has_metrics:
                 start_time = sentence.local_start_ts - global_start
                 table.add_row([
                     f"{start_time:.1f}s",
+                    tid.display,
                     truncate_text(sentence.validated_text),
                     truncate_text(sentence.translated_text),
                     f"{sentence.metric_partial:.2f}",
@@ -433,6 +464,7 @@ def format_report(report: Report, io_data: IoData, source_lang: str, target_lang
                 # Text-only row for extra_parts (_part_1+)
                 table.add_row([
                     "",  # no start time
+                    tid.display,
                     truncate_text(sentence.validated_text),
                     truncate_text(sentence.translated_text),
                     "", "", "", "", ""  # no metrics

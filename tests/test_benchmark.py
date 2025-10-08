@@ -625,6 +625,26 @@ def test_benchmark_parse_handles_part_suffixes():
     assert s2p0.local_start_ts == s2p1.local_start_ts, "sentence_2_part_1 should use parent timestamp"
     assert s2p0.local_start_ts == s2p2.local_start_ts, "sentence_2_part_2 should use parent timestamp"
 
+    # Test that format_report includes IDs correctly
+    from palabra_ai.benchmark.__main__ import format_report
+    from palabra_ai.config import Config
+    from palabra_ai.lang import Language
+    from palabra_ai import SourceLang, TargetLang
+
+    config = Config(
+        source=SourceLang(Language.get_or_create("en"), None),
+        targets=[TargetLang(Language.get_or_create("es"), None)],
+        benchmark=True
+    )
+
+    report_text = format_report(report, io_data, "en", "es", "test.wav", "out.wav", config)
+
+    # Check that table contains formatted IDs
+    assert "sentence_1" in report_text, "Should show sentence_1 without brackets"
+    assert "sentence_2[0]" in report_text, "Should show sentence_2[0]"
+    assert "sentence_2[1]" in report_text, "Should show sentence_2[1]"
+    assert "sentence_2[2]" in report_text, "Should show sentence_2[2]"
+
 
 def test_benchmark_parse_handles_partial_extra_parts():
     """Test that _part_1+ with only validated or only translated are shown"""
@@ -774,3 +794,70 @@ def test_benchmark_parse_handles_orphan_extra_parts():
     output = captured.getvalue()
     assert "WARNING" in output
     assert "No parent sentence found for orphan_part_1" in output
+
+
+def test_tid_parse():
+    """Test that Tid.parse() works correctly"""
+    from palabra_ai.benchmark.__main__ import Tid
+
+    # Without _part suffix
+    tid1 = Tid.parse("sentence_1")
+    assert tid1.base == "sentence_1"
+    assert tid1.part_num is None
+    assert tid1.display == "sentence_1"
+    assert tid1.raw == "sentence_1"
+
+    # With _part_0
+    tid2 = Tid.parse("sentence_2_part_0")
+    assert tid2.base == "sentence_2"
+    assert tid2.part_num == 0
+    assert tid2.display == "sentence_2[0]"
+    assert tid2.raw == "sentence_2_part_0"
+
+    # With _part_1+
+    tid3 = Tid.parse("sentence_2_part_1")
+    assert tid3.base == "sentence_2"
+    assert tid3.part_num == 1
+    assert tid3.display == "sentence_2[1]"
+    assert tid3.raw == "sentence_2_part_1"
+
+    tid4 = Tid.parse("sentence_2_part_10")
+    assert tid4.base == "sentence_2"
+    assert tid4.part_num == 10
+    assert tid4.display == "sentence_2[10]"
+    assert tid4.raw == "sentence_2_part_10"
+
+    # Complex base ids
+    tid5 = Tid.parse("my_long_sentence_id_part_5")
+    assert tid5.base == "my_long_sentence_id"
+    assert tid5.part_num == 5
+    assert tid5.display == "my_long_sentence_id[5]"
+    assert tid5.raw == "my_long_sentence_id_part_5"
+
+
+def test_sentence_has_metrics():
+    """Test that Sentence.has_metrics property works correctly"""
+    from palabra_ai.benchmark.__main__ import Sentence
+
+    # Sentence without metrics (extra_part with text only)
+    sentence_no_metrics = Sentence(
+        transcription_id="test_part_1",
+        local_start_ts=1.0,
+        local_start_chunk_idx=0,
+        validated_text="Some text",
+        translated_text="Translated text"
+    )
+    assert sentence_no_metrics.has_metrics is False
+    assert sentence_no_metrics.metric_partial is None
+
+    # Sentence with metrics (focused sentence)
+    sentence_with_metrics = Sentence(
+        transcription_id="test",
+        local_start_ts=1.0,
+        local_start_chunk_idx=0,
+        validated_text="Some text",
+        translated_text="Translated text",
+        metric_partial=0.5
+    )
+    assert sentence_with_metrics.has_metrics is True
+    assert sentence_with_metrics.metric_partial == 0.5
