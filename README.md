@@ -382,6 +382,20 @@ config = Config(
 )
 ```
 
+## Benchmarking 📊
+
+The SDK includes a powerful benchmarking module for performance analysis and quality testing. Run comprehensive benchmarks with detailed metrics, latency measurements, and trace data export.
+
+```bash
+# Quick benchmark
+uv run python -m palabra_ai.benchmark examples/speech/en.mp3 en es --out ./results
+
+# With Docker
+make bench -- examples/speech/en.mp3 en es --out ./results
+```
+
+📖 **See [Benchmarking Guide](docs/BENCHMARK.md)** for complete documentation including configuration options, output files, and advanced usage.
+
 ## Features ✨
 
 ### Real-time translation ⚡
