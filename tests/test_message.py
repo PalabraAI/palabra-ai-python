@@ -142,7 +142,7 @@ def test_get_task_message():
     msg = GetTaskMessage()
     dump = msg.model_dump()
     assert dump["message_type"] == "get_task"
-    assert dump["data"] == {}
+    assert dump["data"] == {"exclude_hidden": False}
 
 
 def test_queue_status_message():

@@ -4,6 +4,8 @@ import tempfile
 from pathlib import Path
 import pytest
 from unittest.mock import patch, MagicMock
+
+from palabra_ai.benchmark.utils import flatten_container_to_paths
 from palabra_ai.config import Config
 
 
@@ -479,7 +481,7 @@ def test_benchmark_handles_result_none():
 
 def test_benchmark_parse_handles_part_suffixes():
     """Test that _part_0 gets metrics but _part_1+ only gets text"""
-    from palabra_ai.benchmark.__main__ import Report
+    from palabra_ai.benchmark.report import Report
     from palabra_ai.message import IoEvent, Dbg
     from palabra_ai.model import IoData
     from palabra_ai.enum import Kind
@@ -489,7 +491,7 @@ def test_benchmark_parse_handles_part_suffixes():
     base_ts = 0.0  # Use relative timestamps starting from 0
 
     def make_event(idx, tid, mtype, dawn_ts, text="test"):
-        import orjson
+        from palabra_ai.util.orjson import to_json
         import base64
         import numpy as np
 
@@ -520,7 +522,7 @@ def test_benchmark_parse_handles_part_suffixes():
                 }
             }
 
-        body_bytes = orjson.dumps(body_dict)
+        body_bytes = to_json(body_dict)
 
         return IoEvent(
             head=Dbg(kind=Kind.MESSAGE if "transcription" in mtype or mtype == "input_audio_data" else Kind.AUDIO,
@@ -626,7 +628,7 @@ def test_benchmark_parse_handles_part_suffixes():
     assert s2p0.local_start_ts == s2p2.local_start_ts, "sentence_2_part_2 should use parent timestamp"
 
     # Test that format_report includes IDs correctly
-    from palabra_ai.benchmark.__main__ import format_report
+    from palabra_ai.benchmark.report import format_report
     from palabra_ai.config import Config
     from palabra_ai.lang import Language
     from palabra_ai import SourceLang, TargetLang
@@ -648,11 +650,11 @@ def test_benchmark_parse_handles_part_suffixes():
 
 def test_benchmark_parse_handles_partial_extra_parts():
     """Test that _part_1+ with only validated or only translated are shown"""
-    from palabra_ai.benchmark.__main__ import Report
+    from palabra_ai.benchmark.report import Report
     from palabra_ai.message import IoEvent, Dbg
     from palabra_ai.model import IoData
     from palabra_ai.enum import Kind
-    import orjson
+    from palabra_ai.util.orjson import to_json
     import base64
     import numpy as np
 
@@ -681,7 +683,7 @@ def test_benchmark_parse_handles_partial_extra_parts():
         return IoEvent(
             head=Dbg(kind=Kind.MESSAGE if "transcription" in mtype or mtype == "input_audio_data" else Kind.AUDIO,
                      ch=None, dir=None, idx=idx, dawn_ts=dawn_ts, dur_s=0.1),
-            body=orjson.dumps(body_dict),
+            body=to_json(body_dict),
             tid=None,
             mtype=None
         )
@@ -732,13 +734,13 @@ def test_benchmark_parse_handles_partial_extra_parts():
 
 def test_benchmark_parse_handles_orphan_extra_parts():
     """Test that _part_1+ without parent prints warning and is skipped"""
-    from palabra_ai.benchmark.__main__ import Report
+    from palabra_ai.benchmark.report import Report
     from palabra_ai.message import IoEvent, Dbg
     from palabra_ai.model import IoData
     from palabra_ai.enum import Kind
     from io import StringIO
     import sys
-    import orjson
+    from palabra_ai.util.orjson import to_json
 
     base_ts = 0.0
 
@@ -755,7 +757,7 @@ def test_benchmark_parse_handles_orphan_extra_parts():
         }
         return IoEvent(
             head=Dbg(kind=Kind.MESSAGE, ch=None, dir=None, idx=idx, dawn_ts=dawn_ts, dur_s=0.1),
-            body=orjson.dumps(body_dict),
+            body=to_json(body_dict),
             tid=None,
             mtype=None
         )
@@ -798,7 +800,7 @@ def test_benchmark_parse_handles_orphan_extra_parts():
 
 def test_tid_parse():
     """Test that Tid.parse() works correctly"""
-    from palabra_ai.benchmark.__main__ import Tid
+    from palabra_ai.benchmark.report import Tid
 
     # Without _part suffix
     tid1 = Tid.parse("sentence_1")
@@ -837,7 +839,7 @@ def test_tid_parse():
 
 def test_sentence_has_metrics():
     """Test that Sentence.has_metrics property works correctly"""
-    from palabra_ai.benchmark.__main__ import Sentence
+    from palabra_ai.benchmark.report import Sentence
 
     # Sentence without metrics (extra_part with text only)
     sentence_no_metrics = Sentence(
@@ -865,7 +867,7 @@ def test_sentence_has_metrics():
 
 def test_benchmark_always_overrides_allowed_message_types():
     """Test that benchmark always uses BENCHMARK_ALLOWED_MESSAGE_TYPES regardless of config"""
-    from palabra_ai.benchmark.__main__ import BENCHMARK_ALLOWED_MESSAGE_TYPES
+    from palabra_ai.benchmark.report import BENCHMARK_ALLOWED_MESSAGE_TYPES
     from palabra_ai.message import Message
 
     # Verify the constant contains all expected types
@@ -883,7 +885,8 @@ def test_benchmark_always_overrides_allowed_message_types():
 
 def test_benchmark_handles_sentence_splitter_case():
     """Test that sentence splitter case uses _part_0 timestamp as parent for _part_1+"""
-    from palabra_ai.benchmark.__main__ import Report, Tid
+    from palabra_ai.benchmark.report import Report
+    from palabra_ai.benchmark.report import Tid
 
     # Test the core logic directly: parent_timestamps building
     sentences = {
@@ -920,10 +923,10 @@ def test_benchmark_handles_sentence_splitter_case():
 
 def test_benchmark_handles_missing_partial_transcription():
     """Test that sentences are created even when partial_transcription is missing"""
-    from palabra_ai.benchmark.__main__ import Report
+    from palabra_ai.benchmark.report import Report
     from palabra_ai.model import IoData
     from palabra_ai.message import IoEvent, Dbg, Kind
-    import orjson
+    from palabra_ai.util.orjson import to_json
     import base64
     import numpy as np
 
@@ -955,7 +958,7 @@ def test_benchmark_handles_missing_partial_transcription():
         return IoEvent(
             head=Dbg(kind=Kind.MESSAGE if "transcription" in mtype or mtype == "input_audio_data" else Kind.AUDIO,
                      ch=None, dir=None, idx=idx, dawn_ts=dawn_ts, dur_s=0.1),
-            body=orjson.dumps(body_dict),
+            body=to_json(body_dict),
             tid=None,
             mtype=None
         )
@@ -1053,7 +1056,8 @@ def test_benchmark_forces_100ms_chunks_with_config():
 
         # Now test the actual benchmark config loading process
         # Mock the benchmark main function's config loading section
-        from palabra_ai.benchmark.__main__ import INPUT_CHUNK_DURATION_S, BENCHMARK_ALLOWED_MESSAGE_TYPES
+        from palabra_ai.benchmark.report import BENCHMARK_ALLOWED_MESSAGE_TYPES
+        from palabra_ai.benchmark.report import INPUT_CHUNK_DURATION_S
         from palabra_ai.config import WsMode
         from palabra_ai.task.adapter.file import FileReader
         from palabra_ai.task.adapter.dummy import DummyWriter
@@ -1143,7 +1147,7 @@ def test_rewind_saves_files_with_out_option():
                     with patch('palabra_ai.benchmark.rewind.Report.parse') as mock_parse:
                         # Mock empty audio canvases and simple report
                         import numpy as np
-                        from palabra_ai.benchmark.__main__ import Report
+                        from palabra_ai.benchmark.report import Report
                         simple_report = Report()  # Create simple Report instance
                         mock_in_audio = np.zeros(1000, dtype=np.int16)
                         mock_out_audio = np.zeros(1000, dtype=np.int16)
@@ -1178,3 +1182,283 @@ def test_rewind_saves_files_with_out_option():
         # Check that report.txt contains expected content
         report_content = report_txt_files[0].read_text()
         assert "Test report content" in report_content, "Report content should match mock"
+
+
+def test_extract_task_settings_from_events():
+    """Test that extract_task_settings correctly parses set_task and current_task from events"""
+    from palabra_ai.benchmark.__main__ import extract_task_settings
+    from palabra_ai.message import IoEvent, Dbg
+    from palabra_ai.model import IoData
+    from palabra_ai.enum import Kind
+    from palabra_ai.util.orjson import to_json
+
+    # Create mock events with set_task and current_task
+    set_task_event = IoEvent(
+        head=Dbg(kind=Kind.MESSAGE, ch=None, dir=None, idx=0, dawn_ts=0.0, dur_s=0.0),
+        body=to_json({
+            "message_type": "set_task",
+            "data": {
+                "pipeline": {
+                    "transcription": {"source_language": "es"},
+                    "translation_queue_configs": {
+                        "global": {"auto_tempo": True, "min_tempo": 1.0}
+                    }
+                }
+            }
+        }).decode(),
+        tid=None,
+        mtype=None
+    )
+
+    current_task_event = IoEvent(
+        head=Dbg(kind=Kind.MESSAGE, ch=None, dir=None, idx=1, dawn_ts=0.1, dur_s=0.0),
+        body=to_json({
+            "message_type": "current_task",
+            "data": to_json({
+                "pipeline": {
+                    "transcription": {"source_language": "es"},
+                    "translation_queue_configs": {
+                        "global": {"auto_tempo": False, "min_tempo": 1.0}
+                    }
+                },
+                "task_status": "running"
+            }).decode()
+        }).decode(),
+        tid=None,
+        mtype=None
+    )
+
+    io_data = IoData(
+        start_perf_ts=0.0,
+        start_utc_ts=0.0,
+        in_sr=16000,
+        out_sr=24000,
+        mode="ws",
+        channels=1,
+        events=[set_task_event, current_task_event],
+        count_events=2
+    )
+
+    sent_paths, applied_paths = extract_task_settings(io_data)
+
+    # Verify sent_paths (from set_task)
+    sent_dict = dict(sent_paths)
+    assert "pipeline.transcription.source_language" in sent_dict
+    assert sent_dict["pipeline.transcription.source_language"] == "es"
+    assert sent_dict["pipeline.translation_queue_configs.global.auto_tempo"] is True
+
+    # Verify applied_paths (from current_task, task_status removed)
+    applied_dict = dict(applied_paths)
+    assert "pipeline.transcription.source_language" in applied_dict
+    assert applied_dict["pipeline.transcription.source_language"] == "es"
+    assert applied_dict["pipeline.translation_queue_configs.global.auto_tempo"] is False
+    assert "task_status" not in applied_dict
+
+
+def test_merge_task_settings_full_outer_join():
+    """Test that merge_task_settings performs correct full outer join with proper sorting"""
+    from palabra_ai.benchmark.report import merge_task_settings
+
+    sent_paths = [
+        ("pipeline.auto_tempo", True),
+        ("pipeline.shared_setting", "sent_value"),
+        ("pipeline.sent_only", "only_in_sent")
+    ]
+
+    applied_paths = [
+        ("pipeline.auto_tempo", False),
+        ("pipeline.shared_setting", "applied_value"),
+        ("pipeline.applied_only", "only_in_applied")
+    ]
+
+    merged = merge_task_settings(sent_paths, applied_paths)
+
+    # Verify all keys are present
+    merged_dict = {key: (sent, applied) for key, sent, applied in merged}
+    assert len(merged_dict) == 4
+
+    # Verify values
+    assert merged_dict["pipeline.auto_tempo"] == (True, False)
+    assert merged_dict["pipeline.shared_setting"] == ("sent_value", "applied_value")
+    assert merged_dict["pipeline.sent_only"] == ("only_in_sent", None)
+    assert merged_dict["pipeline.applied_only"] == (None, "only_in_applied")
+
+    # Verify sorting: keys with SENT values first, then APPLIED only, alphabetically
+    expected_order = [
+        "pipeline.auto_tempo",      # has SENT
+        "pipeline.sent_only",       # has SENT
+        "pipeline.shared_setting",  # has SENT
+        "pipeline.applied_only"     # only APPLIED
+    ]
+    actual_order = [key for key, _, _ in merged]
+    assert actual_order == expected_order
+
+
+def test_config_table_shows_applied_column():
+    """Test that format_report displays 3-column table with Applied column"""
+    from palabra_ai.benchmark.__main__ import extract_task_settings
+    from palabra_ai.benchmark.report import format_report
+    from palabra_ai.benchmark.report import Report
+    from palabra_ai.message import IoEvent, Dbg
+    from palabra_ai.model import IoData
+    from palabra_ai.enum import Kind
+    from palabra_ai.config import Config
+    from palabra_ai.lang import Language
+    from palabra_ai import SourceLang, TargetLang
+    from palabra_ai.util.orjson import to_json
+
+    # Create mock events with different sent vs applied values
+    set_task_event = IoEvent(
+        head=Dbg(kind=Kind.MESSAGE, ch=None, dir=None, idx=0, dawn_ts=0.0, dur_s=0.0),
+        body=to_json({
+            "message_type": "set_task",
+            "data": {
+                "pipeline": {
+                    "transcription": {"source_language": "es"},
+                    "auto_tempo": True
+                }
+            }
+        }).decode(),
+        tid=None,
+        mtype=None
+    )
+
+    current_task_event = IoEvent(
+        head=Dbg(kind=Kind.MESSAGE, ch=None, dir=None, idx=1, dawn_ts=0.1, dur_s=0.0),
+        body=to_json({
+            "message_type": "current_task",
+            "data": to_json({
+                "pipeline": {
+                    "transcription": {"source_language": "es"},
+                    "auto_tempo": False
+                },
+                "task_status": "running"
+            }).decode()
+        }).decode(),
+        tid=None,
+        mtype=None
+    )
+
+    io_data = IoData(
+        start_perf_ts=0.0, start_utc_ts=0.0, in_sr=16000, out_sr=24000,
+        mode="ws", channels=1, events=[set_task_event, current_task_event], count_events=2
+    )
+
+    # Create mock config and report
+    config = Config(
+        source=SourceLang(Language.get_or_create("es"), None),
+        targets=[TargetLang(Language.get_or_create("en"), None)],
+        benchmark=True
+    )
+
+    report = Report()
+
+    # Generate report text
+    report_text = format_report(report, io_data, "es", "en", "test.wav", "out.wav", config)
+
+    # Verify table structure
+    assert "CONFIG (sent vs applied)" in report_text
+    assert "| Key" in report_text
+    assert "| Sent" in report_text
+    assert "| Applied" in report_text
+
+    # Verify actual data differences are shown
+    assert "pipeline.auto_tempo" in report_text
+    assert "True" in report_text  # sent value
+    assert "False" in report_text # applied value
+
+
+def test_extract_task_settings_handles_missing_current_task():
+    """Test that extract_task_settings handles missing current_task gracefully"""
+    from palabra_ai.benchmark.__main__ import extract_task_settings
+    from palabra_ai.message import IoEvent, Dbg
+    from palabra_ai.model import IoData
+    from palabra_ai.enum import Kind
+    from palabra_ai.util.orjson import to_json
+
+    # Create only set_task event, no current_task
+    set_task_event = IoEvent(
+        head=Dbg(kind=Kind.MESSAGE, ch=None, dir=None, idx=0, dawn_ts=0.0, dur_s=0.0),
+        body=to_json({
+            "message_type": "set_task",
+            "data": {"pipeline": {"auto_tempo": True}}
+        }).decode(),
+        tid=None,
+        mtype=None
+    )
+
+    io_data = IoData(
+        start_perf_ts=0.0, start_utc_ts=0.0, in_sr=16000, out_sr=24000,
+        mode="ws", channels=1, events=[set_task_event], count_events=1
+    )
+
+    sent_paths, applied_paths = extract_task_settings(io_data)
+
+    # Should have sent_paths but empty applied_paths
+    assert len(sent_paths) > 0
+    assert len(applied_paths) == 0
+
+    sent_dict = dict(sent_paths)
+    assert "pipeline.auto_tempo" in sent_dict
+    assert sent_dict["pipeline.auto_tempo"] is True
+
+
+
+def test_mixed_list_of_dicts():
+    data = [
+        {"foo": {"bar": False}},
+        {"bar": {"baz": 10}},
+        {"baz": {"xxx": {}}}
+    ]
+    got = flatten_container_to_paths(data)
+    want = [
+        ("0.foo.bar", False),
+        ("1.bar.baz", 10),
+        ("2.baz.xxx", {}),
+    ]
+    assert got == want
+
+def test_mixed_dict_of_lists_and_scalars():
+    data = {
+        "foo": {"bar": [{"baz": []}]},
+        "xxx": None,
+        "zzz": "hello"
+    }
+    got = flatten_container_to_paths(data)
+    want = [
+        ("foo.bar.0.baz", []),
+        ("xxx", None),
+        ("zzz", "hello"),
+    ]
+    assert got == want
+
+def test_empty_dict_is_leaf():
+    data = {}
+    got = flatten_container_to_paths(data, prefix="root")
+    assert got == [("root", {})]
+
+def test_empty_list_is_leaf():
+    data = []
+    got = flatten_container_to_paths(data, prefix="root")
+    assert got == [("root", [])]
+
+def test_with_prefix_on_container_and_internal_values():
+    data = {"a": [1, {"b": 2}], "c": {}}
+    got = flatten_container_to_paths(data, prefix="P")
+    want = [
+        ("P.a.0", 1),
+        ("P.a.1.b", 2),
+        ("P.c", {}),
+    ]
+    assert got == want
+
+def test_boolean_none_numbers_strings_and_order():
+    data = {"k1": True, "k2": 0, "k3": 1.5, "k4": None, "k5": "s"}
+    got = flatten_container_to_paths(data)
+    want = [("k1", True), ("k2", 0), ("k3", 1.5), ("k4", None), ("k5", "s")]
+    assert got == want
+
+def test_fallback_non_container():
+    # Not expected by signature, but ensure graceful behavior
+    got = flatten_container_to_paths(42, prefix="weird")  # type: ignore[arg-type]
+    assert got == [("weird", 42)]

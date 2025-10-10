@@ -18,6 +18,7 @@ class LogData(BaseModel):
 
 
 class IoData(BaseModel):
+    model_config = {"use_enum_values": True}
     start_perf_ts: float
     start_utc_ts: float
     in_sr: int  # sr = sample rate

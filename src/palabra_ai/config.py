@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+from copy import deepcopy
 from functools import cached_property
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, TextIO
@@ -528,6 +529,8 @@ class Config(BaseModel):
     def reconstruct_from_serialized(cls, data: Any) -> Any:
         if not isinstance(data, dict):
             return data
+
+        data = deepcopy(data)
 
         __from_init = data.pop("__from_init", False)
 
