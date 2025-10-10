@@ -11,7 +11,6 @@ from palabra_ai.util.orjson import from_json, to_json
 from palabra_ai.model import IoData
 from palabra_ai.message import IoEvent, Dbg
 from palabra_ai.benchmark.report import save_benchmark_files
-from palabra_ai.benchmark.report import format_report
 from palabra_ai.benchmark.report import Report
 from palabra_ai import Config
 
@@ -51,7 +50,9 @@ def load_run_result(file_path: Path) -> IoData:
         mode=io_data_dict['mode'],
         channels=io_data_dict['channels'],
         events=events,
-        count_events=len(events)
+        count_events=len(events),
+        reader_x_title=io_data_dict.get('reader_x_title', "n/a"),
+        writer_x_title=io_data_dict.get('writer_x_title', "n/a")
     )
 
     return io_data
@@ -62,53 +63,24 @@ def main():
     parser.add_argument("--out", type=Path, help="Output directory for reconstructed files (if not specified, only prints to console)")
     args = parser.parse_args()
 
-    try:
-        file_path = Path(args.run_result)
 
-        # Load IoData
-        io_data = load_run_result(file_path)
+    file_path = Path(args.run_result)
 
-        # Parse report (same as main benchmark)
-        report, in_audio_canvas, out_audio_canvas = Report.parse(io_data)
+    # Load IoData
+    io_data = load_run_result(file_path)
 
-        config = Config.from_dict(report.set_task_e.body["data"])
+    # Parse report (same as main benchmark)
+    report = Report.parse(io_data)
 
-        # Extract languages from config
-        source_lang = config.source.lang.code
-        target_lang = config.targets[0].lang.code
+    # Save files if --out option is specified
+    if args.out:
+        report.cfg.output_dir = Path(args.out)
+        report.save_all()
+        print(f"\nFiles saved to: {args.out}")
 
-        # Generate report using existing format_report function directly
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        in_file = str(file_path)
-        out_file = f"{timestamp}_rewind_out_{target_lang}.wav"
+    # Always print report to console
+    print("\n" + report.format_report())
 
-        report_text = format_report(report, io_data, source_lang, target_lang, in_file, out_file, config)
-
-        # Save files if --out option is specified
-        if args.out:
-            save_benchmark_files(
-                output_dir=args.out,
-                timestamp=timestamp,
-                report=report,
-                io_data=io_data,
-                config=config,
-                result=None,  # No RunResult in rewind
-                in_audio_canvas=in_audio_canvas,
-                out_audio_canvas=out_audio_canvas,
-                source_lang=source_lang,
-                target_lang=target_lang,
-                report_text=report_text,
-                input_file_path=str(file_path),
-                file_prefix="rewind"
-            )
-            print(f"\nFiles saved to: {args.out}")
-
-        # Always print report to console
-        print("\n" + report_text)
-
-    except Exception as e:
-        print(f"Error: {e}", file=sys.stderr)
-        sys.exit(1)
 
 if __name__ == "__main__":
     main()

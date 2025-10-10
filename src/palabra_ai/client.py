@@ -2,19 +2,68 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import functools
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 
 from aioshutdown import SIGHUP, SIGINT, SIGTERM
 
 from palabra_ai.config import CLIENT_ID, CLIENT_SECRET, DEEP_DEBUG, Config
+from palabra_ai.constant import (
+    OUT_CONFIG_SUFFIX,
+    OUT_EXTRA_CONFIG_SUFFIX,
+    OUT_RUN_RESULT_SUFFIX,
+    OUT_SYSINFO_SUFFIX,
+)
 from palabra_ai.debug.hang_coroutines import diagnose_hanging_tasks
 from palabra_ai.exc import ConfigurationError, unwrap_exceptions
 from palabra_ai.internal.rest import PalabraRESTClient, SessionCredentials
 from palabra_ai.model import RunResult
 from palabra_ai.task.base import TaskEvent
 from palabra_ai.task.manager import Manager
-from palabra_ai.util.logger import debug, error, exception, success
+from palabra_ai.util.fileio import save_json
+from palabra_ai.util.logger import debug, error, exception, success, warning
+from palabra_ai.util.sysinfo import get_system_info
+
+
+def with_config_save(func):
+    @functools.wraps(func)
+    async def wrapper(self, config, *args, **kwargs):
+        def safe_save(suffix, data, saver_fn=functools.partial(save_json, indent=True)):
+            path = None
+            try:
+                path = config.get_out_path(suffix)
+                debug(f"Saving {path}")
+                saver_fn(path, data)
+            except Exception as e:
+                warning(f"⚠️ Exception during save [{suffix}] {path}: {e!r}")
+
+        if not config.output_dir:
+            warning("Output directory not set, skipping config and sysinfo save")
+            return await func(self, config, *args, **kwargs)
+
+        safe_save(OUT_SYSINFO_SUFFIX, get_system_info())
+        safe_save(OUT_CONFIG_SUFFIX, config.to_dict())
+        safe_save(OUT_EXTRA_CONFIG_SUFFIX, config.to_extra_dict())
+
+        # Run the original async method
+        result = await func(self, config, *args, **kwargs)
+
+        safe_save(OUT_RUN_RESULT_SUFFIX, result)
+
+        try:
+            from palabra_ai.benchmark.report import Report
+
+            report = Report.parse(result)
+            report.save_all()
+        except Exception as e:
+            warning(f"⚠️ Exception saving run result in {func.__name__}: {e!r}")
+
+        # Log after completion
+        print(f"[INFO] Finished async method {func.__name__} with config: {config}")
+        return result
+
+    return wrapper
 
 
 @dataclass
@@ -86,6 +135,7 @@ class PalabraAI:
         finally:
             debug("Shutdown complete")
 
+    @with_config_save
     async def arun(
         self,
         cfg: Config,
@@ -107,7 +157,6 @@ class PalabraAI:
         """
 
         async def _run_with_result(manager: Manager) -> RunResult:
-            log_data = None
             exc = None
             ok = False
 
@@ -127,32 +176,6 @@ class PalabraAI:
                 exception("Error in manager task")
                 exc = e
 
-            # CRITICAL: Always try to get log_data from logger
-            try:
-                if manager.logger and manager.logger._task:
-                    # Give logger time to complete if still running
-                    if not manager.logger._task.done():
-                        debug("Waiting for logger to complete...")
-                        try:
-                            await asyncio.wait_for(manager.logger._task, timeout=5.0)
-                        except (TimeoutError, asyncio.CancelledError):
-                            debug(
-                                "Logger task timeout or cancelled, checking result anyway"
-                            )
-
-                    # Try to get the result
-                    log_data = manager.logger.result
-                    if not log_data:
-                        debug("Logger.result is None, trying to call exit() directly")
-                        try:
-                            log_data = await asyncio.wait_for(
-                                manager.logger.exit(), timeout=2.0
-                            )
-                        except Exception as e:
-                            debug(f"Failed to get log_data from logger.exit(): {e}")
-            except Exception:
-                exception("Failed to retrieve log_data")
-
             # Check if EOS was received (only relevant for WS)
             eos_received = manager.io.eos_received if manager.io else False
 
@@ -161,7 +184,7 @@ class PalabraAI:
                 return RunResult(
                     ok=ok,
                     exc=exc if not ok else None,
-                    log_data=log_data,
+                    # log_data=log_data,
                     io_data=manager.io.io_data if manager.io else None,
                     eos=eos_received,
                 )
@@ -169,7 +192,7 @@ class PalabraAI:
                 return RunResult(
                     ok=True,
                     exc=None,
-                    log_data=log_data,
+                    # log_data=log_data,
                     io_data=manager.io.io_data if manager.io else None,
                     eos=eos_received,
                 )
@@ -178,6 +201,7 @@ class PalabraAI:
                 raise exc
 
         try:
+            cfg.set_logging()
             async with self.process(cfg, stopper) as manager:
                 if DEEP_DEBUG:
                     debug(diagnose_hanging_tasks())

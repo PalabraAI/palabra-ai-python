@@ -21,6 +21,10 @@ class BufferReader(Reader):
     _: KW_ONLY
     _buffer_size: int | None = field(default=None, init=False, repr=False)
 
+    @property
+    def x_title(self) -> str:
+        return "in-memory-buffer"
+
     def __post_init__(self):
         self._position = 0
         current_pos = self.buffer.tell()
@@ -69,6 +73,10 @@ class BufferWriter(BufferedWriter):
 
     buffer: io.BytesIO
     _: KW_ONLY
+
+    @property
+    def x_title(self) -> str:
+        return "in-memory-buffer"
 
     async def boot(self):
         await super().boot()

@@ -61,7 +61,7 @@ class TestLogger:
 
         assert logger.cfg == mock_config
         assert logger.io == mock_io
-        assert logger._messages == []
+        # _messages removed - no longer collected
         assert isinstance(logger._start_ts, float)
         assert logger._io_in_sub is not None
         assert logger._io_out_sub is not None
@@ -132,9 +132,8 @@ class TestLogger:
         with patch('palabra_ai.task.logger.debug') as mock_debug:
             await logger._consume(q)
 
-            # Verify message was processed
-            assert len(logger._messages) == 1
-            assert logger._messages[0]["msg"]["type"] == "test_message"
+            # Verify queue was drained (no errors)
+            # Messages no longer collected in Logger
             mock_debug.assert_called()
 
     @pytest.mark.asyncio
@@ -154,7 +153,7 @@ class TestLogger:
         await logger._consume(q)
 
         # Should complete without error
-        assert len(logger._messages) == 0
+        # Messages no longer collected
 
     @pytest.mark.asyncio
     async def test_consume_cancelled(self, mock_config, mock_io):
@@ -189,15 +188,13 @@ class TestLogger:
 
         await logger._consume(q)
 
-        # Verify message was processed with empty Dbg
-        assert len(logger._messages) == 1
-        assert logger._messages[0]["msg"]["type"] == "test_message"
+        # Verify queue was drained (no errors)
+        # Messages no longer collected in Logger
 
     @pytest.mark.asyncio
     async def test_exit_success(self, mock_config, mock_io, tmp_path):
         """Test successful exit"""
         logger = Logger(cfg=mock_config, io=mock_io)
-        logger._messages = [{"msg": {"type": "test1"}}, {"msg": {"type": "test2"}}]
 
         # Create mock tasks that are actual asyncio.Task objects
         async def dummy_task():
@@ -235,7 +232,6 @@ class TestLogger:
     async def test_exit_log_file_error(self, mock_config, mock_io, tmp_path):
         """Test exit when log file can't be read"""
         logger = Logger(cfg=mock_config, io=mock_io)
-        logger._messages = []
 
         # Create mock tasks that are actual asyncio.Task objects
         async def dummy_task():
@@ -262,7 +258,6 @@ class TestLogger:
     async def test_exit_sysinfo_error(self, mock_config, mock_io, tmp_path):
         """Test exit when sysinfo fails"""
         logger = Logger(cfg=mock_config, io=mock_io)
-        logger._messages = []
 
         # Create mock tasks that are actual asyncio.Task objects
         async def dummy_task():
@@ -290,7 +285,6 @@ class TestLogger:
     async def test_exit_with_version(self, mock_config, mock_io):
         """Test exit includes version info"""
         logger = Logger(cfg=mock_config, io=mock_io)
-        logger._messages = []
 
         # Create mock tasks that are actual asyncio.Task objects
         async def dummy_task():
@@ -315,7 +309,6 @@ class TestLogger:
     async def test_exit_no_tasks(self, mock_config, mock_io):
         """Test exit when no tasks were created"""
         logger = Logger(cfg=mock_config, io=mock_io)
-        logger._messages = []
         logger._in_task = None
         logger._out_task = None
 

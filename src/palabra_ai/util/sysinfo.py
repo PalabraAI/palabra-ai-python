@@ -14,6 +14,7 @@ import subprocess
 import sys
 import sysconfig
 from dataclasses import asdict, dataclass, field
+from pathlib import Path
 from typing import Any
 
 try:
@@ -48,6 +49,15 @@ class SystemInfo:
     """Collects basic system information for debugging production issues."""
 
     # Python info
+    command: str = field(default_factory=lambda: " ".join(sys.argv))
+    argv: str = field(default_factory=lambda: sys.argv)
+    cwd: str = field(default_factory=lambda: str(Path.cwd()))
+
+    palabra_version: str = field(
+        default_factory=lambda: getattr(
+            sys.modules.get("palabra_ai"), "__version__", "n/a"
+        )
+    )
     python_version: str = field(default_factory=lambda: sys.version)
     python_version_info: dict[str, Any] = field(
         default_factory=lambda: {

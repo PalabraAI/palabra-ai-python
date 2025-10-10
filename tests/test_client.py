@@ -469,7 +469,6 @@ def test_run_async_with_manager_task_cancelled():
             result = await client.arun(config, no_raise=True)
             assert result.ok is False
             assert isinstance(result.exc, asyncio.CancelledError)
-            assert result.log_data is None
 
     asyncio.run(test_coro())
 
@@ -503,7 +502,6 @@ def test_run_async_with_manager_error():
                 result = await client.arun(config, no_raise=True)
                 assert result.ok is False
                 assert isinstance(result.exc, ValueError)
-                assert result.log_data is None
                 mock_exception.assert_any_call("Error in manager task")
 
     asyncio.run(test_coro())
@@ -536,7 +534,6 @@ def test_run_async_with_logger_timeout():
                 with patch('palabra_ai.client.debug') as mock_debug:
                     result = await client.arun(config, no_raise=True)
                     assert result.ok is True
-                    assert result.log_data is None
                     mock_debug.assert_any_call("Logger task timeout or cancelled, checking result anyway")
 
     asyncio.run(test_coro())
@@ -570,7 +567,6 @@ def test_run_async_with_logger_exception():
                 with patch('palabra_ai.client.error') as mock_error:
                     result = await client.arun(config, no_raise=True)
                     assert result.ok is True
-                    assert result.log_data is None
                     mock_debug.assert_any_call("Failed to get log_data from logger.exit(): Logger exit error")
 
     asyncio.run(test_coro())
@@ -1130,7 +1126,6 @@ def test_benchmark_completes_successfully_with_graceful_shutdown():
         ok=True,
         exc=None,
         io_data=io_data,
-        log_data=None,
         eos=True
     )
 

@@ -3,11 +3,10 @@ from palabra_ai.model import LogData, RunResult
 
 
 def test_log_data_creation():
-    """Test LogData model creation"""
+    """Test LogData model creation without messages field"""
     log_data = LogData(
         version="1.0.0",
         sysinfo={"os": "darwin"},
-        messages=[{"type": "test", "data": "example"}],
         start_ts=1234567890.0,
         cfg={"mode": "test"},
         log_file="test.log",
@@ -18,7 +17,6 @@ def test_log_data_creation():
 
     assert log_data.version == "1.0.0"
     assert log_data.sysinfo["os"] == "darwin"
-    assert len(log_data.messages) == 1
     assert log_data.start_ts == 1234567890.0
     assert log_data.cfg["mode"] == "test"
     assert log_data.log_file == "test.log"
@@ -33,7 +31,6 @@ def test_run_result_success():
 
     assert result.ok is True
     assert result.exc is None
-    assert result.log_data is None
 
 
 def test_run_result_with_exception():
@@ -43,7 +40,6 @@ def test_run_result_with_exception():
 
     assert result.ok is False
     assert result.exc == test_exception
-    assert result.log_data is None
 
 
 def test_run_result_with_log_data():
@@ -51,7 +47,6 @@ def test_run_result_with_log_data():
     log_data = LogData(
         version="1.0.0",
         sysinfo={},
-        messages=[],
         start_ts=0.0,
         cfg={},
         log_file="",
@@ -60,11 +55,10 @@ def test_run_result_with_log_data():
         logs=[]
     )
 
-    result = RunResult(ok=True, log_data=log_data)
+    result = RunResult(ok=True)
 
     assert result.ok is True
     assert result.exc is None
-    assert result.log_data == log_data
 
 
 def test_run_result_arbitrary_types():
@@ -94,10 +88,22 @@ def test_run_result_eos_field_true():
 
 def test_run_result_eos_field_with_all_params():
     """Test RunResult eos field works with all parameters"""
+    result = RunResult(ok=True, exc=None, eos=True)
+
+    assert result.ok is True
+    assert result.exc is None
+    assert result.eos is True
+
+
+# ═══════════════════════════════════════════════════
+# NEW TESTS: LogData without messages field (TDD - RED)
+# ═══════════════════════════════════════════════════
+
+def test_log_data_does_not_have_messages_field():
+    """Test that LogData does not have messages attribute"""
     log_data = LogData(
-        version="1.0.0",
+        version="0.5.13",
         sysinfo={},
-        messages=[],
         start_ts=0.0,
         cfg={},
         log_file="",
@@ -106,9 +112,21 @@ def test_run_result_eos_field_with_all_params():
         logs=[]
     )
 
-    result = RunResult(ok=True, exc=None, log_data=log_data, eos=True)
+    assert not hasattr(log_data, "messages")
 
-    assert result.ok is True
-    assert result.exc is None
-    assert result.log_data == log_data
-    assert result.eos is True
+
+def test_log_data_serialization_without_messages():
+    """Test that LogData.model_dump() does not include messages"""
+    log_data = LogData(
+        version="0.5.13",
+        sysinfo={},
+        start_ts=0.0,
+        cfg={},
+        log_file="",
+        trace_file="",
+        debug=False,
+        logs=[]
+    )
+
+    dumped = log_data.model_dump()
+    assert "messages" not in dumped

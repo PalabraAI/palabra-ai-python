@@ -16,6 +16,10 @@ class DummyReader(Reader):
     eof_after_reads: int | None = field(default=None, repr=False)
     _: KW_ONLY
 
+    @property
+    def x_title(self) -> str:
+        return "dummy"
+
     async def boot(self):
         pass
 
@@ -45,6 +49,10 @@ class DummyWriter(Writer):
     _: KW_ONLY
     frames_processed: int = 0
     _q_reader: asyncio.Task = field(default=None, init=False, repr=False)
+
+    @property
+    def x_title(self) -> str:
+        return "dummy"
 
     async def q_reader(self):
         while not self.stopper and not self.eof:

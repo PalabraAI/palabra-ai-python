@@ -324,19 +324,7 @@ def test_benchmark_handles_cancelled_error():
         "2025-10-03 15:10:50.327 | INFO     | Cancelling...\n",
     ])
 
-    log_data = LogData(
-        version="1.0.0",
-        sysinfo={"platform": "test"},
-        messages=[],
-        start_ts=0.0,
-        cfg={"test": "config"},
-        log_file="test.log",
-        trace_file="",
-        debug=True,
-        logs=log_entries
-    )
-
-    failed_result = RunResult(ok=False, exc=cancelled_exc, io_data=None, log_data=log_data)
+    failed_result = RunResult(ok=False, exc=cancelled_exc, io_data=None)
 
     with tempfile.TemporaryDirectory() as tmpdir:
         output_dir = Path(tmpdir)
