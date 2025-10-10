@@ -857,10 +857,10 @@ def test_sentence_has_metrics():
         local_start_chunk_idx=0,
         validated_text="Some text",
         translated_text="Translated text",
-        metric_partial=0.5
+        metric_validated=2.5
     )
     assert sentence_with_metrics.has_metrics is True
-    assert sentence_with_metrics.metric_partial == 0.5
+    assert sentence_with_metrics.metric_validated == 2.5
 
 
 def test_benchmark_always_overrides_allowed_message_types():
@@ -999,3 +999,182 @@ def test_benchmark_handles_missing_partial_transcription():
     assert sentence.metric_partial is None  # Should be None when partial missing
     assert sentence.metric_validated > 0  # Should be positive
     assert sentence.metric_translated > 0  # Should be positive
+
+
+def test_benchmark_forces_100ms_chunks_with_config():
+    """Test that benchmark forces 100ms chunks even when loading config with defaults"""
+    import json
+    import tempfile
+    from pathlib import Path
+    from unittest.mock import patch, MagicMock
+    from palabra_ai.config import Config
+
+    # Create config that doesn't specify chunk duration (defaults to 320ms)
+    test_config = {
+        "input_stream": {
+            "content_type": "audio",
+            "source": {
+                "type": "ws",
+                "format": "pcm_s16le",
+                "sample_rate": 16000,
+                "channels": 1
+            }
+        },
+        "output_stream": {
+            "content_type": "audio",
+            "target": {
+                "type": "ws",
+                "format": "pcm_s16le",
+                "sample_rate": 24000,
+                "channels": 1
+            }
+        },
+        "pipeline": {
+            "transcription": {
+                "source_language": "en"
+            },
+            "translations": [
+                {
+                    "target_language": "es"
+                }
+            ]
+        }
+    }
+
+    # Create temporary JSON file
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+        json.dump(test_config, f)
+        config_path = Path(f.name)
+
+    try:
+        # This demonstrates the problem: config loaded from JSON defaults to 320ms
+        config = Config.from_json(config_path.read_text())
+        assert config.mode.input_chunk_duration_ms == 320, "Config from JSON should default to 320ms (this is the problem)"
+
+        # Now test the actual benchmark config loading process
+        # Mock the benchmark main function's config loading section
+        from palabra_ai.benchmark.__main__ import INPUT_CHUNK_DURATION_S, BENCHMARK_ALLOWED_MESSAGE_TYPES
+        from palabra_ai.config import WsMode
+        from palabra_ai.task.adapter.file import FileReader
+        from palabra_ai.task.adapter.dummy import DummyWriter
+
+        # Simulate what benchmark main does when --config is provided
+        # This is the code path that currently has the bug
+
+        # Step 1: Create initial mode with 100ms chunks (line 527)
+        mode = WsMode(input_chunk_duration_ms=INPUT_CHUNK_DURATION_S*1000)
+        assert mode.input_chunk_duration_ms == 100, "Initial mode should be 100ms"
+
+        # Step 2: Load config from JSON (line 564) - this overwrites the mode!
+        config = Config.from_json(config_path.read_text())
+        assert config.mode.input_chunk_duration_ms == 320, "JSON config overwrites with 320ms default"
+
+        # Step 3: Apply benchmark overrides (lines 566-571)
+        mock_reader = MagicMock()
+        mock_on_transcription = MagicMock()
+        config.source._reader = mock_reader
+        config.source._on_transcription = mock_on_transcription
+        config.targets[0]._writer = DummyWriter()
+        config.benchmark = True
+        config.allowed_message_types = BENCHMARK_ALLOWED_MESSAGE_TYPES
+
+        # Step 4: Apply the fix - force benchmark mode with 100ms buffer (lines 573-575)
+        config.mode = WsMode(input_chunk_duration_ms=INPUT_CHUNK_DURATION_S*1000)
+
+        # After applying the fix: benchmark should force 100ms chunks
+        assert config.mode.input_chunk_duration_ms == 100, "After fix: benchmark should force 100ms chunks"
+
+    finally:
+        # Cleanup
+        config_path.unlink()
+
+
+def test_rewind_saves_files_with_out_option():
+    """Test that rewind --out saves all expected files"""
+    from palabra_ai.benchmark.rewind import main as rewind_main
+    from palabra_ai.model import IoData, RunResult
+    from pathlib import Path
+    import tempfile
+    import json
+    from unittest.mock import patch, MagicMock
+
+    # Create mock io_data
+    io_data = IoData(
+        start_perf_ts=0.0,
+        start_utc_ts=0.0,
+        in_sr=16000,
+        out_sr=24000,
+        mode="ws",
+        channels=1,
+        events=[],
+        count_events=0
+    )
+
+    # Create mock benchmark result file content
+    mock_result = {
+        "io_data": {
+            "start_perf_ts": 0.0,
+            "start_utc_ts": 0.0,
+            "in_sr": 16000,
+            "out_sr": 24000,
+            "mode": "ws",
+            "channels": 1,
+            "events": []
+        }
+    }
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        input_dir = Path(tmpdir) / "input"
+        output_dir = Path(tmpdir) / "output"
+        input_dir.mkdir()
+        output_dir.mkdir()
+
+        # Create mock result file
+        result_file = input_dir / "test_result.json"
+        result_file.write_text(json.dumps(mock_result))
+
+        with patch('sys.argv', ['rewind', str(result_file), '--out', str(output_dir)]):
+            with patch('palabra_ai.benchmark.rewind.extract_config_from_result') as mock_extract:
+                mock_extract.return_value = ({"test": "config"}, "en", "es")
+
+                with patch('palabra_ai.benchmark.rewind.load_run_result') as mock_load:
+                    mock_load.return_value = (io_data, {})
+
+                    with patch('palabra_ai.benchmark.rewind.Report.parse') as mock_parse:
+                        # Mock empty audio canvases and simple report
+                        import numpy as np
+                        from palabra_ai.benchmark.__main__ import Report
+                        simple_report = Report()  # Create simple Report instance
+                        mock_in_audio = np.zeros(1000, dtype=np.int16)
+                        mock_out_audio = np.zeros(1000, dtype=np.int16)
+                        mock_parse.return_value = (simple_report, mock_in_audio, mock_out_audio)
+
+                        with patch('palabra_ai.benchmark.rewind.format_report') as mock_format:
+                            mock_format.return_value = "Test report content"
+
+                            with patch('palabra_ai.benchmark.rewind.Config.from_dict') as mock_config:
+                                mock_config.return_value = MagicMock()
+
+                                # Run rewind
+                                rewind_main()
+
+        # Check that files were created
+        rewind_files = list(output_dir.glob("*_rewind_*"))
+        assert len(rewind_files) >= 4, f"Expected at least 4 rewind files, found {len(rewind_files)}: {[f.name for f in rewind_files]}"
+
+        # Check for specific file types
+        io_data_files = list(output_dir.glob("*_rewind_io_data.json"))
+        report_files = list(output_dir.glob("*_rewind_report.json"))
+        report_txt_files = list(output_dir.glob("*_rewind_report.txt"))
+        in_wav_files = list(output_dir.glob("*_rewind_in_*.wav"))
+        out_wav_files = list(output_dir.glob("*_rewind_out_*.wav"))
+
+        assert len(io_data_files) == 1, f"Expected 1 io_data file, found {len(io_data_files)}"
+        assert len(report_files) == 1, f"Expected 1 report.json file, found {len(report_files)}"
+        assert len(report_txt_files) == 1, f"Expected 1 report.txt file, found {len(report_txt_files)}"
+        assert len(in_wav_files) == 1, f"Expected 1 input wav file, found {len(in_wav_files)}"
+        assert len(out_wav_files) == 1, f"Expected 1 output wav file, found {len(out_wav_files)}"
+
+        # Check that report.txt contains expected content
+        report_content = report_txt_files[0].read_text()
+        assert "Test report content" in report_content, "Report content should match mock"

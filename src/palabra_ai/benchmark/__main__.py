@@ -503,6 +503,48 @@ def format_report(report: Report, io_data: IoData, source_lang: str, target_lang
     lines.append("=" * 80)
     return "\n".join(lines)
 
+def save_benchmark_files(
+    output_dir: Path,
+    timestamp: str,
+    report: Report,
+    io_data: IoData,
+    config: Config,
+    result,  # RunResult
+    in_audio_canvas,  # np.ndarray
+    out_audio_canvas,  # np.ndarray
+    source_lang: str,
+    target_lang: str,
+    report_text: str,
+    input_file_path: str,
+    file_prefix: str = "bench"
+) -> None:
+    """Save benchmark files to output directory"""
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Create file names based on prefix
+    in_wav_name = f"{timestamp}_{file_prefix}_in_{source_lang}.wav"
+    out_wav_name = f"{timestamp}_{file_prefix}_out_{target_lang}.wav"
+
+    # Define file paths
+    raw_result_path = output_dir / f"{timestamp}_{file_prefix}_raw_result.json" if result else None
+    io_data_path = output_dir / f"{timestamp}_{file_prefix}_io_data.json"
+    report_path = output_dir / f"{timestamp}_{file_prefix}_report.json"
+    report_txt_path = output_dir / f"{timestamp}_{file_prefix}_report.txt"
+    in_wav_path = output_dir / in_wav_name
+    out_wav_path = output_dir / out_wav_name
+
+    # Save JSON files
+    if result and raw_result_path:
+        raw_result_path.write_bytes(to_json(result.model_dump(), True))
+    io_data_path.write_bytes(to_json(io_data, True))
+    report_path.write_bytes(to_json(report, True))
+    report_txt_path.write_text(report_text)
+
+    # Save audio files
+    save_wav(in_audio_canvas, in_wav_path, io_data.in_sr, io_data.channels)
+    save_wav(out_audio_canvas, out_wav_path, io_data.out_sr, io_data.channels)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Palabra AI Benchmark - Data Collection")
     parser.add_argument("audio", help="Audio file path")
@@ -569,6 +611,10 @@ def main():
             config.targets[0]._writer = DummyWriter()
             config.benchmark = True
             config.allowed_message_types = BENCHMARK_ALLOWED_MESSAGE_TYPES
+
+            # Force benchmark mode with 100ms buffer regardless of config
+            # Config loaded from JSON defaults to 320ms chunks, but benchmark needs 100ms for optimal performance
+            config.mode = WsMode(input_chunk_duration_ms=INPUT_CHUNK_DURATION_S*1000)
 
             source_lang = config.source.lang.code
             target_lang = config.targets[0].lang.code
@@ -703,25 +749,24 @@ def main():
         )
 
         if args.out:
-            # Save all files to output directory
+            # Use the shared save function
             if not output_dir:
                 output_dir = args.out
-                output_dir.mkdir(parents=True, exist_ok=True)
-
-            raw_result_path = output_dir / f"{timestamp}_bench_raw_result.json"
-            io_data_path = output_dir / f"{timestamp}_bench_io_data.json"
-            report_path = output_dir / f"{timestamp}_bench_report.json"
-            report_txt_path = output_dir / f"{timestamp}_bench_report.txt"
-            in_wav_path = output_dir / in_wav_name
-            out_wav_path = output_dir / out_wav_name
-
-            raw_result_path.write_bytes(to_json(result.model_dump(), True))
-            io_data_path.write_bytes(to_json(result.io_data, True))
-            report_path.write_bytes(to_json(report, True))
-            report_txt_path.write_text(report_text)
-
-            save_wav(in_audio_canvas, in_wav_path, result.io_data.in_sr, result.io_data.channels)
-            save_wav(out_audio_canvas, out_wav_path, result.io_data.out_sr, result.io_data.channels)
+            save_benchmark_files(
+                output_dir=output_dir,
+                timestamp=timestamp,
+                report=report,
+                io_data=result.io_data,
+                config=config,
+                result=result,
+                in_audio_canvas=in_audio_canvas,
+                out_audio_canvas=out_audio_canvas,
+                source_lang=source_lang,
+                target_lang=target_lang,
+                report_text=report_text,
+                input_file_path=str(audio_path),
+                file_prefix="bench"
+            )
 
         # Always print report to console
         print("\n" + report_text)

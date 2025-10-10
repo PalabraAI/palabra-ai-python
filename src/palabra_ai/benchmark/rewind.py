@@ -11,7 +11,7 @@ from pathlib import Path
 from palabra_ai.util.orjson import from_json, to_json
 from palabra_ai.model import IoData
 from palabra_ai.message import IoEvent, Dbg
-from palabra_ai.benchmark.__main__ import Report, format_report
+from palabra_ai.benchmark.__main__ import Report, format_report, save_benchmark_files
 from palabra_ai import Config
 
 def extract_config_from_result(file_path: Path) -> tuple[dict, str, str]:
@@ -40,8 +40,8 @@ def load_run_result(file_path: Path) -> tuple[IoData, dict]:
     if not file_path.exists():
         raise FileNotFoundError(f"File not found: {file_path}")
 
-    if not file_path.name.endswith('_result.json'):
-        raise ValueError(f"File must be a run_result.json file, got: {file_path.name}")
+    if not (file_path.name.endswith('_result.json') or file_path.name.endswith('.result.json')):
+        raise ValueError(f"File must be a result.json file, got: {file_path.name}")
 
     print(f"Loading IoData from {file_path}...")
 
@@ -109,6 +109,7 @@ def generate_rewind_report(report: Report, io_data: IoData, config: Config, sour
 def main():
     parser = argparse.ArgumentParser(description="Analyze Palabra AI benchmark run_result.json files")
     parser.add_argument("run_result", help="Path to run_result.json file")
+    parser.add_argument("--out", type=Path, help="Output directory for reconstructed files (if not specified, only prints to console)")
     args = parser.parse_args()
 
     try:
@@ -124,10 +125,32 @@ def main():
         io_data, _ = load_run_result(file_path)
 
         # Parse report (same as main benchmark)
-        report, _, _ = Report.parse(io_data)
+        report, in_audio_canvas, out_audio_canvas = Report.parse(io_data)
 
         # Generate report using existing format_report function
         report_text = generate_rewind_report(report, io_data, config, source_lang, target_lang, file_path)
+
+        # Save files if --out option is specified
+        if args.out:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            save_benchmark_files(
+                output_dir=args.out,
+                timestamp=timestamp,
+                report=report,
+                io_data=io_data,
+                config=config,
+                result=None,  # No RunResult in rewind
+                in_audio_canvas=in_audio_canvas,
+                out_audio_canvas=out_audio_canvas,
+                source_lang=source_lang,
+                target_lang=target_lang,
+                report_text=report_text,
+                input_file_path=str(file_path),
+                file_prefix="rewind"
+            )
+            print(f"\nFiles saved to: {args.out}")
+
+        # Always print report to console
         print("\n" + report_text)
 
     except Exception as e:
