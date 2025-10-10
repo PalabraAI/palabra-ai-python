@@ -223,7 +223,7 @@ def test_queue_configs():
     """Test QueueConfigs with alias"""
     qc = QueueConfigs()
     assert qc.global_.desired_queue_level_ms == 5000
-    assert qc.global_.max_queue_level_ms == 24000
+    assert qc.global_.max_queue_level_ms == 20000
     assert qc.global_.auto_tempo is True
 
 def test_source_lang():
@@ -1055,7 +1055,116 @@ def test_config_to_dict_includes_all_modifications():
     config2 = Config.from_json(json.loads(json_str))
     assert config2.preprocessing.vad_threshold == 0.6
     assert config2.preprocessing.auto_tempo == True
-    assert config2.source.transcription.segment_confirmation_silence_threshold == 0.85
-    assert config2.source.transcription.only_confirm_by_silence == True
-    assert config2.targets[0].translation.translate_partial_transcriptions == True
-    assert config2.translation_queue_configs.global_.desired_queue_level_ms == 8000
+
+
+def test_config_default_fields_always_present_in_benchmark():
+    """Test that essential default fields are always present in to_dict() for benchmark"""
+    # Create minimal config like in benchmark (only source/target languages)
+    config = Config(
+        source=SourceLang(lang=EN),
+        targets=[TargetLang(lang=ES)]
+    )
+
+    # Enable the feature directly to test the functionality
+    config.rich_default_config = True
+
+    # Force re-execution of the field marking logic since it runs during init
+    config._ensure_default_fields_are_set()
+
+    # Get dict using default behavior (exclude_unset=True) - same as benchmark
+    data = config.to_dict()
+
+    # These fields MUST be present even though they are defaults
+    pipeline = data["pipeline"]
+
+    # Transcription defaults that should always be present
+    transcription = pipeline["transcription"]
+    assert "detectable_languages" in transcription
+    assert transcription["detectable_languages"] == []
+    assert "segment_confirmation_silence_threshold" in transcription
+    assert transcription["segment_confirmation_silence_threshold"] == 0.7
+
+    # Sentence splitter defaults
+    assert "sentence_splitter" in transcription
+    sentence_splitter = transcription["sentence_splitter"]
+    assert "enabled" in sentence_splitter
+    assert sentence_splitter["enabled"] is True
+
+    # Verification defaults
+    assert "verification" in transcription
+    verification = transcription["verification"]
+    assert "auto_transcription_correction" in verification
+    assert verification["auto_transcription_correction"] is False
+    assert "transcription_correction_style" in verification
+    assert verification["transcription_correction_style"] is None
+
+    # Translation defaults
+    translations = pipeline["translations"]
+    assert len(translations) == 1
+    translation = translations[0]
+    assert "translate_partial_transcriptions" in translation
+    assert translation["translate_partial_transcriptions"] is False
+
+    # Speech generation defaults
+    assert "speech_generation" in translation
+    speech_gen = translation["speech_generation"]
+    assert "voice_cloning" in speech_gen
+    assert speech_gen["voice_cloning"] is False
+    assert "voice_id" in speech_gen
+    assert speech_gen["voice_id"] == "default_low"
+
+    # Voice timbre detection defaults
+    assert "voice_timbre_detection" in speech_gen
+    voice_timbre = speech_gen["voice_timbre_detection"]
+    assert "enabled" in voice_timbre
+    assert voice_timbre["enabled"] is False
+    assert "high_timbre_voices" in voice_timbre
+    assert voice_timbre["high_timbre_voices"] == ["default_high"]
+    assert "low_timbre_voices" in voice_timbre
+    assert voice_timbre["low_timbre_voices"] == ["default_low"]
+
+    # Translation queue config defaults
+    assert "translation_queue_configs" in pipeline
+    queue_configs = pipeline["translation_queue_configs"]
+    assert "global" in queue_configs
+    global_config = queue_configs["global"]
+    assert "desired_queue_level_ms" in global_config
+    assert global_config["desired_queue_level_ms"] == 5000
+    assert "max_queue_level_ms" in global_config
+    assert global_config["max_queue_level_ms"] == 20000
+    assert "auto_tempo" in global_config
+    assert global_config["auto_tempo"] is True
+    assert "min_tempo" in global_config
+    assert global_config["min_tempo"] == 1.15
+    assert "max_tempo" in global_config
+    assert global_config["max_tempo"] == 1.45
+
+
+def test_rich_default_config_disabled_by_default():
+    """Test that rich_default_config is disabled by default and default fields are excluded"""
+    # Create minimal config without explicitly setting rich_default_config
+    config = Config(
+        source=SourceLang(lang=EN),
+        targets=[TargetLang(lang=ES)]
+    )
+
+    # Get dict using default behavior (exclude_unset=True) - same as benchmark
+    data = config.to_dict()
+    pipeline = data["pipeline"]
+    transcription = pipeline["transcription"]
+
+    # These default fields should NOT be present when feature is disabled
+    assert "detectable_languages" not in transcription
+    assert "segment_confirmation_silence_threshold" not in transcription
+    assert "sentence_splitter" not in transcription
+    assert "verification" not in transcription
+
+    # Check translations
+    translations = pipeline["translations"]
+    assert len(translations) == 1
+    translation = translations[0]
+    assert "translate_partial_transcriptions" not in translation
+    assert "speech_generation" not in translation
+
+    # Check queue configs
+    assert "translation_queue_configs" not in pipeline

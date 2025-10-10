@@ -59,6 +59,7 @@ from palabra_ai.message import Message
 from palabra_ai.types import T_ON_TRANSCRIPTION
 from palabra_ai.util.logger import set_logging
 from palabra_ai.util.orjson import from_json, to_json
+from palabra_ai.util.pydantic import mark_fields_as_set
 
 if TYPE_CHECKING:
     from palabra_ai.task.adapter.base import Reader, Writer
@@ -74,6 +75,28 @@ DEEP_DEBUG = env.bool("DEEP_DEBUG", default=False)
 DEEPEST_DEBUG = env.bool("DEEPEST_DEBUG", default=False)
 TIMEOUT = env.int("TIMEOUT", default=0)
 LOG_FILE = env.path("LOG_FILE", default=None)
+RICH_DEFAULT_CONFIG = env.bool("RICH_DEFAULT_CONFIG", default=False)
+
+# Materialized paths for fields that should always be included in serialization
+# when rich_default_config is enabled, even with exclude_unset=True
+ALWAYS_INCLUDE_PATHS = [
+    "source.transcription.detectable_languages",
+    "source.transcription.segment_confirmation_silence_threshold",
+    "source.transcription.sentence_splitter.enabled",
+    "source.transcription.verification.auto_transcription_correction",
+    "source.transcription.verification.transcription_correction_style",
+    "targets[].translation.translate_partial_transcriptions",
+    "targets[].translation.speech_generation.voice_cloning",
+    "targets[].translation.speech_generation.voice_id",
+    "targets[].translation.speech_generation.voice_timbre_detection.enabled",
+    "targets[].translation.speech_generation.voice_timbre_detection.high_timbre_voices",
+    "targets[].translation.speech_generation.voice_timbre_detection.low_timbre_voices",
+    "translation_queue_configs.global_.desired_queue_level_ms",
+    "translation_queue_configs.global_.max_queue_level_ms",
+    "translation_queue_configs.global_.auto_tempo",
+    "translation_queue_configs.global_.min_tempo",
+    "translation_queue_configs.global_.max_tempo",
+]
 
 
 def validate_language(v):
@@ -499,6 +522,7 @@ class Config(BaseModel):
     trace_file: Path | str | None = Field(default=None, exclude=True)
     drop_empty_frames: bool = Field(default=False, exclude=True)
     estimated_duration: float | None = Field(default=None, exclude=True)
+    rich_default_config: bool = Field(default=RICH_DEFAULT_CONFIG, exclude=True)
 
     def __init__(
         self,
@@ -511,6 +535,7 @@ class Config(BaseModel):
             self.source = source
         if not self.targets:
             self.targets = targets
+        self._ensure_default_fields_are_set()
 
     def model_post_init(self, context: Any, /) -> None:
         if self.targets is None:
@@ -522,7 +547,21 @@ class Config(BaseModel):
             self.log_file.parent.mkdir(exist_ok=True, parents=True)
             self.trace_file = self.log_file.with_suffix(".trace.json")
         set_logging(self.silent, self.debug, self.internal_logs, self.log_file)
+        self._ensure_default_fields_are_set()
         super().model_post_init(context)
+
+    def _ensure_default_fields_are_set(self) -> None:
+        """
+        Ensure that essential default fields are marked as 'set' in Pydantic
+        so they appear in serialization even with exclude_unset=True.
+
+        This feature is disabled by default and can be enabled with
+        RICH_DEFAULT_CONFIG environment variable.
+        """
+        if not self.rich_default_config:
+            return
+
+        mark_fields_as_set(self, ALWAYS_INCLUDE_PATHS)
 
     @model_validator(mode="before")
     @classmethod
@@ -609,6 +648,11 @@ class Config(BaseModel):
             pipeline["translation_queue_configs"] = data.pop(
                 "translation_queue_configs"
             )
+        elif "translation_queue_configs" in self.__pydantic_fields_set__:
+            # Include if was explicitly set, even if not in data due to exclude_unset
+            pipeline["translation_queue_configs"] = (
+                self.translation_queue_configs.model_dump(exclude_unset=exclude_unset)
+            )
         if "allowed_message_types" in data:
             pipeline["allowed_message_types"] = data.pop("allowed_message_types")
 
@@ -652,4 +696,6 @@ class Config(BaseModel):
     def from_json(cls, data: str | dict) -> Config:
         if isinstance(data, str):
             data = from_json(data)
-        return cls.model_validate(data)
+        config = cls.model_validate(data)
+        config._ensure_default_fields_are_set()
+        return config
