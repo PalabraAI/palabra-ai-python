@@ -19,7 +19,7 @@ from prettytable import PrettyTable
 from palabra_ai import Config
 from palabra_ai import Message
 from palabra_ai.audio import save_wav
-from palabra_ai.benchmark.utils import flatten_container_to_paths
+from palabra_ai.benchmark.utils import flatten_container_to_paths, _format_value
 
 from palabra_ai.message import IoEvent
 
@@ -439,17 +439,11 @@ def format_report(report: Report, io_data: IoData, source_lang: str, target_lang
     lines.append("CONFIG (sent vs applied)")
     lines.append("-" * 80)
 
-    # Flatten both data sets to paths for table display
-    import wat
-    wat / report.set_task_e
-    wat / report.current_task_e
+    set_task_data = report.set_task_e.body["data"] if report.set_task_e else {}
+    current_task_data = report.current_task_e.body["data"] if report.current_task_e else {}
 
-    sent_paths = flatten_container_to_paths(report.set_task_e.body["data"] if report.set_task_e else {})
-    applied_paths = flatten_container_to_paths(report.current_task_e.body["data"] if report.current_task_e else {})
-
-    import wat
-    wat / sent_paths
-    wat / applied_paths
+    sent_paths = [(k, _format_value(v)) for k,v in flatten_container_to_paths(set_task_data)]
+    applied_paths = [(k, _format_value(v)) for k,v in flatten_container_to_paths(current_task_data)]
 
     # Merge settings using full outer join
     merged_settings = merge_task_settings(sent_paths, applied_paths)
@@ -461,8 +455,8 @@ def format_report(report: Report, io_data: IoData, source_lang: str, target_lang
     table.align["Applied"] = "l"
 
     for key, sent_value, applied_value in merged_settings:
-        sent_str = str(sent_value) if sent_value is not None else ""
-        applied_str = str(applied_value) if applied_value is not None else ""
+        sent_str = sent_value if sent_value is not None else ""
+        applied_str = applied_value if applied_value is not None else ""
         table.add_row([key, sent_str, applied_str])
 
     lines.append(str(table))

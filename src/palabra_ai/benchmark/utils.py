@@ -34,7 +34,7 @@ def flatten_container_to_paths(container: Container, prefix: str = "") -> List[T
                 else:
                     out.append((path, []))
             else:
-                out.append((path, _format_value(v)))
+                out.append((path, v))
         return out
 
     if isinstance(container, list):
@@ -54,8 +54,8 @@ def flatten_container_to_paths(container: Container, prefix: str = "") -> List[T
                 else:
                     out.append((path, []))
             else:
-                out.append((path, _format_value(v)))
+                out.append((path, v))
         return out
 
-    out.append((prefix, _format_value(container)))
+    out.append((prefix, container))
     return out
