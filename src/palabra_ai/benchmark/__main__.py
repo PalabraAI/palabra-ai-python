@@ -19,6 +19,7 @@ from palabra_ai.config import WsMode
 from palabra_ai.lang import Language
 from palabra_ai.task.adapter.dummy import DummyWriter
 from palabra_ai.task.adapter.file import FileReader
+from palabra_ai.util.fileio import save_text
 from palabra_ai.util.orjson import to_json
 from palabra_ai.util.sysinfo import get_system_info
 
@@ -158,11 +159,12 @@ def main():
             raise RuntimeError("Benchmark failed: no io_data")
 
         # Parse report
-        report = Report.parse(result.io_data)
         if args.out:
-            report.cfg.output_dir = Path(args.out)
+            report = Report.parse(result.io_data, Path(args.out))
             report.save_all()
-        print("\n" + report.format_report())
+        else:
+            report = Report.parse(result.io_data)
+        print("\n" + report.report_txt)
 
     except Exception as e:
         # Capture traceback IMMEDIATELY - must be done in except block!
@@ -174,26 +176,18 @@ def main():
         print(f"{'='*80}\n")
         print(tb_string)
 
-        # Save error to file if output directory exists
-        if output_dir and timestamp:
-            try:
-                error_file = output_dir / f"{timestamp}_bench_error.txt"
-                error_file.write_text(f"Benchmark Error:\n\n{tb_string}")
-                print(f"\nError details saved to: {error_file}")
-            except Exception as save_error:
-                print(f"Failed to save error file: {save_error}")
+        save_text(config.get_out_path(".error.txt"), f"Benchmark Error:\n\n{tb_string}")
 
         # Try to save partial report/audio even on error (for debugging)
-        if output_dir and timestamp and result and result.io_data:
+        if result and result.io_data:
             try:
                 print("\nAttempting to save partial results for debugging...")
 
                 # Try to parse report
-                report = Report.parse(result.io_data)
                 if args.out:
-                    report.cfg.output_dir = Path(args.out)
+                    output_dir = Path(args.out)
+                    report = Report.parse(result.io_data, output_dir)
                     report.save_all()
-
                 print(f"✓ Something saved to: {args.out}")
 
             except Exception as save_err:

@@ -7,6 +7,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 
 from dataclasses import field
+from functools import cached_property
 from pathlib import Path
 from typing import Any
 from typing import NamedTuple
@@ -195,7 +196,7 @@ class Report:
 
 
     @classmethod
-    def parse(cls, io_data: IoData) -> Self:
+    def parse(cls, io_data: IoData, output_dir: Path | None = None) -> Self:
         sentences = {}
 
         all_with_tid: list[IoEvent] = []
@@ -226,6 +227,8 @@ class Report:
                 current_task_e = e
 
         cfg = Config.from_dict(set_task_e.body["data"])
+        if output_dir is not None:
+            cfg.output_dir = output_dir
 
         focused_by_tid = defaultdict(list)
         for fe in focused:
@@ -350,12 +353,16 @@ class Report:
         save_wav(self.out_audio_canvas, path, self.io_data.out_sr, self.io_data.channels)
 
     def save_txt(self) -> None:
-        save_text(self.cfg.get_out_path(OUT_REPORT_SUFFIX), self.format_report())
+        save_text(self.cfg.get_out_path(OUT_REPORT_SUFFIX), self.report_txt)
 
     def save_all(self):
         self.save_txt()
         self.save_in(self.cfg.get_out_path(OUT_IN_AUDIO_SUFFIX))
         self.save_out(self.cfg.get_out_path(OUT_OUT_AUDIO_SUFFIX))
+
+    @cached_property
+    def report_txt(self) -> str:
+        return self.format_report()
 
     def format_report(self) -> str:
         """Format report as text with tables and histogram"""
@@ -372,8 +379,10 @@ class Report:
         # Input/Output info
         in_dur = f"{self.in_audio_stat.length_s:.1f}s" if self.in_audio_stat else "?.?s"
         out_dur = f"{self.out_audio_stat.length_s:.1f}s" if self.out_audio_stat else "?.?s"
-        lines.append(f"Input:  [{in_dur}, {self.io_data.in_sr}hz, 16bit, PCM] {self.io_data.reader_x_title}")
-        lines.append(f"Output: [{out_dur}, {self.io_data.out_sr}hz, 16bit, PCM] {self.io_data.writer_x_title}")
+        lines.append(f"Reader:  [{in_dur}, {self.io_data.in_sr}hz, 16bit, PCM] {self.io_data.reader_x_title}")
+        lines.append(f"Writer:  [{out_dur}, {self.io_data.out_sr}hz, 16bit, PCM] {self.io_data.writer_x_title}")
+        if self.cfg.output_dir:
+            lines.append(f"Out dir: {self.cfg.output_dir}")
 
         # TTS autotempo info
         queue_config = self.cfg.translation_queue_configs.global_ if self.cfg.translation_queue_configs else None

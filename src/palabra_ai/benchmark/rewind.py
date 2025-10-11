@@ -70,16 +70,15 @@ def main():
     io_data = load_run_result(file_path)
 
     # Parse report (same as main benchmark)
-    report = Report.parse(io_data)
-
-    # Save files if --out option is specified
     if args.out:
-        report.cfg.output_dir = Path(args.out)
+        report = Report.parse(io_data, Path(args.out))
         report.save_all()
         print(f"\nFiles saved to: {args.out}")
+    else:
+        report = Report.parse(io_data)
 
     # Always print report to console
-    print("\n" + report.format_report())
+    print("\n" + report.report_txt)
 
 
 if __name__ == "__main__":

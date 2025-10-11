@@ -54,13 +54,10 @@ def with_config_save(func):
         try:
             from palabra_ai.benchmark.report import Report
 
-            report = Report.parse(result)
+            report = Report.parse(result.io_data, config.output_dir)
             report.save_all()
         except Exception as e:
             warning(f"⚠️ Exception saving run result in {func.__name__}: {e!r}")
-
-        # Log after completion
-        print(f"[INFO] Finished async method {func.__name__} with config: {config}")
         return result
 
     return wrapper
