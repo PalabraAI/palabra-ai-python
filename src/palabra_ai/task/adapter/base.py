@@ -126,6 +126,10 @@ class BufferedWriter(UnlimitedExitMixin, Writer):
     _: KW_ONLY
     ab: AudioBuffer | None = field(default=None, init=False)
 
+    @property
+    def x_title(self) -> str:
+        return "in-memory-buffer"
+
     async def boot(self):
         # Create buffer with estimated duration from config
         self.ab = AudioBuffer(
