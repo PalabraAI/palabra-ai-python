@@ -16,8 +16,10 @@ from pydantic import (
     PrivateAttr,
     model_validator,
 )
+from pydantic.json_schema import SkipJsonSchema
 
 from palabra_ai.constant import (
+    AUTO_TEMPO_MAX_DELAY_MS_DEFAULT,
     BYTES_PER_SAMPLE,
     CONTEXT_SIZE_DEFAULT,
     DESIRED_QUEUE_LEVEL_MS_DEFAULT,
@@ -39,8 +41,9 @@ from palabra_ai.constant import (
     QUEUE_MIN_TEMPO,
     SEGMENT_CONFIRMATION_SILENCE_THRESHOLD_DEFAULT,
     SEGMENTS_AFTER_RESTART_DEFAULT,
-    SPEECH_TEMPO_ADJUSTMENT_FACTOR_DEFAULT,
     STEP_SIZE_DEFAULT,
+    TEMPO_DECAY_DEFAULT,
+    TEMPO_SMOOTHING_DEFAULT,
     VAD_LEFT_PADDING_DEFAULT,
     VAD_RIGHT_PADDING_DEFAULT,
     VAD_THRESHOLD_DEFAULT,
@@ -379,6 +382,7 @@ class Transcription(BaseModel):
     batched_inference: bool = False
     force_detect_language: bool = False
     calculate_voice_loudness: bool = False
+    speakers_total: int | None = None
     sentence_splitter: Splitter = Field(default_factory=Splitter)
     verification: Verification = Field(default_factory=Verification)
     advanced: TranscriptionAdvanced = Field(default_factory=TranscriptionAdvanced)
@@ -399,13 +403,13 @@ class TTSAdvanced(BaseModel):
 class SpeechGen(BaseModel):
     tts_model: str = "auto"
     voice_cloning: bool = False
-    voice_cloning_mode: str = "static_10"
+    voice_cloning_mode: str = "static_5"
     denoise_voice_samples: bool = True
     voice_id: str = "default_low"
     voice_timbre_detection: TimbreDetection = Field(default_factory=TimbreDetection)
-    speech_tempo_auto: bool = True
+    speech_tempo_auto: bool = False
     speech_tempo_timings_factor: int = 0
-    speech_tempo_adjustment_factor: float = SPEECH_TEMPO_ADJUSTMENT_FACTOR_DEFAULT
+    speech_tempo_adjustment_factor: float = 1.0
     advanced: TTSAdvanced = Field(default_factory=TTSAdvanced)
 
 
@@ -429,6 +433,9 @@ class QueueConfig(BaseModel):
     auto_tempo: bool = True
     min_tempo: float = QUEUE_MIN_TEMPO
     max_tempo: float = QUEUE_MAX_TEMPO
+    auto_tempo_max_delay_ms: int = AUTO_TEMPO_MAX_DELAY_MS_DEFAULT
+    tempo_decay: float = TEMPO_DECAY_DEFAULT
+    tempo_smoothing: float = TEMPO_SMOOTHING_DEFAULT
 
 
 class QueueConfigs(BaseModel):
@@ -515,7 +522,9 @@ class Config(BaseModel):
     silent: bool = Field(default=SILENT, exclude=True)
     log_file: Path | str | None = Field(default=LOG_FILE, exclude=True)
     benchmark: bool = Field(default=False, exclude=True)
-    internal_logs: TextIO | None = Field(default_factory=io.StringIO, exclude=True)
+    internal_logs: SkipJsonSchema[TextIO | None] = Field(
+        default_factory=io.StringIO, exclude=True
+    )
     debug: bool = Field(default=DEBUG, exclude=True)
     deep_debug: bool = Field(default=DEEP_DEBUG, exclude=True)
     timeout: int = Field(default=TIMEOUT, exclude=True)  # TODO!

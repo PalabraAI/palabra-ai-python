@@ -1168,3 +1168,80 @@ def test_rich_default_config_disabled_by_default():
 
     # Check queue configs
     assert "translation_queue_configs" not in pipeline
+
+
+def test_config_model_json_schema():
+    """Test that Config.model_json_schema() works correctly"""
+    schema = Config.model_json_schema()
+
+    # Basic checks
+    assert isinstance(schema, dict)
+    assert "$defs" in schema or "definitions" in schema
+    assert "properties" in schema
+
+    # Check that essential fields are in schema
+    properties = schema["properties"]
+    assert "source" in properties
+    assert "targets" in properties
+    assert "preprocessing" in properties
+    assert "translation_queue_configs" in properties
+    assert "allowed_message_types" in properties
+
+    # internal_logs should NOT be in schema (skipped via SkipJsonSchema)
+    assert "internal_logs" not in properties
+
+
+def test_config_new_fields_from_applied():
+    """Test that new fields from Applied column are present"""
+    # Create config
+    config = Config(
+        source=SourceLang(lang=EN),
+        targets=[TargetLang(lang=ES)]
+    )
+
+    # Check Transcription.speakers_total
+    assert hasattr(config.source.transcription, 'speakers_total')
+    assert config.source.transcription.speakers_total is None
+
+    # Check QueueConfig new fields
+    queue_config = config.translation_queue_configs.global_
+    assert hasattr(queue_config, 'auto_tempo_max_delay_ms')
+    assert queue_config.auto_tempo_max_delay_ms == 250
+    assert hasattr(queue_config, 'tempo_decay')
+    assert queue_config.tempo_decay == 0.35
+    assert hasattr(queue_config, 'tempo_smoothing')
+    assert queue_config.tempo_smoothing == 0.005
+
+    # Check SpeechGen defaults match Applied
+    speech_gen = config.targets[0].translation.speech_generation
+    assert speech_gen.voice_cloning_mode == "static_5"
+    assert speech_gen.speech_tempo_auto is False
+    assert speech_gen.speech_tempo_adjustment_factor == 1.0
+
+
+def test_config_json_schema_includes_new_fields():
+    """Test that model_json_schema includes new fields from Applied"""
+    schema = Config.model_json_schema()
+    defs = schema.get("$defs") or schema.get("definitions", {})
+
+    # Check Transcription schema includes speakers_total
+    transcription_def = defs.get("Transcription")
+    assert transcription_def is not None
+    trans_props = transcription_def.get("properties", {})
+    assert "speakers_total" in trans_props
+
+    # Check QueueConfig schema includes new tempo fields
+    queue_config_def = defs.get("QueueConfig")
+    assert queue_config_def is not None
+    queue_props = queue_config_def.get("properties", {})
+    assert "auto_tempo_max_delay_ms" in queue_props
+    assert "tempo_decay" in queue_props
+    assert "tempo_smoothing" in queue_props
+
+    # Check SpeechGen schema includes all fields
+    speech_gen_def = defs.get("SpeechGen")
+    assert speech_gen_def is not None
+    speech_props = speech_gen_def.get("properties", {})
+    assert "voice_cloning_mode" in speech_props
+    assert "speech_tempo_auto" in speech_props
+    assert "speech_tempo_adjustment_factor" in speech_props
