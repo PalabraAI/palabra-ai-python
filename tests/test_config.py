@@ -1171,24 +1171,65 @@ def test_rich_default_config_disabled_by_default():
 
 
 def test_config_model_json_schema():
-    """Test that Config.model_json_schema() works correctly"""
+    """Test that Config.model_json_schema() matches to_dict() structure"""
     schema = Config.model_json_schema()
 
     # Basic checks
     assert isinstance(schema, dict)
-    assert "$defs" in schema or "definitions" in schema
+    assert "$defs" in schema
     assert "properties" in schema
 
-    # Check that essential fields are in schema
     properties = schema["properties"]
-    assert "source" in properties
-    assert "targets" in properties
-    assert "preprocessing" in properties
-    assert "translation_queue_configs" in properties
-    assert "allowed_message_types" in properties
 
-    # internal_logs should NOT be in schema (skipped via SkipJsonSchema)
+    # Schema should match to_dict() structure
+    assert "pipeline" in properties
+    assert "input_stream" in properties
+    assert "output_stream" in properties
+
+    # Excluded fields should NOT be in schema
+    assert "source" not in properties
+    assert "targets" not in properties
+    assert "mode" not in properties
+    assert "silent" not in properties
+    assert "log_file" not in properties
+    assert "benchmark" not in properties
+    assert "debug" not in properties
+    assert "deep_debug" not in properties
+    assert "timeout" not in properties
+    assert "trace_file" not in properties
+    assert "drop_empty_frames" not in properties
+    assert "estimated_duration" not in properties
+    assert "rich_default_config" not in properties
     assert "internal_logs" not in properties
+
+    # Check pipeline structure
+    pipeline = properties["pipeline"]["properties"]
+    assert "transcription" in pipeline
+    assert "translations" in pipeline
+    assert "preprocessing" in pipeline
+    assert "translation_queue_configs" in pipeline
+    assert "allowed_message_types" in pipeline
+
+    # Check language enums with flags
+    defs = schema["$defs"]
+    assert "SourceLanguageEnum" in defs
+    assert "TargetLanguageEnum" in defs
+
+    source_enum = defs["SourceLanguageEnum"]
+    assert "enum" in source_enum
+    assert "enumNames" in source_enum
+    assert len(source_enum["enum"]) > 0
+    assert len(source_enum["enumNames"]) == len(source_enum["enum"])
+    # Check that enumNames have flags
+    assert any("🇺🇸" in name or "🇬🇧" in name for name in source_enum["enumNames"])
+
+    target_enum = defs["TargetLanguageEnum"]
+    assert "enum" in target_enum
+    assert "enumNames" in target_enum
+    assert len(target_enum["enum"]) > 0
+    assert len(target_enum["enumNames"]) == len(target_enum["enum"])
+    # Check that enumNames have flags
+    assert any("🇺🇸" in name or "🇪🇸" in name for name in target_enum["enumNames"])
 
 
 def test_config_new_fields_from_applied():
@@ -1245,3 +1286,23 @@ def test_config_json_schema_includes_new_fields():
     assert "voice_cloning_mode" in speech_props
     assert "speech_tempo_auto" in speech_props
     assert "speech_tempo_adjustment_factor" in speech_props
+
+
+def test_config_json_schema_has_stream_defaults():
+    """Test that model_json_schema includes default values for input/output streams"""
+    from palabra_ai.constant import WS_MODE_INPUT_SAMPLE_RATE, WS_MODE_OUTPUT_SAMPLE_RATE, WS_MODE_CHANNELS
+
+    schema = Config.model_json_schema()
+    properties = schema["properties"]
+
+    # Check input_stream source defaults
+    input_source = properties["input_stream"]["properties"]["source"]["properties"]
+    assert input_source["format"]["default"] == "pcm_s16le"
+    assert input_source["sample_rate"]["default"] == WS_MODE_INPUT_SAMPLE_RATE
+    assert input_source["channels"]["default"] == WS_MODE_CHANNELS
+
+    # Check output_stream target defaults
+    output_target = properties["output_stream"]["properties"]["target"]["properties"]
+    assert output_target["format"]["default"] == "pcm_s16le"
+    assert output_target["sample_rate"]["default"] == WS_MODE_OUTPUT_SAMPLE_RATE
+    assert output_target["channels"]["default"] == WS_MODE_CHANNELS
