@@ -337,11 +337,14 @@ class GetTaskMessage(Message):
     """Get task message"""
 
     type_: Message.Type = Field(default=Message.Type.GET_TASK, alias="message_type")
+    exclude_hidden: bool = Field(
+        default=False, description="Include hidden configuration fields"
+    )
 
     def model_dump(self, **kwargs) -> dict[str, Any]:
         return {
             "message_type": self.type_.value,
-            "data": {},
+            "data": {"exclude_hidden": self.exclude_hidden},
         }
 
 

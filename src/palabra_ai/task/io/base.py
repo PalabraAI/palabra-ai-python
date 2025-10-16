@@ -292,7 +292,7 @@ class Io(Task):
             start_time = time.perf_counter()
             await aio.sleep(SLEEP_INTERVAL_LONG)
             while start_time + BOOT_TIMEOUT > time.perf_counter():
-                await self.push_in_msg(GetTaskMessage())
+                await self.push_in_msg(GetTaskMessage(exclude_hidden=False))
                 msg = await anext(msgs_out)
                 if isinstance(msg, CurrentTaskMessage):
                     debug(f"set_task() SUCCESS: Received current task: {msg.data}")

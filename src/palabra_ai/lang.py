@@ -396,3 +396,13 @@ def is_valid_target_language(lang: Language) -> bool:
 def is_auto_detectable_language(lang: Language) -> bool:
     """Check if language supports auto-detection (asr_model='alpha')"""
     return lang in AUTO_DETECTABLE_LANGUAGES
+
+
+def get_source_languages() -> list[Language]:
+    """Get all languages valid for source (transcription/recognition)"""
+    return sorted(VALID_SOURCE_LANGUAGES, key=lambda l: l.code)
+
+
+def get_target_languages() -> list[Language]:
+    """Get all languages valid for target (translation)"""
+    return sorted(VALID_TARGET_LANGUAGES, key=lambda l: l.code)

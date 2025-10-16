@@ -1,0 +1,18 @@
+services:
+  benchmark:
+    build: .
+    volumes:
+      # Mount entire project directory
+      - .:/workspace
+      # Cache .venv to avoid reinstalling deps every time
+      - palabra-venv:/workspace/.venv
+    working_dir: /workspace
+    env_file:
+      - .env
+    # Override CMD to pass arguments from command line
+    # Usage: docker-compose run benchmark --config DNA.json --out ./results DNA.wav
+    # Note: $$@ is special syntax for docker-compose v1 compatibility
+    entrypoint: sh -c 'uv sync --frozen && uv run python -m palabra_ai.benchmark "$$@"' --
+
+volumes:
+  palabra-venv:
