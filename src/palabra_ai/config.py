@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+from copy import deepcopy
 from functools import cached_property
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, TextIO
@@ -15,8 +16,10 @@ from pydantic import (
     PrivateAttr,
     model_validator,
 )
+from pydantic.json_schema import SkipJsonSchema
 
 from palabra_ai.constant import (
+    AUTO_TEMPO_MAX_DELAY_MS_DEFAULT,
     BYTES_PER_SAMPLE,
     CONTEXT_SIZE_DEFAULT,
     DESIRED_QUEUE_LEVEL_MS_DEFAULT,
@@ -38,8 +41,9 @@ from palabra_ai.constant import (
     QUEUE_MIN_TEMPO,
     SEGMENT_CONFIRMATION_SILENCE_THRESHOLD_DEFAULT,
     SEGMENTS_AFTER_RESTART_DEFAULT,
-    SPEECH_TEMPO_ADJUSTMENT_FACTOR_DEFAULT,
     STEP_SIZE_DEFAULT,
+    TEMPO_DECAY_DEFAULT,
+    TEMPO_SMOOTHING_DEFAULT,
     VAD_LEFT_PADDING_DEFAULT,
     VAD_RIGHT_PADDING_DEFAULT,
     VAD_THRESHOLD_DEFAULT,
@@ -58,6 +62,7 @@ from palabra_ai.message import Message
 from palabra_ai.types import T_ON_TRANSCRIPTION
 from palabra_ai.util.logger import set_logging
 from palabra_ai.util.orjson import from_json, to_json
+from palabra_ai.util.pydantic import mark_fields_as_set
 
 if TYPE_CHECKING:
     from palabra_ai.task.adapter.base import Reader, Writer
@@ -73,6 +78,28 @@ DEEP_DEBUG = env.bool("DEEP_DEBUG", default=False)
 DEEPEST_DEBUG = env.bool("DEEPEST_DEBUG", default=False)
 TIMEOUT = env.int("TIMEOUT", default=0)
 LOG_FILE = env.path("LOG_FILE", default=None)
+RICH_DEFAULT_CONFIG = env.bool("RICH_DEFAULT_CONFIG", default=False)
+
+# Materialized paths for fields that should always be included in serialization
+# when rich_default_config is enabled, even with exclude_unset=True
+ALWAYS_INCLUDE_PATHS = [
+    "source.transcription.detectable_languages",
+    "source.transcription.segment_confirmation_silence_threshold",
+    "source.transcription.sentence_splitter.enabled",
+    "source.transcription.verification.auto_transcription_correction",
+    "source.transcription.verification.transcription_correction_style",
+    "targets[].translation.translate_partial_transcriptions",
+    "targets[].translation.speech_generation.voice_cloning",
+    "targets[].translation.speech_generation.voice_id",
+    "targets[].translation.speech_generation.voice_timbre_detection.enabled",
+    "targets[].translation.speech_generation.voice_timbre_detection.high_timbre_voices",
+    "targets[].translation.speech_generation.voice_timbre_detection.low_timbre_voices",
+    "translation_queue_configs.global_.desired_queue_level_ms",
+    "translation_queue_configs.global_.max_queue_level_ms",
+    "translation_queue_configs.global_.auto_tempo",
+    "translation_queue_configs.global_.min_tempo",
+    "translation_queue_configs.global_.max_tempo",
+]
 
 
 def validate_language(v):
@@ -355,6 +382,7 @@ class Transcription(BaseModel):
     batched_inference: bool = False
     force_detect_language: bool = False
     calculate_voice_loudness: bool = False
+    speakers_total: int | None = None
     sentence_splitter: Splitter = Field(default_factory=Splitter)
     verification: Verification = Field(default_factory=Verification)
     advanced: TranscriptionAdvanced = Field(default_factory=TranscriptionAdvanced)
@@ -375,13 +403,13 @@ class TTSAdvanced(BaseModel):
 class SpeechGen(BaseModel):
     tts_model: str = "auto"
     voice_cloning: bool = False
-    voice_cloning_mode: str = "static_10"
+    voice_cloning_mode: str = "static_5"
     denoise_voice_samples: bool = True
     voice_id: str = "default_low"
     voice_timbre_detection: TimbreDetection = Field(default_factory=TimbreDetection)
-    speech_tempo_auto: bool = True
+    speech_tempo_auto: bool = False
     speech_tempo_timings_factor: int = 0
-    speech_tempo_adjustment_factor: float = SPEECH_TEMPO_ADJUSTMENT_FACTOR_DEFAULT
+    speech_tempo_adjustment_factor: float = 1.0
     advanced: TTSAdvanced = Field(default_factory=TTSAdvanced)
 
 
@@ -405,6 +433,9 @@ class QueueConfig(BaseModel):
     auto_tempo: bool = True
     min_tempo: float = QUEUE_MIN_TEMPO
     max_tempo: float = QUEUE_MAX_TEMPO
+    auto_tempo_max_delay_ms: int = AUTO_TEMPO_MAX_DELAY_MS_DEFAULT
+    tempo_decay: float = TEMPO_DECAY_DEFAULT
+    tempo_smoothing: float = TEMPO_SMOOTHING_DEFAULT
 
 
 class QueueConfigs(BaseModel):
@@ -487,17 +518,22 @@ class Config(BaseModel):
     translation_queue_configs: QueueConfigs = Field(default_factory=QueueConfigs)
     allowed_message_types: list[str] = [mt.value for mt in Message.ALLOWED_TYPES]
 
-    mode: IoMode = Field(default_factory=WsMode, exclude=True)
-    silent: bool = Field(default=SILENT, exclude=True)
-    log_file: Path | str | None = Field(default=LOG_FILE, exclude=True)
-    benchmark: bool = Field(default=False, exclude=True)
-    internal_logs: TextIO | None = Field(default_factory=io.StringIO, exclude=True)
-    debug: bool = Field(default=DEBUG, exclude=True)
-    deep_debug: bool = Field(default=DEEP_DEBUG, exclude=True)
-    timeout: int = Field(default=TIMEOUT, exclude=True)  # TODO!
-    trace_file: Path | str | None = Field(default=None, exclude=True)
-    drop_empty_frames: bool = Field(default=False, exclude=True)
-    estimated_duration: float | None = Field(default=None, exclude=True)
+    mode: SkipJsonSchema[IoMode] = Field(default_factory=WsMode, exclude=True)
+    silent: SkipJsonSchema[bool] = Field(default=SILENT, exclude=True)
+    log_file: SkipJsonSchema[Path | str | None] = Field(default=LOG_FILE, exclude=True)
+    benchmark: SkipJsonSchema[bool] = Field(default=False, exclude=True)
+    internal_logs: SkipJsonSchema[TextIO | None] = Field(
+        default_factory=io.StringIO, exclude=True
+    )
+    debug: SkipJsonSchema[bool] = Field(default=DEBUG, exclude=True)
+    deep_debug: SkipJsonSchema[bool] = Field(default=DEEP_DEBUG, exclude=True)
+    timeout: SkipJsonSchema[int] = Field(default=TIMEOUT, exclude=True)  # TODO!
+    trace_file: SkipJsonSchema[Path | str | None] = Field(default=None, exclude=True)
+    drop_empty_frames: SkipJsonSchema[bool] = Field(default=False, exclude=True)
+    estimated_duration: SkipJsonSchema[float | None] = Field(default=None, exclude=True)
+    rich_default_config: SkipJsonSchema[bool] = Field(
+        default=RICH_DEFAULT_CONFIG, exclude=True
+    )
 
     def __init__(
         self,
@@ -510,6 +546,7 @@ class Config(BaseModel):
             self.source = source
         if not self.targets:
             self.targets = targets
+        self._ensure_default_fields_are_set()
 
     def model_post_init(self, context: Any, /) -> None:
         if self.targets is None:
@@ -521,13 +558,29 @@ class Config(BaseModel):
             self.log_file.parent.mkdir(exist_ok=True, parents=True)
             self.trace_file = self.log_file.with_suffix(".trace.json")
         set_logging(self.silent, self.debug, self.internal_logs, self.log_file)
+        self._ensure_default_fields_are_set()
         super().model_post_init(context)
+
+    def _ensure_default_fields_are_set(self) -> None:
+        """
+        Ensure that essential default fields are marked as 'set' in Pydantic
+        so they appear in serialization even with exclude_unset=True.
+
+        This feature is disabled by default and can be enabled with
+        RICH_DEFAULT_CONFIG environment variable.
+        """
+        if not self.rich_default_config:
+            return
+
+        mark_fields_as_set(self, ALWAYS_INCLUDE_PATHS)
 
     @model_validator(mode="before")
     @classmethod
     def reconstruct_from_serialized(cls, data: Any) -> Any:
         if not isinstance(data, dict):
             return data
+
+        data = deepcopy(data)
 
         __from_init = data.pop("__from_init", False)
 
@@ -606,6 +659,11 @@ class Config(BaseModel):
             pipeline["translation_queue_configs"] = data.pop(
                 "translation_queue_configs"
             )
+        elif "translation_queue_configs" in self.__pydantic_fields_set__:
+            # Include if was explicitly set, even if not in data due to exclude_unset
+            pipeline["translation_queue_configs"] = (
+                self.translation_queue_configs.model_dump(exclude_unset=exclude_unset)
+            )
         if "allowed_message_types" in data:
             pipeline["allowed_message_types"] = data.pop("allowed_message_types")
 
@@ -615,11 +673,31 @@ class Config(BaseModel):
         result = {**data, **{"pipeline": pipeline}, **self.mode.model_dump()}
         return result
 
-    def to_dict(self) -> dict[str, Any]:
-        return self.model_dump()
+    def to_dict(self, full: bool = False) -> dict[str, Any]:
+        """
+        Convert config to dict.
 
-    def to_json(self) -> str:
-        return to_json(self.model_dump()).decode("utf-8")
+        Args:
+            full: If False (default), return only explicitly set fields (exclude_unset=True).
+                  If True, return all fields including defaults (exclude_unset=False).
+
+        Note: When config is created via __init__ and then modified, use full=True
+              to include all modifications.
+        """
+        return self.model_dump(exclude_unset=not full)
+
+    def to_json(self, full: bool = False) -> str:
+        """
+        Convert config to JSON string.
+
+        Args:
+            full: If False (default), return only explicitly set fields (exclude_unset=True).
+                  If True, return all fields including defaults (exclude_unset=False).
+
+        Note: When config is created via __init__ and then modified, use full=True
+              to include all modifications.
+        """
+        return to_json(self.to_dict(full=full)).decode("utf-8")
 
     @classmethod
     def from_dict(cls, data: dict) -> Config:
@@ -629,4 +707,156 @@ class Config(BaseModel):
     def from_json(cls, data: str | dict) -> Config:
         if isinstance(data, str):
             data = from_json(data)
-        return cls.model_validate(data)
+        config = cls.model_validate(data)
+        config._ensure_default_fields_are_set()
+        return config
+
+    @classmethod
+    def model_json_schema(cls, **kwargs) -> dict[str, Any]:
+        """Generate JSON Schema matching the actual to_dict() serialization structure"""
+        from palabra_ai.lang import get_source_languages, get_target_languages
+
+        # Get base schemas from Pydantic models
+        base_schema = super().model_json_schema(**kwargs)
+        base_defs = base_schema.get("$defs", {})
+
+        # Build transcription schema from Transcription model + source_language
+        transcription_base = base_defs.get("Transcription", {})
+        transcription_props = deepcopy(transcription_base.get("properties", {}))
+        transcription_props["source_language"] = {"$ref": "#/$defs/SourceLanguageEnum"}
+
+        # Build translation schema from Translation model + target_language
+        translation_base = base_defs.get("Translation", {})
+        translation_props = deepcopy(translation_base.get("properties", {}))
+        translation_props["target_language"] = {"$ref": "#/$defs/TargetLanguageEnum"}
+
+        # Create schema matching to_dict() output structure
+        schema = {
+            "type": "object",
+            "title": "Config",
+            "properties": {
+                "pipeline": {
+                    "type": "object",
+                    "properties": {
+                        "transcription": {
+                            "type": "object",
+                            "properties": transcription_props,
+                            "additionalProperties": False,
+                            "required": ["source_language"],
+                        },
+                        "translations": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": translation_props,
+                                "additionalProperties": False,
+                                "required": ["target_language"],
+                            },
+                        },
+                        "preprocessing": {"allOf": [{"$ref": "#/$defs/Preprocessing"}]},
+                        "translation_queue_configs": {
+                            "allOf": [{"$ref": "#/$defs/QueueConfigs"}]
+                        },
+                        "allowed_message_types": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                        },
+                    },
+                    "required": ["transcription", "translations"],
+                },
+                "input_stream": {
+                    "type": "object",
+                    "properties": {
+                        "content_type": {"type": "string", "default": "audio"},
+                        "source": {
+                            "type": "object",
+                            "properties": {
+                                "type": {"type": "string", "enum": ["ws", "webrtc"]},
+                                "format": {"type": "string", "default": "pcm_s16le"},
+                                "sample_rate": {
+                                    "type": "integer",
+                                    "default": WS_MODE_INPUT_SAMPLE_RATE,
+                                },
+                                "channels": {
+                                    "type": "integer",
+                                    "default": WS_MODE_CHANNELS,
+                                },
+                            },
+                            "required": ["type"],
+                        },
+                    },
+                },
+                "output_stream": {
+                    "type": "object",
+                    "properties": {
+                        "content_type": {"type": "string", "default": "audio"},
+                        "target": {
+                            "type": "object",
+                            "properties": {
+                                "type": {"type": "string", "enum": ["ws", "webrtc"]},
+                                "format": {"type": "string", "default": "pcm_s16le"},
+                                "sample_rate": {
+                                    "type": "integer",
+                                    "default": WS_MODE_OUTPUT_SAMPLE_RATE,
+                                },
+                                "channels": {
+                                    "type": "integer",
+                                    "default": WS_MODE_CHANNELS,
+                                },
+                            },
+                            "required": ["type"],
+                        },
+                    },
+                },
+            },
+            "$defs": {
+                # Include all nested model definitions
+                "Preprocessing": base_defs.get("Preprocessing", {}),
+                "QueueConfig": base_defs.get("QueueConfig", {}),
+                "QueueConfigs": base_defs.get("QueueConfigs", {}),
+                "Transcription": base_defs.get("Transcription", {}),
+                "Translation": base_defs.get("Translation", {}),
+                "Splitter": base_defs.get("Splitter", {}),
+                "SplitterAdvanced": base_defs.get("SplitterAdvanced", {}),
+                "Verification": base_defs.get("Verification", {}),
+                "TranscriptionAdvanced": base_defs.get("TranscriptionAdvanced", {}),
+                "FillerPhrases": base_defs.get("FillerPhrases", {}),
+                "SpeechGen": base_defs.get("SpeechGen", {}),
+                "TTSAdvanced": base_defs.get("TTSAdvanced", {}),
+                "TimbreDetection": base_defs.get("TimbreDetection", {}),
+                "TranslationAdvanced": base_defs.get("TranslationAdvanced", {}),
+                # Language enums with flags
+                "SourceLanguageEnum": {
+                    "type": "string",
+                    "enum": list(
+                        {
+                            lang.source_code: None for lang in get_source_languages()
+                        }.keys()
+                    ),
+                    "enumNames": list(
+                        {
+                            lang.source_code: f"{lang.flag} {lang.source_code}"
+                            for lang in get_source_languages()
+                        }.values()
+                    ),
+                    "title": "Source Language",
+                },
+                "TargetLanguageEnum": {
+                    "type": "string",
+                    "enum": list(
+                        {
+                            lang.target_code: None for lang in get_target_languages()
+                        }.keys()
+                    ),
+                    "enumNames": list(
+                        {
+                            lang.target_code: f"{lang.flag} {lang.target_code}"
+                            for lang in get_target_languages()
+                        }.values()
+                    ),
+                    "title": "Target Language",
+                },
+            },
+        }
+
+        return schema
