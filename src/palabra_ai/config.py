@@ -568,8 +568,14 @@ class Config(BaseModel):
     def output_dir(self, value):
         self.x_output_dir = Path(value).absolute()
         self.x_output_dir.mkdir(exist_ok=True, parents=True)
-        self.log_file = self.get_out_path(OUT_LOG_SUFFIX)
-        self.trace_file = self.get_out_path(OUT_TRACE_SUFFIX)
+
+        # Only auto-set log_file if not explicitly provided
+        if "log_file" not in self.model_fields_set:
+            self.log_file = self.get_out_path(OUT_LOG_SUFFIX)
+
+        # Only auto-set trace_file if not explicitly provided
+        if "trace_file" not in self.model_fields_set:
+            self.trace_file = self.get_out_path(OUT_TRACE_SUFFIX)
 
     def model_post_init(self, context: Any, /) -> None:
         # Trigger output_dir setter if output_dir was provided

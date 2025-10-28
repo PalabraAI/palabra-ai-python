@@ -264,6 +264,23 @@ def test_benchmark_parse_handles_part_suffixes():
     # Create mock events for different tid patterns
     base_ts = 0.0  # Use relative timestamps starting from 0
 
+    # Helper to create set_task event
+    def make_set_task_event(idx, dawn_ts):
+        from palabra_ai.util.orjson import to_json
+        body_dict = {
+            "message_type": "set_task",
+            "data": {
+                "source": {"lang": {"code": "en"}},
+                "targets": [{"lang": {"code": "es"}}]
+            }
+        }
+        return IoEvent(
+            head=Dbg(kind=Kind.MESSAGE, ch=None, dir=None, idx=idx, dawn_ts=dawn_ts, dur_s=0.0),
+            body=to_json(body_dict),
+            tid=None,
+            mtype=None
+        )
+
     def make_event(idx, tid, mtype, dawn_ts, text="test"):
         from palabra_ai.util.orjson import to_json
         import base64
@@ -307,10 +324,13 @@ def test_benchmark_parse_handles_part_suffixes():
         )
 
     events = [
+        # set_task event (required by Report.parse)
+        make_set_task_event(0, base_ts),
+
         # Input audio events
-        make_event(0, None, "input_audio_data", base_ts),
-        make_event(1, None, "input_audio_data", base_ts + 0.1),
-        make_event(2, None, "input_audio_data", base_ts + 0.2),
+        make_event(1, None, "input_audio_data", base_ts),
+        make_event(2, None, "input_audio_data", base_ts + 0.1),
+        make_event(3, None, "input_audio_data", base_ts + 0.2),
 
         # sentence_1 (no _part suffix) - should have metrics
         make_event(10, "sentence_1", "partial_transcription", base_ts + 0.5, "Hello"),
@@ -347,7 +367,7 @@ def test_benchmark_parse_handles_part_suffixes():
     )
 
     # Parse the report
-    report, _, _ = Report.parse(io_data)
+    report = Report.parse(io_data)
 
     # Check that we have all 4 sentences
     assert len(report.sentences) == 4, f"Expected 4 sentences, got {len(report.sentences)}"
@@ -404,18 +424,7 @@ def test_benchmark_parse_handles_part_suffixes():
     assert s2p0.local_start_ts == s2p2.local_start_ts, "sentence_2_part_2 should use parent timestamp"
 
     # Test that format_report includes IDs correctly
-    from palabra_ai.benchmark.report import format_report
-    from palabra_ai.config import Config
-    from palabra_ai.lang import Language
-    from palabra_ai import SourceLang, TargetLang
-
-    config = Config(
-        source=SourceLang(Language.get_or_create("en"), None),
-        targets=[TargetLang(Language.get_or_create("es"), None)],
-        benchmark=True
-    )
-
-    report_text = format_report(report, io_data, "en", "es", "test.wav", "out.wav", config)
+    report_text = report.report_txt
 
     # Check that table contains formatted IDs
     assert "sentence_1" in report_text, "Should show sentence_1 without brackets"
@@ -435,6 +444,22 @@ def test_benchmark_parse_handles_partial_extra_parts():
     import numpy as np
 
     base_ts = 0.0
+
+    # Helper to create set_task event
+    def make_set_task_event(idx, dawn_ts):
+        body_dict = {
+            "message_type": "set_task",
+            "data": {
+                "source": {"lang": {"code": "en"}},
+                "targets": [{"lang": {"code": "es"}}]
+            }
+        }
+        return IoEvent(
+            head=Dbg(kind=Kind.MESSAGE, ch=None, dir=None, idx=idx, dawn_ts=dawn_ts, dur_s=0.0),
+            body=to_json(body_dict),
+            tid=None,
+            mtype=None
+        )
 
     def make_event(idx, tid, mtype, dawn_ts, text="test"):
         if mtype in ("input_audio_data", "output_audio_data"):
@@ -465,7 +490,10 @@ def test_benchmark_parse_handles_partial_extra_parts():
         )
 
     events = [
-        make_event(0, None, "input_audio_data", base_ts),
+        # set_task event (required by Report.parse)
+        make_set_task_event(0, base_ts),
+
+        make_event(1, None, "input_audio_data", base_ts),
 
         # Parent sentence
         make_event(10, "s1_part_0", "partial_transcription", base_ts + 0.5, "Parent"),
@@ -493,7 +521,7 @@ def test_benchmark_parse_handles_partial_extra_parts():
         writer_x_title="DummyWriter()"
     )
 
-    report, _, _ = Report.parse(io_data)
+    report = Report.parse(io_data)
 
     assert len(report.sentences) == 3, f"Expected 3 sentences, got {len(report.sentences)}"
 
@@ -522,6 +550,22 @@ def test_benchmark_parse_handles_orphan_extra_parts():
 
     base_ts = 0.0
 
+    # Helper to create set_task event
+    def make_set_task_event(idx, dawn_ts):
+        body_dict = {
+            "message_type": "set_task",
+            "data": {
+                "source": {"lang": {"code": "en"}},
+                "targets": [{"lang": {"code": "es"}}]
+            }
+        }
+        return IoEvent(
+            head=Dbg(kind=Kind.MESSAGE, ch=None, dir=None, idx=idx, dawn_ts=dawn_ts, dur_s=0.0),
+            body=to_json(body_dict),
+            tid=None,
+            mtype=None
+        )
+
     def make_event(idx, tid, mtype, dawn_ts, text="test"):
         body_dict = {
             "message_type": mtype,
@@ -541,6 +585,9 @@ def test_benchmark_parse_handles_orphan_extra_parts():
         )
 
     events = [
+        # set_task event (required by Report.parse)
+        make_set_task_event(0, base_ts),
+
         # Orphan _part_1 without parent
         make_event(10, "orphan_part_1", "validated_transcription", base_ts + 0.5, "Orphan"),
         make_event(11, "orphan_part_1", "translated_transcription", base_ts + 0.6, "Huerfano"),
@@ -564,7 +611,7 @@ def test_benchmark_parse_handles_orphan_extra_parts():
     old_stdout = sys.stdout
     try:
         sys.stdout = captured
-        report, _, _ = Report.parse(io_data)
+        report = Report.parse(io_data)
         sys.stdout = old_stdout
     finally:
         sys.stdout = old_stdout
@@ -710,6 +757,22 @@ def test_benchmark_handles_missing_partial_transcription():
     import base64
     import numpy as np
 
+    # Helper to create set_task event
+    def make_set_task_event(idx, dawn_ts):
+        body_dict = {
+            "message_type": "set_task",
+            "data": {
+                "source": {"lang": {"code": "en"}},
+                "targets": [{"lang": {"code": "es"}}]
+            }
+        }
+        return IoEvent(
+            head=Dbg(kind=Kind.MESSAGE, ch=None, dir=None, idx=idx, dawn_ts=dawn_ts, dur_s=0.0),
+            body=to_json(body_dict),
+            tid=None,
+            mtype=None
+        )
+
     def make_event(idx, tid, mtype, dawn_ts, text="test"):
         if mtype in ("input_audio_data", "output_audio_data"):
             audio_samples = np.zeros(160, dtype=np.int16)
@@ -748,7 +811,10 @@ def test_benchmark_handles_missing_partial_transcription():
 
     # Create events: input, validated, translated, output_audio (no partial)
     events = [
-        make_event(0, None, "input_audio_data", base_ts),
+        # set_task event (required by Report.parse)
+        make_set_task_event(0, base_ts),
+
+        make_event(1, None, "input_audio_data", base_ts),
         make_event(10, base_tid, "validated_transcription", base_ts + 0.5, "validated text"),
         make_event(11, base_tid, "translated_transcription", base_ts + 1.0, "translated text"),
         make_event(12, base_tid, "output_audio_data", base_ts + 1.5),
@@ -757,11 +823,13 @@ def test_benchmark_handles_missing_partial_transcription():
     # Create IoData
     io_data = IoData(
         start_perf_ts=base_ts, start_utc_ts=base_ts, in_sr=16000, out_sr=24000,
-        mode="test", channels=1, events=events, count_events=len(events)
+        mode="test", channels=1, events=events, count_events=len(events),
+        reader_x_title="FileReader(test.wav)",
+        writer_x_title="DummyWriter()"
     )
 
     # Parse with Report - should handle missing partial_transcription
-    report, _, _ = Report.parse(io_data)
+    report = Report.parse(io_data)
 
     # Verify sentence was created despite missing partial_transcription
     assert len(report.sentences) == 1
@@ -891,7 +959,9 @@ def test_rewind_saves_files_with_out_option():
         mode="ws",
         channels=1,
         events=[],
-        count_events=0
+        count_events=0,
+        reader_x_title="FileReader(test.wav)",
+        writer_x_title="DummyWriter()"
     )
 
     # Create mock benchmark result file content
@@ -924,45 +994,18 @@ def test_rewind_saves_files_with_out_option():
                 mock_load.return_value = io_data
 
                 with patch('palabra_ai.benchmark.rewind.Report.parse') as mock_parse:
-                    # Mock empty audio canvases and report with proper set_task_e
-                    import numpy as np
-                    from palabra_ai.benchmark.report import Report
-
-                    # Create mock report with set_task_e that contains config data
+                    # Mock report with save_all and report_txt
                     mock_report = MagicMock()
-                    mock_report.set_task_e = MagicMock()
-                    mock_report.set_task_e.body = {
-                        "data": {
-                            "source": {"lang": {"code": "en"}},
-                            "targets": [{"lang": {"code": "es"}}]
-                        }
-                    }
+                    mock_report.report_txt = "Test report content"
+                    mock_report.save_all = MagicMock()
+                    mock_parse.return_value = mock_report
 
-                    mock_in_audio = np.zeros(1000, dtype=np.int16)
-                    mock_out_audio = np.zeros(1000, dtype=np.int16)
-                    mock_parse.return_value = (mock_report, mock_in_audio, mock_out_audio)
+                    # Run rewind
+                    rewind_main()
 
-                    with patch('palabra_ai.benchmark.rewind.format_report') as mock_format:
-                        mock_format.return_value = "Test report content"
-
-                        with patch('palabra_ai.benchmark.rewind.Config.from_dict') as mock_config:
-                            # Create mock config with language properties
-                            mock_config_obj = MagicMock()
-                            mock_config_obj.source.lang.code = "en"
-                            mock_config_obj.targets = [MagicMock()]
-                            mock_config_obj.targets[0].lang.code = "es"
-                            mock_config.return_value = mock_config_obj
-
-                            with patch('palabra_ai.benchmark.rewind.save_benchmark_files') as mock_save:
-                                # Run rewind
-                                rewind_main()
-
-                                # Verify save_benchmark_files was called
-                                mock_save.assert_called_once()
-
-        # The test was originally checking for actual file creation, but since we're mocking
-        # save_benchmark_files, we just verify the function was called correctly
-        assert True, "Rewind executed successfully with mocked dependencies"
+                    # Verify parse and save_all were called
+                    mock_parse.assert_called_once()
+                    mock_report.save_all.assert_called_once()
 
 
 
