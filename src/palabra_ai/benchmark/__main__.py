@@ -176,7 +176,8 @@ def main():
         print(f"{'='*80}\n")
         print(tb_string)
 
-        save_text(config.get_out_path(".error.txt"), f"Benchmark Error:\n\n{tb_string}")
+        if config and args.out:
+            save_text(config.get_out_path(".error.txt"), f"Benchmark Error:\n\n{tb_string}")
 
         # Try to save partial report/audio even on error (for debugging)
         if result and result.io_data:

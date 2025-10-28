@@ -553,6 +553,13 @@ class Config(BaseModel):
             self.targets = targets
         self._ensure_default_fields_are_set()
 
+    @model_validator(mode="before")
+    @classmethod
+    def _handle_output_dir(cls, data: Any) -> Any:
+        if isinstance(data, dict) and "output_dir" in data:
+            data["x_output_dir"] = data.pop("output_dir")
+        return data
+
     @property
     def output_dir(self) -> Path | None:
         return self.x_output_dir
@@ -565,6 +572,10 @@ class Config(BaseModel):
         self.trace_file = self.get_out_path(OUT_TRACE_SUFFIX)
 
     def model_post_init(self, context: Any, /) -> None:
+        # Trigger output_dir setter if output_dir was provided
+        if self.x_output_dir is not None:
+            self.output_dir = self.x_output_dir
+
         if self.targets is None:
             self.targets = []
         elif isinstance(self.targets, TargetLang):

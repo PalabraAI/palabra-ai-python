@@ -1403,7 +1403,7 @@ def test_config_output_dir_sets_trace_file_automatically(tmp_path):
 
     assert config.trace_file is not None
     assert config.trace_file.parent == output_dir
-    assert str(config.trace_file).endswith(".trace.json")
+    assert str(config.trace_file).endswith(".trace.log")
 
 
 def test_config_output_dir_respects_explicit_log_file(tmp_path):

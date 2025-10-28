@@ -21,6 +21,10 @@ class MockReader(Reader):
         self._task = None
         self.name = "MockReader"
 
+    @property
+    def x_title(self) -> str:
+        return "mock-reader"
+
     async def boot(self):
         pass
 
@@ -43,6 +47,10 @@ class MockWriter(Writer):
         self.eof = False
         self._task = None
         self.name = "MockWriter"
+
+    @property
+    def x_title(self) -> str:
+        return "mock-writer"
 
     async def boot(self):
         pass
