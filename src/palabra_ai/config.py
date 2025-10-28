@@ -36,6 +36,8 @@ from palabra_ai.constant import (
     MIN_SPLIT_INTERVAL_DEFAULT,
     MIN_TRANSCRIPTION_LEN_DEFAULT,
     MIN_TRANSCRIPTION_TIME_DEFAULT,
+    OUT_LOG_SUFFIX,
+    OUT_TRACE_SUFFIX,
     PHRASE_CHANCE_DEFAULT,
     QUEUE_MAX_TEMPO,
     QUEUE_MIN_TEMPO,
@@ -60,6 +62,7 @@ from palabra_ai.exc import ConfigurationError
 from palabra_ai.lang import Language, is_valid_source_language, is_valid_target_language
 from palabra_ai.message import Message
 from palabra_ai.types import T_ON_TRANSCRIPTION
+from palabra_ai.util.dt import get_now_strftime
 from palabra_ai.util.logger import set_logging
 from palabra_ai.util.orjson import from_json, to_json
 from palabra_ai.util.pydantic import mark_fields_as_set
@@ -280,7 +283,7 @@ class WsMode(IoMode):
     input_sample_rate: int = WS_MODE_INPUT_SAMPLE_RATE
     output_sample_rate: int = WS_MODE_OUTPUT_SAMPLE_RATE
     num_channels: int = WS_MODE_CHANNELS
-    input_chunk_duration_ms: int = WS_MODE_CHUNK_DURATION_MS
+    input_chunk_duration_ms: float = WS_MODE_CHUNK_DURATION_MS
 
     def model_dump(self, *args, **kwargs) -> dict[str, Any]:
         return {
@@ -534,6 +537,8 @@ class Config(BaseModel):
     rich_default_config: SkipJsonSchema[bool] = Field(
         default=RICH_DEFAULT_CONFIG, exclude=True
     )
+    x_output_dir: Path | None = Field(default=None, exclude=True)
+    run_name: str = Field(default_factory=lambda: get_now_strftime(), exclude=True)
 
     def __init__(
         self,
@@ -548,7 +553,35 @@ class Config(BaseModel):
             self.targets = targets
         self._ensure_default_fields_are_set()
 
+    @model_validator(mode="before")
+    @classmethod
+    def _handle_output_dir(cls, data: Any) -> Any:
+        if isinstance(data, dict) and "output_dir" in data:
+            data["x_output_dir"] = data.pop("output_dir")
+        return data
+
+    @property
+    def output_dir(self) -> Path | None:
+        return self.x_output_dir
+
+    @output_dir.setter
+    def output_dir(self, value):
+        self.x_output_dir = Path(value).absolute()
+        self.x_output_dir.mkdir(exist_ok=True, parents=True)
+
+        # Only auto-set log_file if not explicitly provided
+        if "log_file" not in self.model_fields_set:
+            self.log_file = self.get_out_path(OUT_LOG_SUFFIX)
+
+        # Only auto-set trace_file if not explicitly provided
+        if "trace_file" not in self.model_fields_set:
+            self.trace_file = self.get_out_path(OUT_TRACE_SUFFIX)
+
     def model_post_init(self, context: Any, /) -> None:
+        # Trigger output_dir setter if output_dir was provided
+        if self.x_output_dir is not None:
+            self.output_dir = self.x_output_dir
+
         if self.targets is None:
             self.targets = []
         elif isinstance(self.targets, TargetLang):
@@ -556,10 +589,51 @@ class Config(BaseModel):
         if self.log_file:
             self.log_file = Path(self.log_file).absolute()
             self.log_file.parent.mkdir(exist_ok=True, parents=True)
-            self.trace_file = self.log_file.with_suffix(".trace.json")
-        set_logging(self.silent, self.debug, self.internal_logs, self.log_file)
+
+            # Only auto-set trace_file if not already set by output_dir
+            if not self.trace_file:
+                self.trace_file = self.log_file.with_suffix(OUT_TRACE_SUFFIX)
+
         self._ensure_default_fields_are_set()
         super().model_post_init(context)
+
+    def set_logging(self):
+        if not self.log_file:
+            return
+        set_logging(self.silent, self.debug, self.internal_logs, self.log_file)
+
+    def get_out_path(self, suffix: str) -> Path | None:
+        if self.output_dir is None:
+            return None
+        return self.output_dir / f"{self.run_name}{suffix}"
+
+    @property
+    def source_lang(self) -> str:
+        """Get source language code.
+
+        Returns:
+            str: Source language code (e.g., 'en', 'es', 'ru')
+
+        Raises:
+            ConfigurationError: If source is not configured
+        """
+        if not self.source:
+            raise ConfigurationError("Source language not configured")
+        return self.source.lang.source_code
+
+    @property
+    def target_lang(self) -> str:
+        """Get first target language code.
+
+        Returns:
+            str: First target language code (e.g., 'en', 'es', 'ru')
+
+        Raises:
+            ConfigurationError: If no targets configured
+        """
+        if not self.targets or len(self.targets) == 0:
+            raise ConfigurationError("Target language not configured")
+        return self.targets[0].lang.target_code
 
     def _ensure_default_fields_are_set(self) -> None:
         """
@@ -672,6 +746,20 @@ class Config(BaseModel):
 
         result = {**data, **{"pipeline": pipeline}, **self.mode.model_dump()}
         return result
+
+    def to_extra_dict(self) -> dict[str, Any]:
+        return {
+            "silent": self.silent,
+            "debug": self.debug,
+            "log_file": self.log_file,
+            "trace_file": self.trace_file,
+            "drop_empty_frames": self.drop_empty_frames,
+            "timeout": self.timeout,
+            "benchmark": self.benchmark,
+            "rich_default_config": self.rich_default_config,
+            "output_dir": self.output_dir,
+            "run_name": self.run_name,
+        }
 
     def to_dict(self, full: bool = False) -> dict[str, Any]:
         """

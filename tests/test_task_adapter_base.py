@@ -35,6 +35,10 @@ class ConcreteReader(Reader):
         self._task = None
         self._sub_tasks = []
 
+    @property
+    def x_title(self) -> str:
+        return "concrete-reader"
+
     async def read(self, size: int) -> bytes | None:
         """Mock implementation"""
         return b"test_data"
@@ -75,6 +79,10 @@ class ConcreteBufferedWriter(BufferedWriter):
         # BufferedWriter specific fields
         self.ab = None
         self.drop_empty_frames = drop_empty_frames
+
+    @property
+    def x_title(self) -> str:
+        return "concrete-buffered-writer"
 
     async def boot(self):
         """Mock boot implementation"""
@@ -117,6 +125,10 @@ class ConcreteWriter(Writer):
         self.sub_tg = asyncio.TaskGroup()
         self._task = None
         self._sub_tasks = []
+
+    @property
+    def x_title(self) -> str:
+        return "concrete-writer"
 
     async def write(self, frame: AudioFrame):
         """Mock implementation"""

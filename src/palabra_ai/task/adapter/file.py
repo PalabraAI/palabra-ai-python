@@ -54,6 +54,10 @@ class FileReader(Reader):
             raise FileNotFoundError(f"File not found: {self.path}")
         self._buffer = deque()
 
+    @property
+    def x_title(self) -> str:
+        return str(self.path)
+
     def _preprocess_audio(self):
         """Preprocess audio with configurable pipeline."""
         # Setup progress bar
@@ -233,6 +237,10 @@ class FileWriter(BufferedWriter):
     def __post_init__(self):
         self.path = Path(self.path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
+
+    @property
+    def x_title(self) -> str:
+        return str(self.path)
 
     async def exit(self):
         """Write the buffered WAV data to file"""

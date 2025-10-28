@@ -13,14 +13,13 @@ from tqdm import tqdm
 from palabra_ai import Config, PalabraAI, SourceLang, TargetLang
 from palabra_ai.audio import save_wav
 from palabra_ai.benchmark.report import BENCHMARK_ALLOWED_MESSAGE_TYPES
-from palabra_ai.benchmark.report import format_report
 from palabra_ai.benchmark.report import INPUT_CHUNK_DURATION_S
 from palabra_ai.benchmark.report import Report
-from palabra_ai.benchmark.report import save_benchmark_files
 from palabra_ai.config import WsMode
 from palabra_ai.lang import Language
 from palabra_ai.task.adapter.dummy import DummyWriter
 from palabra_ai.task.adapter.file import FileReader
+from palabra_ai.util.fileio import save_text
 from palabra_ai.util.orjson import to_json
 from palabra_ai.util.sysinfo import get_system_info
 
@@ -50,20 +49,6 @@ def main():
         if not audio_path.exists():
             raise FileNotFoundError(f"Audio file not found: {args.audio}")
         mode = WsMode(input_chunk_duration_ms=INPUT_CHUNK_DURATION_S * 1000)
-
-        # Setup output directory and timestamp if --out is specified
-        if args.out:
-            output_dir = args.out
-            output_dir.mkdir(parents=True, exist_ok=True)
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-
-            # Save sysinfo immediately at startup
-            sysinfo = get_system_info()
-            sysinfo["command"] = " ".join(sys.argv)
-            sysinfo["argv"] = sys.argv
-            sysinfo["cwd"] = str(Path.cwd())
-            sysinfo_path = output_dir / f"{timestamp}_bench_sysinfo.json"
-            sysinfo_path.write_bytes(to_json(sysinfo, True))
 
         # Get audio duration for progress tracking
         with av.open(str(audio_path)) as container:
@@ -98,63 +83,39 @@ def main():
             # Force benchmark mode with 100ms buffer regardless of config
             # Config loaded from JSON defaults to 320ms chunks, but benchmark needs 100ms for optimal performance
             config.mode = WsMode(input_chunk_duration_ms=INPUT_CHUNK_DURATION_S * 1000)
-
-            source_lang = config.source.lang.code
-            target_lang = config.targets[0].lang.code
         else:
             if not args.source_lang or not args.target_lang:
                 parser.error("source_lang and target_lang required without --config")
-            source_lang = args.source_lang
-            target_lang = args.target_lang
 
             config = Config(
-                source=SourceLang(Language.get_or_create(source_lang), reader, on_transcription=on_transcription),
-                targets=[TargetLang(Language.get_or_create(target_lang), DummyWriter())],
+                source=SourceLang(Language.get_or_create(args.source_lang), reader, on_transcription=on_transcription),
+                targets=[TargetLang(Language.get_or_create(args.target_lang), DummyWriter())],
                 benchmark=True,
                 mode=mode,
                 allowed_message_types=BENCHMARK_ALLOWED_MESSAGE_TYPES,
             )
 
-        # Enable debug mode and logging when --out is specified
-        if output_dir and timestamp:
-            config.debug = True
-            config.log_file = str(output_dir / f"{timestamp}_bench.log")
-
-            # Save exact config that goes to set_task (SetTaskMessage.from_config uses to_dict)
-            config_dict = config.to_dict()
-            config_path = output_dir / f"{timestamp}_bench_config.json"
-            config_path.write_bytes(to_json(config_dict, True))
+        # Enable debug mode and output directory when --out is specified
+        # Core will auto-save log, trace, result.json, and audio files
+        if args.out:
+            # config.debug = True
+            config.output_dir = Path(args.out)
+            print(f"Files will be saved to {args.out}")
 
         # Create progress bar with language info
         progress_bar[0] = tqdm(
             total=100,
-            desc=f"Processing {source_lang}→{target_lang}",
+            desc=f"Processing {config.source_lang}→{config.target_lang}",
             unit="%",
             mininterval=7.0,
             bar_format="{desc}: {percentage:3.0f}%|{bar}| [{elapsed}<{remaining}]"
         )
 
-        print(f"Running benchmark: {source_lang} → {target_lang}")
-        if args.out:
-            print(f"Files will be saved to {args.out}")
+        print(f"Running benchmark: {config.source_lang} → {config.target_lang}")
         print("-" * 60)
 
         palabra = PalabraAI()
         result = palabra.run(config, no_raise=True)
-
-        # Save RunResult in debug mode when --out is specified
-        if output_dir and timestamp and result is not None:
-            try:
-                result_debug_path = output_dir / f"{timestamp}_bench_runresult_debug.json"
-                result_debug_path.write_bytes(to_json(result.model_dump(), True))
-            except Exception as e:
-                # If serialization fails, save error info
-                error_path = output_dir / f"{timestamp}_bench_runresult_error.txt"
-                error_path.write_text(
-                    f"Failed to serialize RunResult: {e}\n\n"
-                    f"RunResult repr:\n{repr(result)}\n\n"
-                    f"Exception: {result.exc if result else 'N/A'}"
-                )
 
         # Complete and close progress bar
         if progress_bar[0]:
@@ -183,24 +144,10 @@ def main():
                     print("  - Task was cancelled by timeout")
                     print("  - Internal cancellation due to error")
                     print("  - One of the subtasks failed and caused cascade cancellation\n")
-
-                    # For CancelledError, show ALL logs to understand what happened
-                    if result.log_data and result.log_data.logs:
-                        print(f"Full logs (all {len(result.log_data.logs)} entries):")
-                        for log_line in result.log_data.logs:
-                            print(log_line, end='')
-                        print()
                 else:
                     print(f"\n{'='*80}")
                     print(f"BENCHMARK FAILED: {exc_type}: {exc_msg}")
                     print(f"{'='*80}\n")
-
-                    # For other errors, show last 100
-                    if result.log_data and result.log_data.logs:
-                        print("Last 100 log entries:")
-                        for log_line in result.log_data.logs[-100:]:
-                            print(log_line, end='')
-                        print()
 
                 # Print traceback from exception if available
                 if hasattr(result.exc, '__traceback__') and result.exc.__traceback__:
@@ -212,47 +159,12 @@ def main():
             raise RuntimeError("Benchmark failed: no io_data")
 
         # Parse report
-        report, in_audio_canvas, out_audio_canvas = Report.parse(result.io_data)
-
-        # Create file paths (used in report and optionally saved with --out)
-        if not timestamp:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        in_wav_name = f"{timestamp}_bench_in_{source_lang}.wav"
-        out_wav_name = f"{timestamp}_bench_out_{target_lang}.wav"
-
-        # Generate text report
-        report_text = format_report(
-            report,
-            result.io_data,
-            source_lang,
-            target_lang,
-            str(audio_path),
-            out_wav_name,
-            config
-        )
-
         if args.out:
-            # Use the shared save function
-            if not output_dir:
-                output_dir = args.out
-            save_benchmark_files(
-                output_dir=output_dir,
-                timestamp=timestamp,
-                report=report,
-                io_data=result.io_data,
-                config=config,
-                result=result,
-                in_audio_canvas=in_audio_canvas,
-                out_audio_canvas=out_audio_canvas,
-                source_lang=source_lang,
-                target_lang=target_lang,
-                report_text=report_text,
-                input_file_path=str(audio_path),
-                file_prefix="bench"
-            )
-
-        # Always print report to console
-        print("\n" + report_text)
+            report = Report.parse(result.io_data, Path(args.out))
+            report.save_all()
+        else:
+            report = Report.parse(result.io_data)
+        print("\n" + report.report_txt)
 
     except Exception as e:
         # Capture traceback IMMEDIATELY - must be done in except block!
@@ -264,34 +176,20 @@ def main():
         print(f"{'='*80}\n")
         print(tb_string)
 
-        # Save error to file if output directory exists
-        if output_dir and timestamp:
-            try:
-                error_file = output_dir / f"{timestamp}_bench_error.txt"
-                error_file.write_text(f"Benchmark Error:\n\n{tb_string}")
-                print(f"\nError details saved to: {error_file}")
-            except Exception as save_error:
-                print(f"Failed to save error file: {save_error}")
+        if config and args.out:
+            save_text(config.get_out_path(".error.txt"), f"Benchmark Error:\n\n{tb_string}")
 
         # Try to save partial report/audio even on error (for debugging)
-        if output_dir and timestamp and result and result.io_data:
+        if result and result.io_data:
             try:
                 print("\nAttempting to save partial results for debugging...")
 
                 # Try to parse report
-                report, in_audio, out_audio = Report.parse(result.io_data)
-
-                # Save report files
-                report_path = output_dir / f"{timestamp}_bench_report_partial.json"
-                report_path.write_bytes(to_json(report, True))
-                print(f"✓ Partial report saved to: {report_path}")
-
-                # Save audio (always when --out is specified)
-                in_wav = output_dir / f"{timestamp}_bench_in_partial.wav"
-                out_wav = output_dir / f"{timestamp}_bench_out_partial.wav"
-                save_wav(in_audio, in_wav, result.io_data.in_sr, result.io_data.channels)
-                save_wav(out_audio, out_wav, result.io_data.out_sr, result.io_data.channels)
-                print(f"✓ Partial audio saved: {in_wav.name}, {out_wav.name}")
+                if args.out:
+                    output_dir = Path(args.out)
+                    report = Report.parse(result.io_data, output_dir)
+                    report.save_all()
+                print(f"✓ Something saved to: {args.out}")
 
             except Exception as save_err:
                 print(f"Could not save partial results: {save_err}")

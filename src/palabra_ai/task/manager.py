@@ -16,10 +16,7 @@ from palabra_ai.internal.rest import SessionCredentials
 from palabra_ai.task.adapter.base import Reader, Writer
 from palabra_ai.task.adapter.dummy import DummyWriter
 from palabra_ai.task.base import Task
-
-# from palabra_ai.internal.webrtc import AudioTrackSettings
 from palabra_ai.task.io.base import Io
-from palabra_ai.task.logger import Logger
 from palabra_ai.task.stat import Stat
 from palabra_ai.task.transcription import Transcription
 from palabra_ai.util.logger import debug, exception, success, warning
@@ -40,7 +37,7 @@ class Manager(Task):
     io: Io = field(init=False)
     # sender: SenderSourceAudio = field(init=False)
     # receiver: ReceiverTranslatedAudio = field(init=False)
-    logger: Logger | None = field(default=None, init=False)
+    # logger: Logger | None = field(default=None, init=False)
     # rtmon: IoMon = field(init=False)
     transcription: Transcription = field(init=False)
     stat: Stat = field(init=False)
@@ -101,11 +98,6 @@ class Manager(Task):
                 f"🔧 {self.name} using default estimated_duration={self.cfg.estimated_duration}s"
             )
 
-        # if hasattr(self.writer, "set_track_settings"):
-        #     self.writer.set_track_settings(self.track_settings)
-        # if hasattr(self.reader, "set_track_settings"):
-        #     self.reader.set_track_settings(self.track_settings)
-
         if not self.io_class:
             self.io_class = self.cfg.mode.get_io_class()
         self.io = self.io_class(
@@ -115,41 +107,16 @@ class Manager(Task):
             writer=self.writer,
         )
 
-        # self.rt = Realtime(self.cfg, self.io)
-        self.logger = Logger(self.cfg, self.io)
-        #
         self.transcription = Transcription(self.cfg, self.io)
-        #
-        # self.receiver = ReceiverTranslatedAudio(
-        #     self.cfg,
-        #     self.writer,
-        #     self.rt,
-        #     target.lang,
-        # )
-
-        # self.sender = SenderSourceAudio(
-        #     self.cfg,
-        #     self.rt,
-        #     self.reader,
-        #     self.cfg.to_dict(),
-        #     self.track_settings,
-        # )
-
-        # self.rtmon = IoMon(self.cfg, self.rt)
 
         self.tasks.extend(
             [
                 t
                 for t in [
                     self.reader,
-                    # self.sender,
-                    # self.rt,
                     self.io,
-                    # self.receiver,
                     self.writer,
-                    # self.rtmon,
                     self.transcription,
-                    self.logger,
                     self,
                     self.stat,
                 ]
@@ -158,9 +125,6 @@ class Manager(Task):
         )
 
     async def start_system(self):
-        self.logger(self.root_tg)
-        await self.logger.ready
-
         self.stat(self.root_tg)
         await self.stat.ready
         self._show_banner_loop = self.stat.run_banner()
@@ -233,7 +197,6 @@ class Manager(Task):
             debug(f"🔧 {self.name}.exit() exiting...")
             +self.stopper  # noqa
             +self.stat.stopper  # noqa
-            +self.logger.stopper  # noqa
             debug(f"🔧 {self.name}.exit() tasks: {[t.name for t in self.tasks]}")
             # DON'T use _abort() - it's internal!
             # Cancel all subtasks properly

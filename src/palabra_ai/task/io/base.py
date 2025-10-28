@@ -68,6 +68,8 @@ class Io(Task):
             channels=self.cfg.mode.num_channels,
             events=self.io_events,
             count_events=len(self.io_events),
+            reader_x_title=f"<{self.reader.__class__.__name__}: {self.reader.x_title}>",
+            writer_x_title=f"<{self.writer.__class__.__name__}: {self.writer.x_title}>",
         )
 
     @property

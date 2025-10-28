@@ -15,8 +15,18 @@ if TYPE_CHECKING:
     from palabra_ai.config import Config
 
 
+class PathMinix(abc.ABC):
+    """Mixin for classes that have a path property."""
+
+    @property
+    @abc.abstractmethod
+    def x_title(self) -> str:
+        """Path or identifier of the audio source."""
+        ...
+
+
 @dataclass
-class Reader(Task):
+class Reader(Task, PathMinix):
     """Abstract PCM audio reader process."""
 
     _: KW_ONLY
@@ -46,7 +56,7 @@ class Reader(Task):
 
 
 @dataclass
-class Writer(Task):
+class Writer(Task, PathMinix):
     _: KW_ONLY
     cfg: Config = field(default=None, init=False, repr=False)
     q: asyncio.Queue[AudioFrame | None] = field(default_factory=asyncio.Queue)
@@ -115,6 +125,10 @@ class BufferedWriter(UnlimitedExitMixin, Writer):
 
     _: KW_ONLY
     ab: AudioBuffer | None = field(default=None, init=False)
+
+    @property
+    def x_title(self) -> str:
+        return "in-memory-buffer"
 
     async def boot(self):
         # Create buffer with estimated duration from config

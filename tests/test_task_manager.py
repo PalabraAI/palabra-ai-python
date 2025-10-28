@@ -21,6 +21,10 @@ class MockReader(Reader):
         self._task = None
         self.name = "MockReader"
 
+    @property
+    def x_title(self) -> str:
+        return "mock-reader"
+
     async def boot(self):
         pass
 
@@ -43,6 +47,10 @@ class MockWriter(Writer):
         self.eof = False
         self._task = None
         self.name = "MockWriter"
+
+    @property
+    def x_title(self) -> str:
+        return "mock-writer"
 
     async def boot(self):
         pass
@@ -181,10 +189,10 @@ class TestManager:
         manager.root_tg = MagicMock()
         manager.sub_tg = MagicMock()
 
-        # Mock logger properly
-        manager.logger = MagicMock()
-        manager.logger.ready = TaskEvent()
-        +manager.logger.ready  # Set it
+        # # Mock logger properly
+        # manager.logger = MagicMock()
+        # manager.logger.ready = TaskEvent()
+        # +manager.logger.ready  # Set it
 
         await manager.start_system()
 

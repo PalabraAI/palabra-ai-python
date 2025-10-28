@@ -1306,3 +1306,127 @@ def test_config_json_schema_has_stream_defaults():
     assert output_target["format"]["default"] == "pcm_s16le"
     assert output_target["sample_rate"]["default"] == WS_MODE_OUTPUT_SAMPLE_RATE
     assert output_target["channels"]["default"] == WS_MODE_CHANNELS
+
+# ═══════════════════════════════════════════════════
+# NEW TESTS: Config Language Properties (TDD - RED)
+# ═══════════════════════════════════════════════════
+
+def test_config_source_lang_property():
+    """Test Config.source_lang property returns source language code"""
+    config = Config(
+        source=SourceLang(lang=Language.get_by_bcp47("en-US")),
+        targets=[TargetLang(lang=ES)]
+    )
+    # Uses source_code from Language
+    assert config.source_lang == "en"
+
+
+def test_config_target_lang_property():
+    """Test Config.target_lang property returns first target language code"""
+    config = Config(
+        source=SourceLang(lang=EN),
+        targets=[TargetLang(lang=ES)]
+    )
+    # Uses target_code from Language
+    assert config.target_lang == "es"
+
+
+def test_config_source_lang_raises_when_not_configured():
+    """Test Config.source_lang raises ConfigurationError if source not set"""
+    config = Config()
+    with pytest.raises(ConfigurationError, match="Source language not configured"):
+        _ = config.source_lang
+
+
+def test_config_target_lang_raises_when_not_configured():
+    """Test Config.target_lang raises ConfigurationError if no targets"""
+    config = Config(source=SourceLang(lang=EN))
+    with pytest.raises(ConfigurationError, match="Target language not configured"):
+        _ = config.target_lang
+
+
+def test_config_target_lang_with_multiple_targets():
+    """Test Config.target_lang returns first target when multiple exist"""
+    config = Config(
+        source=SourceLang(lang=EN),
+        targets=[
+            TargetLang(lang=ES),
+            TargetLang(lang=FR),
+        ]
+    )
+    assert config.target_lang == "es"
+
+
+# ═══════════════════════════════════════════════════
+# NEW TESTS: Config.output_dir Field (TDD - RED)
+# ═══════════════════════════════════════════════════
+
+def test_config_output_dir_creates_directory(tmp_path):
+    """Test Config.output_dir creates directory if doesn't exist"""
+    output_dir = tmp_path / "outputs"
+    assert not output_dir.exists()
+
+    config = Config(
+        source=SourceLang(lang=EN),
+        targets=[TargetLang(lang=ES)],
+        output_dir=output_dir
+    )
+
+    assert output_dir.exists()
+    assert output_dir.is_dir()
+
+
+def test_config_output_dir_sets_log_file_automatically(tmp_path):
+    """Test Config.output_dir auto-sets log_file when not explicitly set"""
+    output_dir = tmp_path / "outputs"
+
+    config = Config(
+        source=SourceLang(lang=EN),
+        targets=[TargetLang(lang=ES)],
+        output_dir=output_dir
+    )
+
+    assert config.log_file is not None
+    assert config.log_file.parent == output_dir
+    assert config.log_file.suffix == ".log"
+
+
+def test_config_output_dir_sets_trace_file_automatically(tmp_path):
+    """Test Config.output_dir auto-sets trace_file when not explicitly set"""
+    output_dir = tmp_path / "outputs"
+
+    config = Config(
+        source=SourceLang(lang=EN),
+        targets=[TargetLang(lang=ES)],
+        output_dir=output_dir
+    )
+
+    assert config.trace_file is not None
+    assert config.trace_file.parent == output_dir
+    assert str(config.trace_file).endswith(".trace.log")
+
+
+def test_config_output_dir_respects_explicit_log_file(tmp_path):
+    """Test Config.output_dir keeps explicit log_file even when output_dir set"""
+    output_dir = tmp_path / "outputs"
+    custom_log = tmp_path / "custom.log"
+
+    config = Config(
+        source=SourceLang(lang=EN),
+        targets=[TargetLang(lang=ES)],
+        output_dir=output_dir,
+        log_file=str(custom_log)
+    )
+
+    assert config.log_file == custom_log
+
+
+def test_config_output_dir_none_works_normally():
+    """Test Config works normally when output_dir is None"""
+    config = Config(
+        source=SourceLang(lang=EN),
+        targets=[TargetLang(lang=ES)],
+        output_dir=None
+    )
+
+    assert config.output_dir is None

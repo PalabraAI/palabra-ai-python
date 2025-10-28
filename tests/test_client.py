@@ -453,7 +453,7 @@ def test_run_async_with_manager_task_cancelled():
             mock_manager = MagicMock()
             mock_manager._graceful_completion = False  # External cancellation, not graceful
             mock_io = MagicMock()
-            mock_io.io_data = {"start_perf_ts": 0.0, "start_utc_ts": 0.0, "in_sr": 16000, "out_sr": 16000, "mode": "test", "channels": 1, "events": [], "count_events": 0}
+            mock_io.io_data = {"start_perf_ts": 0.0, "start_utc_ts": 0.0, "in_sr": 16000, "out_sr": 16000, "mode": "test", "channels": 1, "events": [], "count_events": 0, "reader_x_title": "<MockReader: test>", "writer_x_title": "<MockWriter: test>"}
             mock_manager.io = mock_io
             # Create a future that raises CancelledError when awaited
             mock_task = asyncio.Future()
@@ -469,7 +469,6 @@ def test_run_async_with_manager_task_cancelled():
             result = await client.arun(config, no_raise=True)
             assert result.ok is False
             assert isinstance(result.exc, asyncio.CancelledError)
-            assert result.log_data is None
 
     asyncio.run(test_coro())
 
@@ -484,7 +483,7 @@ def test_run_async_with_manager_error():
         with patch.object(client, 'process') as mock_process:
             mock_manager = MagicMock()
             mock_io = MagicMock()
-            mock_io.io_data = {"start_perf_ts": 0.0, "start_utc_ts": 0.0, "in_sr": 16000, "out_sr": 16000, "mode": "test", "channels": 1, "events": [], "count_events": 0}
+            mock_io.io_data = {"start_perf_ts": 0.0, "start_utc_ts": 0.0, "in_sr": 16000, "out_sr": 16000, "mode": "test", "channels": 1, "events": [], "count_events": 0, "reader_x_title": "<MockReader: test>", "writer_x_title": "<MockWriter: test>"}
             mock_io.eos_received = False
             mock_manager.io = mock_io
             # Create a future that raises ValueError when awaited
@@ -503,75 +502,7 @@ def test_run_async_with_manager_error():
                 result = await client.arun(config, no_raise=True)
                 assert result.ok is False
                 assert isinstance(result.exc, ValueError)
-                assert result.log_data is None
                 mock_exception.assert_any_call("Error in manager task")
-
-    asyncio.run(test_coro())
-
-def test_run_async_with_logger_timeout():
-    """Test _run_with_result when logger times out"""
-    config = Config()
-    config.source = SourceLang(lang="es")
-
-    client = PalabraAI(client_id="test", client_secret="test")
-
-    async def test_coro():
-        with patch.object(client, 'process') as mock_process:
-            mock_manager = MagicMock()
-            mock_io = MagicMock()
-            mock_io.io_data = {"start_perf_ts": 0.0, "start_utc_ts": 0.0, "in_sr": 16000, "out_sr": 16000, "mode": "test", "channels": 1, "events": [], "count_events": 0}
-            mock_manager.io = mock_io
-            async def normal_task():
-                return None
-            mock_manager.task = asyncio.create_task(normal_task())
-            mock_manager.logger = MagicMock()
-            mock_manager.logger._task = MagicMock()
-            mock_manager.logger._task.done.return_value = False
-            mock_manager.logger.result = None
-            mock_manager.logger.exit = AsyncMock(side_effect=asyncio.TimeoutError())
-            mock_process.return_value.__aenter__.return_value = mock_manager
-            mock_process.return_value.__aexit__.return_value = None
-
-            with patch('asyncio.wait_for', side_effect=asyncio.TimeoutError()):
-                with patch('palabra_ai.client.debug') as mock_debug:
-                    result = await client.arun(config, no_raise=True)
-                    assert result.ok is True
-                    assert result.log_data is None
-                    mock_debug.assert_any_call("Logger task timeout or cancelled, checking result anyway")
-
-    asyncio.run(test_coro())
-
-def test_run_async_with_logger_exception():
-    """Test _run_with_result when logger.exit() raises exception"""
-    config = Config()
-    config.source = SourceLang(lang="es")
-
-    client = PalabraAI(client_id="test", client_secret="test")
-
-    async def test_coro():
-        with patch.object(client, 'process') as mock_process:
-            mock_manager = MagicMock()
-            mock_io = MagicMock()
-            mock_io.io_data = {"start_perf_ts": 0.0, "start_utc_ts": 0.0, "in_sr": 16000, "out_sr": 16000, "mode": "test", "channels": 1, "events": [], "count_events": 0}
-            mock_manager.io = mock_io
-            # Create a future that completes normally
-            mock_task = asyncio.Future()
-            mock_task.set_result(None)
-            mock_manager.task = mock_task
-            mock_manager.logger = MagicMock()
-            mock_manager.logger._task = MagicMock()
-            mock_manager.logger._task.done.return_value = True
-            mock_manager.logger.result = None
-            mock_manager.logger.exit = AsyncMock(side_effect=RuntimeError("Logger exit error"))
-            mock_process.return_value.__aenter__.return_value = mock_manager
-            mock_process.return_value.__aexit__.return_value = None
-
-            with patch('palabra_ai.client.debug') as mock_debug:
-                with patch('palabra_ai.client.error') as mock_error:
-                    result = await client.arun(config, no_raise=True)
-                    assert result.ok is True
-                    assert result.log_data is None
-                    mock_debug.assert_any_call("Failed to get log_data from logger.exit(): Logger exit error")
 
     asyncio.run(test_coro())
 
@@ -997,7 +928,7 @@ async def test_run_result_eos_field_from_manager():
     mock_manager = MagicMock()
     mock_io = MagicMock()
     mock_io.eos_received = True
-    mock_io.io_data = {"start_perf_ts": 0.0, "start_utc_ts": 0.0, "in_sr": 16000, "out_sr": 16000, "mode": "test", "channels": 1, "events": [], "count_events": 0}
+    mock_io.io_data = {"start_perf_ts": 0.0, "start_utc_ts": 0.0, "in_sr": 16000, "out_sr": 16000, "mode": "test", "channels": 1, "events": [], "count_events": 0, "reader_x_title": "<MockReader: test>", "writer_x_title": "<MockWriter: test>"}
     mock_manager.io = mock_io
 
     # Mock logger with result
@@ -1076,7 +1007,7 @@ async def test_run_result_eos_field_false():
     mock_manager = MagicMock()
     mock_io = MagicMock()
     mock_io.eos_received = False
-    mock_io.io_data = {"start_perf_ts": 0.0, "start_utc_ts": 0.0, "in_sr": 16000, "out_sr": 16000, "mode": "test", "channels": 1, "events": [], "count_events": 0}
+    mock_io.io_data = {"start_perf_ts": 0.0, "start_utc_ts": 0.0, "in_sr": 16000, "out_sr": 16000, "mode": "test", "channels": 1, "events": [], "count_events": 0, "reader_x_title": "<MockReader: test>", "writer_x_title": "<MockWriter: test>"}
     mock_manager.io = mock_io
 
     # Mock logger with result
@@ -1123,14 +1054,15 @@ def test_benchmark_completes_successfully_with_graceful_shutdown():
         mode="ws",
         channels=1,
         events=[],
-        count_events=0
+        count_events=0,
+        reader_x_title="<test-reader>",
+        writer_x_title="<test-writer>"
     )
 
     successful_result = RunResult(
         ok=True,
         exc=None,
         io_data=io_data,
-        log_data=None,
         eos=True
     )
 
@@ -1157,7 +1089,7 @@ async def test_manager_cancelled_graceful_shutdown():
         mock_manager = MagicMock()
         mock_manager._graceful_completion = True  # GRACEFUL shutdown
         mock_io = MagicMock()
-        mock_io.io_data = {"start_perf_ts": 0.0, "start_utc_ts": 0.0, "in_sr": 16000, "out_sr": 16000, "mode": "ws", "channels": 1, "events": [], "count_events": 0}
+        mock_io.io_data = {"start_perf_ts": 0.0, "start_utc_ts": 0.0, "in_sr": 16000, "out_sr": 16000, "mode": "ws", "channels": 1, "events": [], "count_events": 0, "reader_x_title": "<MockReader: ws>", "writer_x_title": "<MockWriter: ws>"}
         mock_io.eos_received = True
         mock_manager.io = mock_io
 
@@ -1208,7 +1140,7 @@ async def test_manager_cancelled_external():
         mock_manager = MagicMock()
         mock_manager._graceful_completion = False  # EXTERNAL cancellation
         mock_io = MagicMock()
-        mock_io.io_data = {"start_perf_ts": 0.0, "start_utc_ts": 0.0, "in_sr": 16000, "out_sr": 16000, "mode": "ws", "channels": 1, "events": [], "count_events": 0}
+        mock_io.io_data = {"start_perf_ts": 0.0, "start_utc_ts": 0.0, "in_sr": 16000, "out_sr": 16000, "mode": "ws", "channels": 1, "events": [], "count_events": 0, "reader_x_title": "<MockReader: ws>", "writer_x_title": "<MockWriter: ws>"}
         mock_io.eos_received = False
         mock_manager.io = mock_io
 
@@ -1261,7 +1193,9 @@ async def test_graceful_shutdown_returns_ok_true():
             "mode": "ws",
             "channels": 1,
             "events": [],
-            "count_events": 0
+            "count_events": 0,
+            "reader_x_title": "<MockReader: ws>",
+            "writer_x_title": "<MockWriter: ws>"
         }
         mock_io.eos_received = True  # EOS was received - normal completion
         mock_manager.io = mock_io

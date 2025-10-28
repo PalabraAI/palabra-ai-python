@@ -259,34 +259,6 @@ class AudioFrame:
             }
         )
 
-    def to_bench(self):
-        result = {
-            "message_type": "__$bench_audio_frame",
-            "__dbg": {
-                "size": len(self.data),
-                "sample_rate": self.sample_rate,
-                "num_channels": self.num_channels,
-                "samples_per_channel": self.samples_per_channel,
-            },
-            "data": {},
-        }
-
-        # Include transcription metadata only for output frames (those with transcription_id)
-        if self.transcription_id:
-            result["data"].update(
-                {
-                    "transcription_id": self.transcription_id,
-                    "language": self.language,
-                    "last_chunk": self.last_chunk,
-                }
-            )
-
-        # Replace base64 audio data with "..." to avoid log pollution
-        if "data" in result["data"] and isinstance(result["data"]["data"], str):
-            result["data"]["data"] = "..."
-
-        return result
-
 
 @dataclass
 class AudioBuffer:

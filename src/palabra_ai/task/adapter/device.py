@@ -161,6 +161,12 @@ class DeviceReader(Reader):
     sdm: SoundDeviceManager = field(default_factory=SoundDeviceManager)
     tg: asyncio.TaskGroup | None = field(default=None, init=False)
 
+    @property
+    def x_title(self) -> str:
+        if isinstance(self.device, Device):
+            return self.device.name
+        return str(self.device)
+
     def do_preprocess(self):
         """Set default duration for real-time input."""
         self.duration = RT_DEFAULT_DURATION
@@ -235,6 +241,12 @@ class DeviceWriter(Writer):
         default_factory=lambda: ThreadPoolExecutor(max_workers=THREADPOOL_MAX_WORKERS),
         init=False,
     )
+
+    @property
+    def x_title(self) -> str:
+        if isinstance(self.device, Device):
+            return self.device.name
+        return str(self.device)
 
     async def boot(self):
         self._sdm.tg = self.sub_tg
