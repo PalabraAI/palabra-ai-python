@@ -16,8 +16,10 @@ from pydantic import (
     PrivateAttr,
     model_validator,
 )
+from pydantic.json_schema import SkipJsonSchema
 
 from palabra_ai.constant import (
+    AUTO_TEMPO_MAX_DELAY_MS_DEFAULT,
     BYTES_PER_SAMPLE,
     CONTEXT_SIZE_DEFAULT,
     DESIRED_QUEUE_LEVEL_MS_DEFAULT,
@@ -41,8 +43,9 @@ from palabra_ai.constant import (
     QUEUE_MIN_TEMPO,
     SEGMENT_CONFIRMATION_SILENCE_THRESHOLD_DEFAULT,
     SEGMENTS_AFTER_RESTART_DEFAULT,
-    SPEECH_TEMPO_ADJUSTMENT_FACTOR_DEFAULT,
     STEP_SIZE_DEFAULT,
+    TEMPO_DECAY_DEFAULT,
+    TEMPO_SMOOTHING_DEFAULT,
     VAD_LEFT_PADDING_DEFAULT,
     VAD_RIGHT_PADDING_DEFAULT,
     VAD_THRESHOLD_DEFAULT,
@@ -382,6 +385,7 @@ class Transcription(BaseModel):
     batched_inference: bool = False
     force_detect_language: bool = False
     calculate_voice_loudness: bool = False
+    speakers_total: int | None = None
     sentence_splitter: Splitter = Field(default_factory=Splitter)
     verification: Verification = Field(default_factory=Verification)
     advanced: TranscriptionAdvanced = Field(default_factory=TranscriptionAdvanced)
@@ -402,13 +406,13 @@ class TTSAdvanced(BaseModel):
 class SpeechGen(BaseModel):
     tts_model: str = "auto"
     voice_cloning: bool = False
-    voice_cloning_mode: str = "static_10"
+    voice_cloning_mode: str = "static_5"
     denoise_voice_samples: bool = True
     voice_id: str = "default_low"
     voice_timbre_detection: TimbreDetection = Field(default_factory=TimbreDetection)
-    speech_tempo_auto: bool = True
+    speech_tempo_auto: bool = False
     speech_tempo_timings_factor: int = 0
-    speech_tempo_adjustment_factor: float = SPEECH_TEMPO_ADJUSTMENT_FACTOR_DEFAULT
+    speech_tempo_adjustment_factor: float = 1.0
     advanced: TTSAdvanced = Field(default_factory=TTSAdvanced)
 
 
@@ -432,6 +436,9 @@ class QueueConfig(BaseModel):
     auto_tempo: bool = True
     min_tempo: float = QUEUE_MIN_TEMPO
     max_tempo: float = QUEUE_MAX_TEMPO
+    auto_tempo_max_delay_ms: int = AUTO_TEMPO_MAX_DELAY_MS_DEFAULT
+    tempo_decay: float = TEMPO_DECAY_DEFAULT
+    tempo_smoothing: float = TEMPO_SMOOTHING_DEFAULT
 
 
 class QueueConfigs(BaseModel):
@@ -514,18 +521,22 @@ class Config(BaseModel):
     translation_queue_configs: QueueConfigs = Field(default_factory=QueueConfigs)
     allowed_message_types: list[str] = [mt.value for mt in Message.ALLOWED_TYPES]
 
-    mode: IoMode = Field(default_factory=WsMode, exclude=True)
-    silent: bool = Field(default=SILENT, exclude=True)
-    log_file: Path | str | None = Field(default=LOG_FILE, exclude=True)
-    benchmark: bool = Field(default=False, exclude=True)
-    internal_logs: TextIO | None = Field(default_factory=io.StringIO, exclude=True)
-    debug: bool = Field(default=DEBUG, exclude=True)
-    deep_debug: bool = Field(default=DEEP_DEBUG, exclude=True)
-    timeout: int = Field(default=TIMEOUT, exclude=True)  # TODO!
-    trace_file: Path | str | None = Field(default=None, exclude=True)
-    drop_empty_frames: bool = Field(default=False, exclude=True)
-    estimated_duration: float | None = Field(default=None, exclude=True)
-    rich_default_config: bool = Field(default=RICH_DEFAULT_CONFIG, exclude=True)
+    mode: SkipJsonSchema[IoMode] = Field(default_factory=WsMode, exclude=True)
+    silent: SkipJsonSchema[bool] = Field(default=SILENT, exclude=True)
+    log_file: SkipJsonSchema[Path | str | None] = Field(default=LOG_FILE, exclude=True)
+    benchmark: SkipJsonSchema[bool] = Field(default=False, exclude=True)
+    internal_logs: SkipJsonSchema[TextIO | None] = Field(
+        default_factory=io.StringIO, exclude=True
+    )
+    debug: SkipJsonSchema[bool] = Field(default=DEBUG, exclude=True)
+    deep_debug: SkipJsonSchema[bool] = Field(default=DEEP_DEBUG, exclude=True)
+    timeout: SkipJsonSchema[int] = Field(default=TIMEOUT, exclude=True)  # TODO!
+    trace_file: SkipJsonSchema[Path | str | None] = Field(default=None, exclude=True)
+    drop_empty_frames: SkipJsonSchema[bool] = Field(default=False, exclude=True)
+    estimated_duration: SkipJsonSchema[float | None] = Field(default=None, exclude=True)
+    rich_default_config: SkipJsonSchema[bool] = Field(
+        default=RICH_DEFAULT_CONFIG, exclude=True
+    )
     x_output_dir: Path | None = Field(default=None, exclude=True)
     run_name: str = Field(default_factory=lambda: get_now_strftime(), exclude=True)
 
@@ -770,3 +781,153 @@ class Config(BaseModel):
         config = cls.model_validate(data)
         config._ensure_default_fields_are_set()
         return config
+
+    @classmethod
+    def model_json_schema(cls, **kwargs) -> dict[str, Any]:
+        """Generate JSON Schema matching the actual to_dict() serialization structure"""
+        from palabra_ai.lang import get_source_languages, get_target_languages
+
+        # Get base schemas from Pydantic models
+        base_schema = super().model_json_schema(**kwargs)
+        base_defs = base_schema.get("$defs", {})
+
+        # Build transcription schema from Transcription model + source_language
+        transcription_base = base_defs.get("Transcription", {})
+        transcription_props = deepcopy(transcription_base.get("properties", {}))
+        transcription_props["source_language"] = {"$ref": "#/$defs/SourceLanguageEnum"}
+
+        # Build translation schema from Translation model + target_language
+        translation_base = base_defs.get("Translation", {})
+        translation_props = deepcopy(translation_base.get("properties", {}))
+        translation_props["target_language"] = {"$ref": "#/$defs/TargetLanguageEnum"}
+
+        # Create schema matching to_dict() output structure
+        schema = {
+            "type": "object",
+            "title": "Config",
+            "properties": {
+                "pipeline": {
+                    "type": "object",
+                    "properties": {
+                        "transcription": {
+                            "type": "object",
+                            "properties": transcription_props,
+                            "additionalProperties": False,
+                            "required": ["source_language"],
+                        },
+                        "translations": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": translation_props,
+                                "additionalProperties": False,
+                                "required": ["target_language"],
+                            },
+                        },
+                        "preprocessing": {"allOf": [{"$ref": "#/$defs/Preprocessing"}]},
+                        "translation_queue_configs": {
+                            "allOf": [{"$ref": "#/$defs/QueueConfigs"}]
+                        },
+                        "allowed_message_types": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                        },
+                    },
+                    "required": ["transcription", "translations"],
+                },
+                "input_stream": {
+                    "type": "object",
+                    "properties": {
+                        "content_type": {"type": "string", "default": "audio"},
+                        "source": {
+                            "type": "object",
+                            "properties": {
+                                "type": {"type": "string", "enum": ["ws", "webrtc"]},
+                                "format": {"type": "string", "default": "pcm_s16le"},
+                                "sample_rate": {
+                                    "type": "integer",
+                                    "default": WS_MODE_INPUT_SAMPLE_RATE,
+                                },
+                                "channels": {
+                                    "type": "integer",
+                                    "default": WS_MODE_CHANNELS,
+                                },
+                            },
+                            "required": ["type"],
+                        },
+                    },
+                },
+                "output_stream": {
+                    "type": "object",
+                    "properties": {
+                        "content_type": {"type": "string", "default": "audio"},
+                        "target": {
+                            "type": "object",
+                            "properties": {
+                                "type": {"type": "string", "enum": ["ws", "webrtc"]},
+                                "format": {"type": "string", "default": "pcm_s16le"},
+                                "sample_rate": {
+                                    "type": "integer",
+                                    "default": WS_MODE_OUTPUT_SAMPLE_RATE,
+                                },
+                                "channels": {
+                                    "type": "integer",
+                                    "default": WS_MODE_CHANNELS,
+                                },
+                            },
+                            "required": ["type"],
+                        },
+                    },
+                },
+            },
+            "$defs": {
+                # Include all nested model definitions
+                "Preprocessing": base_defs.get("Preprocessing", {}),
+                "QueueConfig": base_defs.get("QueueConfig", {}),
+                "QueueConfigs": base_defs.get("QueueConfigs", {}),
+                "Transcription": base_defs.get("Transcription", {}),
+                "Translation": base_defs.get("Translation", {}),
+                "Splitter": base_defs.get("Splitter", {}),
+                "SplitterAdvanced": base_defs.get("SplitterAdvanced", {}),
+                "Verification": base_defs.get("Verification", {}),
+                "TranscriptionAdvanced": base_defs.get("TranscriptionAdvanced", {}),
+                "FillerPhrases": base_defs.get("FillerPhrases", {}),
+                "SpeechGen": base_defs.get("SpeechGen", {}),
+                "TTSAdvanced": base_defs.get("TTSAdvanced", {}),
+                "TimbreDetection": base_defs.get("TimbreDetection", {}),
+                "TranslationAdvanced": base_defs.get("TranslationAdvanced", {}),
+                # Language enums with flags
+                "SourceLanguageEnum": {
+                    "type": "string",
+                    "enum": list(
+                        {
+                            lang.source_code: None for lang in get_source_languages()
+                        }.keys()
+                    ),
+                    "enumNames": list(
+                        {
+                            lang.source_code: f"{lang.flag} {lang.source_code}"
+                            for lang in get_source_languages()
+                        }.values()
+                    ),
+                    "title": "Source Language",
+                },
+                "TargetLanguageEnum": {
+                    "type": "string",
+                    "enum": list(
+                        {
+                            lang.target_code: None for lang in get_target_languages()
+                        }.keys()
+                    ),
+                    "enumNames": list(
+                        {
+                            lang.target_code: f"{lang.flag} {lang.target_code}"
+                            for lang in get_target_languages()
+                        }.values()
+                    ),
+                    "title": "Target Language",
+                },
+            },
+        }
+
+        return schema
