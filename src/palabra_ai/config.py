@@ -27,6 +27,8 @@ from palabra_ai.constant import (
     EOF_SILENCE_DURATION_S,
     F0_VARIANCE_FACTOR_DEFAULT,
     FORCE_END_OF_SEGMENT_DEFAULT,
+    FORCE_SPLIT_MIN_CHARACTERS_DEFAULT,
+    FORCE_SPLIT_MIN_SECONDS_DEFAULT,
     MAX_ALIGNMENT_CER_DEFAULT,
     MAX_QUEUE_LEVEL_MS_DEFAULT,
     MAX_STEPS_WITHOUT_EOS_DEFAULT,
@@ -330,6 +332,8 @@ class Preprocessing(BaseModel):
 
 
 class SplitterAdvanced(BaseModel):
+    force_split_min_characters: int | None = FORCE_SPLIT_MIN_CHARACTERS_DEFAULT
+    force_split_min_seconds: float | None = FORCE_SPLIT_MIN_SECONDS_DEFAULT
     min_sentence_characters: int = MIN_SENTENCE_CHARACTERS_DEFAULT
     min_sentence_seconds: int = MIN_SENTENCE_SECONDS_DEFAULT
     min_split_interval: float = MIN_SPLIT_INTERVAL_DEFAULT
