@@ -100,7 +100,7 @@ class TestBufferReader:
         +reader.ready
         reader._position = 4  # At end
 
-        with patch('palabra_ai.task.adapter.buffer.debug') as mock_debug:
+        with patch('palabra_ai.task.adapter.base.debug') as mock_debug:
             data = await reader.read(5)
             assert data is None
             assert reader.eof.is_set()
@@ -456,3 +456,189 @@ class TestRunAsPipe:
         pipe.__del__()
 
         pipe._cleanup.assert_called_once()
+
+
+class TestBufferReaderEOSPadding:
+    """Test BufferReader EOS silence padding functionality"""
+
+    @pytest.mark.asyncio
+    async def test_empty_buffer_sends_padding_before_eof(self):
+        """Test that empty buffer sends padding before EOF"""
+        from palabra_ai.config import Config, WsMode
+
+        # Create empty buffer
+        buffer = io.BytesIO(b"")
+
+        config = Config(
+            source="en",
+            targets=["es"],
+            mode=WsMode(),
+            eos_silence_s=1.0  # 1 second = 32000 bytes (16000Hz * 1ch * 2 bytes)
+        )
+
+        reader = BufferReader(buffer=buffer)
+        reader.cfg = config
+        reader.ready.set()
+
+        # First read should return padding (not None)
+        chunk1 = await reader.read(1024)
+        assert chunk1 is not None
+        assert len(chunk1) == 1024
+        assert chunk1 == bytes(1024)  # All zeros
+
+        # EOF should not be set yet
+        assert not reader.eof
+
+        # Continue reading padding
+        total_read = 1024
+        while total_read < 32000:
+            chunk = await reader.read(1024)
+            if chunk is None:
+                break
+            total_read += len(chunk)
+
+        # After all padding read, EOF should be set
+        final_chunk = await reader.read(1024)
+        assert final_chunk is None
+        assert reader.eof
+
+    @pytest.mark.asyncio
+    async def test_buffer_with_data_sends_data_then_padding(self):
+        """Test that buffer with data sends data first, then padding"""
+        from palabra_ai.config import Config, WsMode
+
+        # Create buffer with some data
+        buffer = io.BytesIO(b"test_audio_data_1234")  # 20 bytes
+
+        config = Config(
+            source="en",
+            targets=["es"],
+            mode=WsMode(),
+            eos_silence_s=0.5  # 0.5 seconds = 16000 bytes
+        )
+
+        reader = BufferReader(buffer=buffer)
+        reader.cfg = config
+        reader.ready.set()
+
+        # First read should return actual data
+        chunk1 = await reader.read(20)
+        assert chunk1 == b"test_audio_data_1234"
+        assert not reader.eof
+
+        # Next read should start padding
+        chunk2 = await reader.read(1024)
+        assert chunk2 is not None
+        assert len(chunk2) == 1024
+        assert chunk2 == bytes(1024)  # Zeros (padding)
+        assert not reader.eof
+
+    @pytest.mark.asyncio
+    async def test_zero_padding_config_sets_eof_immediately(self):
+        """Test that eos_silence_s=0 sets EOF immediately without padding"""
+        from palabra_ai.config import Config, WsMode
+
+        buffer = io.BytesIO(b"")
+
+        config = Config(
+            source="en",
+            targets=["es"],
+            mode=WsMode(),
+            eos_silence_s=0.0  # No padding
+        )
+
+        reader = BufferReader(buffer=buffer)
+        reader.cfg = config
+        reader.ready.set()
+
+        # First read on empty buffer should return None immediately
+        chunk = await reader.read(1024)
+        assert chunk is None
+        assert reader.eof
+
+    @pytest.mark.asyncio
+    async def test_runas_pipe_waits_for_process_completion(self):
+        """Test that RunAsPipe waits for process to complete before starting padding"""
+        from palabra_ai.config import Config, WsMode
+        import subprocess
+        import time
+
+        # Create a process that writes data slowly
+        # Use echo with sleep to simulate slow writing
+        cmd = ["sh", "-c", "echo 'part1'; sleep 0.1; echo 'part2'; sleep 0.1; echo 'part3'"]
+
+        pipe = RunAsPipe(cmd)
+
+        config = Config(
+            source="en",
+            targets=["es"],
+            mode=WsMode(),
+            eos_silence_s=0.5
+        )
+
+        reader = BufferReader(buffer=pipe)
+        reader.cfg = config
+        reader.ready.set()
+
+        # Give process time to start
+        await asyncio.sleep(0.05)
+
+        # Start reading - should get data, not immediate EOF
+        chunks = []
+        max_attempts = 50  # Prevent infinite loop
+        attempts = 0
+
+        while attempts < max_attempts:
+            chunk = await reader.read(1024)
+            if chunk is None:
+                break
+            chunks.append(chunk)
+            attempts += 1
+
+        # Should have received actual data before padding
+        all_data = b"".join(chunks)
+        assert b"part1" in all_data
+        assert b"part2" in all_data
+        assert b"part3" in all_data
+
+        # EOF should be set after process completes and padding sent
+        assert reader.eof
+
+    @pytest.mark.asyncio
+    async def test_runas_pipe_no_premature_padding(self):
+        """Test that RunAsPipe doesn't start padding while process still writing"""
+        from palabra_ai.config import Config, WsMode
+
+        # Simple fast process
+        cmd = ["echo", "test_data_12345678"]
+
+        pipe = RunAsPipe(cmd)
+
+        config = Config(
+            source="en",
+            targets=["es"],
+            mode=WsMode(),
+            eos_silence_s=0.1  # Small padding for faster test
+        )
+
+        reader = BufferReader(buffer=pipe)
+        reader.cfg = config
+        reader.ready.set()
+
+        # Give process time to write
+        await asyncio.sleep(0.1)
+
+        # First read should get real data
+        chunk1 = await reader.read(1024)
+        assert chunk1 is not None
+        assert b"test_data" in chunk1
+        assert not reader._padding_started  # Not in padding mode yet
+
+        # Continue reading until EOF
+        while True:
+            chunk = await reader.read(1024)
+            if chunk is None:
+                break
+
+        # Should eventually reach EOF
+        assert reader.eof

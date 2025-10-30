@@ -161,6 +161,9 @@ class DeviceReader(Reader):
     sdm: SoundDeviceManager = field(default_factory=SoundDeviceManager)
     tg: asyncio.TaskGroup | None = field(default=None, init=False)
 
+    # Padding state field (for signal interruption)
+    _signal_received: bool = field(default=False, init=False, repr=False)
+
     def do_preprocess(self):
         """Set default duration for real-time input."""
         self.duration = RT_DEFAULT_DURATION
@@ -173,8 +176,8 @@ class DeviceReader(Reader):
             loop = asyncio.get_running_loop()
 
             def handle_signal():
-                +self.eof  # noqa
-                debug("Device reader received signal, setting EOF")
+                self._signal_received = True
+                debug("Device reader received signal, will send padding before EOF")
 
             for sig in (signal.SIGINT, signal.SIGTERM):
                 loop.add_signal_handler(sig, handle_signal)
@@ -214,8 +217,27 @@ class DeviceReader(Reader):
     async def read(self, size: int | None = None) -> bytes | None:
         await self.ready
 
+        # If in padding mode, deliver padding chunks
+        # DeviceReader uses config chunk size, not the size parameter
+        if self._padding_started:
+            chunk_size = self.cfg.mode.input_chunk_bytes if self.cfg else 1024
+            return self._deliver_padding(chunk_size)
+
         try:
-            return await self.q.get()
+            # If signal received, use timeout to avoid blocking forever
+            if self._signal_received:
+                try:
+                    return await asyncio.wait_for(self.q.get(), timeout=0.1)
+                except TimeoutError:
+                    # Queue empty and signal received → start padding
+                    chunk_size = self.cfg.mode.input_chunk_bytes if self.cfg else 1024
+                    return await self._start_padding(
+                        "signal received, queue empty", chunk_size
+                    )
+            else:
+                # Normal reading without timeout
+                return await self.q.get()
+
         except asyncio.CancelledError:
             debug("DeviceReader read cancelled")
             +self.eof  # noqa

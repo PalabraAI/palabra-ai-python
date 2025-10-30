@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import atexit
 import io
 import os
@@ -51,13 +52,30 @@ class BufferReader(Reader):
     async def read(self, size: int) -> bytes | None:
         await self.ready
 
+        # If in padding mode, deliver padding chunks
+        if self._padding_started:
+            return self._deliver_padding(size)
+
+        # Normal reading from buffer
         self.buffer.seek(self._position)
         chunk = self.buffer.read(size)
 
         if not chunk:
-            +self.eof  # noqa
-            debug(f"EOF reached at position {self._position}")
-            return None
+            # For RunAsPipe, check if process still running before treating as EOF
+            if isinstance(self.buffer, RunAsPipe):
+                if not self.buffer.is_complete():
+                    # Process still running, wait for more data
+                    debug(
+                        f"{self.name}: RunAsPipe returned empty chunk but process still running, "
+                        "waiting for more data..."
+                    )
+                    await asyncio.sleep(0.01)  # Brief wait
+                    return await self.read(size)  # Retry
+
+            # Buffer truly exhausted, start padding mode
+            return await self._start_padding(
+                f"buffer exhausted at position {self._position}", size
+            )
 
         self._position = self.buffer.tell()
         return chunk
@@ -157,6 +175,24 @@ class RunAsPipe:
     def tell(self):
         """Current position"""
         return self._pos
+
+    def is_complete(self) -> bool:
+        """Check if process finished and all data has been read.
+
+        Returns:
+            True if pipe is closed, or process terminated and all buffer data consumed.
+        """
+        if self._closed:
+            return True
+
+        # Check if process has terminated
+        if self.process and self.process.poll() is not None:
+            # Process finished - check if all data consumed
+            with self._lock:
+                return self._pos >= len(self._buffer)
+
+        # Process still running
+        return False
 
     def __del__(self):
         """Cleanup on garbage collection"""

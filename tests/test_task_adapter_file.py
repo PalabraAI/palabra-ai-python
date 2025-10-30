@@ -353,3 +353,160 @@ class TestFileWriter:
         assert UnlimitedExitMixin in FileWriter.__mro__
         # Verify _exit comes from UnlimitedExitMixin, not Writer
         assert writer._exit.__qualname__.startswith("UnlimitedExitMixin")
+
+
+class TestFileReaderEOSPadding:
+    """Test FileReader EOS silence padding functionality"""
+
+    @pytest.mark.asyncio
+    async def test_streaming_mode_sends_padding_before_eof(self, tmp_path):
+        """Test streaming mode sends EOS padding when source exhausted"""
+        from palabra_ai.config import Config, WsMode
+
+        test_file = tmp_path / "test.wav"
+        test_file.write_bytes(b"dummy")
+
+        config = Config(
+            source="en",
+            targets=["es"],
+            mode=WsMode(),
+            eos_silence_s=1.0  # 1 second = 32000 bytes at 16kHz
+        )
+
+        reader = FileReader(path=test_file, preprocess=False)
+        reader.cfg = config
+        reader._preprocessed = False
+        reader._source_exhausted = True  # Simulate exhausted source
+        reader.ready = TaskEvent()
+        +reader.ready
+        reader.eof = TaskEvent()
+
+        # Buffer empty, source exhausted → should start padding
+        chunk1 = await reader.read(10000)
+        assert chunk1 is not None
+        assert len(chunk1) == 10000
+        assert chunk1 == bytes(10000)  # All zeros
+
+        # Should have padding remaining
+        assert reader._padding_started is True
+        assert reader._padding_remaining == 22000  # 32000 - 10000
+
+        # Read more padding
+        chunk2 = await reader.read(22000)
+        assert len(chunk2) == 22000
+        assert chunk2 == bytes(22000)
+
+        # Padding exhausted → should set EOF
+        chunk3 = await reader.read(1000)
+        assert chunk3 is None
+        assert reader.eof.is_set()
+
+    @pytest.mark.asyncio
+    async def test_streaming_mode_with_data_then_padding(self, tmp_path):
+        """Test streaming mode sends data, then padding, then EOF"""
+        from palabra_ai.config import Config, WsMode
+
+        test_file = tmp_path / "test.wav"
+        test_file.write_bytes(b"dummy")
+
+        config = Config(
+            source="en",
+            targets=["es"],
+            mode=WsMode(),
+            eos_silence_s=0.5  # 0.5 seconds = 16000 bytes
+        )
+
+        reader = FileReader(path=test_file, preprocess=False)
+        reader.cfg = config
+        reader._preprocessed = False
+        reader._buffer.append(b"audio data here")
+        reader._source_exhausted = False
+        reader.ready = TaskEvent()
+        +reader.ready
+        reader.eof = TaskEvent()
+
+        # Read data first
+        chunk1 = await reader.read(10)
+        assert chunk1 == b"audio data"
+        assert not reader.eof.is_set()
+
+        # Mark source exhausted
+        reader._source_exhausted = True
+
+        # Buffer has remaining data
+        chunk2 = await reader.read(5)
+        assert chunk2 == b" here"
+
+        # Now buffer empty and source exhausted → padding
+        chunk3 = await reader.read(8000)
+        assert len(chunk3) == 8000
+        assert chunk3 == bytes(8000)
+        assert reader._padding_started is True
+
+        # Continue padding
+        chunk4 = await reader.read(8000)
+        assert len(chunk4) == 8000
+
+        # Padding exhausted → EOF
+        chunk5 = await reader.read(1000)
+        assert chunk5 is None
+        assert reader.eof.is_set()
+
+    @pytest.mark.asyncio
+    async def test_streaming_mode_zero_padding_immediate_eof(self, tmp_path):
+        """Test streaming mode with zero padding sets EOF immediately"""
+        from palabra_ai.config import Config, WsMode
+
+        test_file = tmp_path / "test.wav"
+        test_file.write_bytes(b"dummy")
+
+        config = Config(
+            source="en",
+            targets=["es"],
+            mode=WsMode(),
+            eos_silence_s=0.0  # No padding
+        )
+
+        reader = FileReader(path=test_file, preprocess=False)
+        reader.cfg = config
+        reader._preprocessed = False
+        reader._source_exhausted = True
+        reader.ready = TaskEvent()
+        +reader.ready
+        reader.eof = TaskEvent()
+
+        # Buffer empty, source exhausted, no padding → immediate EOF
+        chunk = await reader.read(1000)
+        assert chunk is None
+        assert reader.eof.is_set()
+        assert not reader._padding_started
+
+    @pytest.mark.asyncio
+    async def test_preprocessed_mode_skips_padding_state(self, tmp_path):
+        """Test preprocessed mode doesn't use padding state (already has padding baked in)"""
+        from palabra_ai.config import Config, WsMode
+
+        test_file = tmp_path / "test.wav"
+        test_file.write_bytes(b"dummy")
+
+        config = Config(
+            source="en",
+            targets=["es"],
+            mode=WsMode(),
+            eos_silence_s=10.0  # Has padding setting
+        )
+
+        reader = FileReader(path=test_file, preprocess=True)
+        reader.cfg = config
+        reader._preprocessed = True  # Preprocessed mode
+        reader.ready = TaskEvent()
+        +reader.ready
+        reader.eof = TaskEvent()
+
+        # Empty buffer in preprocessed mode → immediate EOF (padding already baked in)
+        chunk = await reader.read(1000)
+        assert chunk is None
+        assert reader.eof.is_set()
+        # Padding state should NOT be used
+        assert not reader._padding_started
+        assert reader._padding_remaining == 0

@@ -380,3 +380,156 @@ class TestDeviceWriter:
             await writer.exit()
 
             writer._executor.shutdown.assert_called_once_with(wait=False)
+
+
+class TestDeviceReaderEOSPadding:
+    """Test DeviceReader EOS silence padding functionality"""
+
+    @pytest.fixture
+    def mock_device(self):
+        """Create a mock device"""
+        return Device(
+            name="Test Microphone",
+            id="test_mic_123",
+            channels=1,
+            sample_rate=16000,
+            is_default=True
+        )
+
+    @pytest.mark.asyncio
+    async def test_signal_received_sends_padding_before_eof(self, mock_device):
+        """Test signal received with empty queue sends EOS padding"""
+        from palabra_ai.config import Config, WsMode
+
+        config = Config(
+            source="en",
+            targets=["es"],
+            mode=WsMode(),
+            eos_silence_s=1.0  # 1 second = 32000 bytes at 16kHz
+        )
+
+        reader = DeviceReader(device=mock_device)
+        reader.cfg = config
+        reader.q = asyncio.Queue()
+        reader.ready = TaskEvent()
+        +reader.ready
+        reader.eof = TaskEvent()
+        reader._signal_received = True
+
+        # Queue empty, signal received → should start padding
+        chunk1 = await reader.read()
+        assert chunk1 is not None
+        assert len(chunk1) == config.mode.input_chunk_bytes
+        assert chunk1 == bytes(config.mode.input_chunk_bytes)
+
+        # Should have padding started
+        assert reader._padding_started is True
+        assert reader._padding_remaining > 0
+
+        # Continue reading padding until exhausted
+        padding_read = len(chunk1)
+        while padding_read < 32000:
+            chunk = await reader.read()
+            if chunk is None:
+                break
+            assert chunk == bytes(len(chunk))
+            padding_read += len(chunk)
+
+        # Final read should be None (EOF)
+        final_chunk = await reader.read()
+        assert final_chunk is None
+        assert reader.eof.is_set()
+
+    @pytest.mark.asyncio
+    async def test_signal_received_with_queue_data_then_padding(self, mock_device):
+        """Test signal received sends queue data first, then padding"""
+        from palabra_ai.config import Config, WsMode
+
+        config = Config(
+            source="en",
+            targets=["es"],
+            mode=WsMode(),
+            eos_silence_s=0.5  # 0.5 seconds = 16000 bytes
+        )
+
+        reader = DeviceReader(device=mock_device)
+        reader.cfg = config
+        reader.q = asyncio.Queue()
+        reader.ready = TaskEvent()
+        +reader.ready
+        reader.eof = TaskEvent()
+        reader._signal_received = True
+
+        # Add data to queue
+        await reader.q.put(b"audio data 1")
+        await reader.q.put(b"audio data 2")
+
+        # Read data from queue first
+        chunk1 = await reader.read()
+        assert chunk1 == b"audio data 1"
+        assert not reader._padding_started
+
+        chunk2 = await reader.read()
+        assert chunk2 == b"audio data 2"
+        assert not reader._padding_started
+
+        # Queue empty now, should start padding
+        chunk3 = await reader.read()
+        assert chunk3 is not None
+        assert len(chunk3) == config.mode.input_chunk_bytes
+        assert chunk3 == bytes(config.mode.input_chunk_bytes)
+        assert reader._padding_started is True
+
+    @pytest.mark.asyncio
+    async def test_signal_received_zero_padding_immediate_eof(self, mock_device):
+        """Test signal received with zero padding sets EOF immediately"""
+        from palabra_ai.config import Config, WsMode
+
+        config = Config(
+            source="en",
+            targets=["es"],
+            mode=WsMode(),
+            eos_silence_s=0.0  # No padding
+        )
+
+        reader = DeviceReader(device=mock_device)
+        reader.cfg = config
+        reader.q = asyncio.Queue()
+        reader.ready = TaskEvent()
+        +reader.ready
+        reader.eof = TaskEvent()
+        reader._signal_received = True
+
+        # Queue empty, signal received, no padding → immediate EOF
+        chunk = await reader.read()
+        assert chunk is None
+        assert reader.eof.is_set()
+        assert not reader._padding_started
+
+    @pytest.mark.asyncio
+    async def test_normal_operation_without_signal(self, mock_device):
+        """Test normal operation without signal works as before"""
+        from palabra_ai.config import Config, WsMode
+
+        config = Config(
+            source="en",
+            targets=["es"],
+            mode=WsMode(),
+            eos_silence_s=10.0
+        )
+
+        reader = DeviceReader(device=mock_device)
+        reader.cfg = config
+        reader.q = asyncio.Queue()
+        reader.ready = TaskEvent()
+        +reader.ready
+        reader.eof = TaskEvent()
+        reader._signal_received = False
+
+        # Add data to queue
+        await reader.q.put(b"normal audio data")
+
+        # Should read normally without timeout
+        chunk = await reader.read()
+        assert chunk == b"normal audio data"
+        assert not reader._padding_started

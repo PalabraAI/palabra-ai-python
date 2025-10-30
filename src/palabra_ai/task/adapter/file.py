@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from collections import deque
 from collections.abc import Iterator
-from dataclasses import KW_ONLY, dataclass
+from dataclasses import KW_ONLY, dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -47,6 +47,9 @@ class FileReader(Reader):
 
     _target_rate: int = 0
     _preprocessed: bool = False
+
+    # Streaming state field (for streaming mode only)
+    _source_exhausted: bool = field(default=False, init=False, repr=False)
 
     def __post_init__(self):
         self.path = Path(self.path)
@@ -148,13 +151,24 @@ class FileReader(Reader):
     async def read(self, size: int) -> bytes | None:
         await self.ready
 
+        # If in padding mode (streaming only), deliver padding chunks
+        if self._padding_started:
+            return self._deliver_padding(size)
+
         if not self._preprocessed:
             # Fill buffer if needed (streaming mode)
             await self._ensure_buffer_has_data(size)
 
         # Extract from buffer (same logic for both preprocessed and streaming)
         if not self._buffer:
-            debug(f"EOF at position {self._position}")
+            # Buffer exhausted - check if we need padding (streaming mode only)
+            if not self._preprocessed and self._source_exhausted:
+                return await self._start_padding(
+                    f"streaming source exhausted at position {self._position}", size
+                )
+
+            # No padding needed (preprocessed mode) or no padding configured
+            debug(f"{self.name}: EOF at position {self._position}")
             +self.eof  # noqa
             return None
 
@@ -174,6 +188,12 @@ class FileReader(Reader):
             self._position += len(result)
             return bytes(result)
         else:
+            # Buffer became empty during extraction
+            if not self._preprocessed and self._source_exhausted:
+                return await self._start_padding(
+                    f"streaming buffer empty at position {self._position}", size
+                )
+
             +self.eof  # noqa
             return None
 
@@ -216,6 +236,8 @@ class FileReader(Reader):
 
             except StopIteration:
                 self._iterator = None
+                self._source_exhausted = True
+                debug(f"{self.name}: streaming source exhausted")
                 break
             except Exception as e:
                 debug(f"Error reading frame: {e}")

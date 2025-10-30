@@ -376,3 +376,97 @@ class TestBufferedWriter:
         # Verify AudioBuffer was created with drop_empty_frames=False
         assert writer.ab is not None
         assert writer.ab.drop_empty_frames is False
+
+
+class TestReaderPaddingHelpers:
+    """Test Reader padding helper methods for EOS silence"""
+
+    def test_calculate_padding_bytes_basic(self):
+        """Test padding calculation with basic config"""
+        from palabra_ai.config import Config, WsMode
+
+        config = Config(
+            source="en",
+            targets=["es"],
+            mode=WsMode(),
+            eos_silence_s=10.0
+        )
+
+        reader = ConcreteReader(cfg=config)
+
+        # WsMode: 16000 Hz, 1 channel, 2 bytes per sample
+        # 10 seconds * 16000 samples/s * 1 channel * 2 bytes = 320000 bytes
+        expected_bytes = 10.0 * 16000 * 1 * 2
+        assert reader._calculate_padding_bytes() == expected_bytes
+
+    def test_calculate_padding_bytes_different_sample_rates(self):
+        """Test padding calculation with different sample rates"""
+        from palabra_ai.config import Config, WebrtcMode
+
+        config = Config(
+            source="en",
+            targets=["es"],
+            mode=WebrtcMode(),  # 48000 Hz
+            eos_silence_s=5.0
+        )
+
+        reader = ConcreteReader(cfg=config)
+
+        # WebrtcMode: 48000 Hz, 1 channel, 2 bytes per sample
+        # 5 seconds * 48000 samples/s * 1 channel * 2 bytes = 480000 bytes
+        expected_bytes = 5.0 * 48000 * 1 * 2
+        assert reader._calculate_padding_bytes() == expected_bytes
+
+    def test_calculate_padding_bytes_zero_duration(self):
+        """Test padding calculation with zero duration returns 0"""
+        from palabra_ai.config import Config, WsMode
+
+        config = Config(
+            source="en",
+            targets=["es"],
+            mode=WsMode(),
+            eos_silence_s=0.0
+        )
+
+        reader = ConcreteReader(cfg=config)
+        assert reader._calculate_padding_bytes() == 0
+
+    def test_calculate_padding_bytes_negative_duration(self):
+        """Test padding calculation with negative duration returns 0"""
+        from palabra_ai.config import Config, WsMode
+
+        config = Config(
+            source="en",
+            targets=["es"],
+            mode=WsMode(),
+            eos_silence_s=-5.0
+        )
+
+        reader = ConcreteReader(cfg=config)
+        assert reader._calculate_padding_bytes() == 0
+
+    def test_generate_padding_chunk_returns_zeros(self):
+        """Test padding chunk generation returns correct size of zeros"""
+        from palabra_ai.config import Config, WsMode
+
+        config = Config(source="en", targets=["es"], mode=WsMode())
+        reader = ConcreteReader(cfg=config)
+
+        # Generate 1000 bytes
+        chunk = reader._generate_padding_chunk(1000)
+
+        assert isinstance(chunk, bytes)
+        assert len(chunk) == 1000
+        assert chunk == bytes(1000)  # All zeros
+
+    def test_generate_padding_chunk_various_sizes(self):
+        """Test padding chunk generation with various sizes"""
+        from palabra_ai.config import Config, WsMode
+
+        config = Config(source="en", targets=["es"], mode=WsMode())
+        reader = ConcreteReader(cfg=config)
+
+        for size in [0, 1, 100, 320, 1024, 16000]:
+            chunk = reader._generate_padding_chunk(size)
+            assert len(chunk) == size
+            assert chunk == bytes(size)
