@@ -24,7 +24,7 @@ from palabra_ai.constant import (
     CONTEXT_SIZE_DEFAULT,
     DESIRED_QUEUE_LEVEL_MS_DEFAULT,
     ENERGY_VARIANCE_FACTOR_DEFAULT,
-    EOF_SILENCE_DURATION_S,
+    EOS_SILENCE_S,
     F0_VARIANCE_FACTOR_DEFAULT,
     FORCE_END_OF_SEGMENT_DEFAULT,
     FORCE_SPLIT_MIN_CHARACTERS_DEFAULT,
@@ -81,6 +81,7 @@ DEEPEST_DEBUG = env.bool("DEEPEST_DEBUG", default=False)
 TIMEOUT = env.int("TIMEOUT", default=0)
 LOG_FILE = env.path("LOG_FILE", default=None)
 RICH_DEFAULT_CONFIG = env.bool("RICH_DEFAULT_CONFIG", default=False)
+EOS_SILENCE_S_ENV = env.float("EOS_SILENCE_S", default=EOS_SILENCE_S)
 
 # Materialized paths for fields that should always be included in serialization
 # when rich_default_config is enabled, even with exclude_unset=True
@@ -167,7 +168,6 @@ class IoMode(BaseModel):
     output_sample_rate: int
     num_channels: int
     input_chunk_duration_ms: int
-    eof_silence_duration_s: float = EOF_SILENCE_DURATION_S
 
     @cached_property
     def input_samples_per_channel(self) -> int:
@@ -537,6 +537,9 @@ class Config(BaseModel):
     estimated_duration: SkipJsonSchema[float | None] = Field(default=None, exclude=True)
     rich_default_config: SkipJsonSchema[bool] = Field(
         default=RICH_DEFAULT_CONFIG, exclude=True
+    )
+    eos_silence_s: SkipJsonSchema[float] = Field(
+        default=EOS_SILENCE_S_ENV, exclude=True
     )
 
     def __init__(
