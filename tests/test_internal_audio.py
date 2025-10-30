@@ -430,3 +430,220 @@ class TestPullUntilBlocked:
         result = pull_until_blocked(mock_graph)
 
         assert result == []
+
+
+class TestSimplePreprocessAudioFileEOSilence:
+    """Test EOS silence padding in simple_preprocess_audio_file"""
+
+    @patch('palabra_ai.internal.audio.av.open')
+    @patch('palabra_ai.internal.audio.open_audio_file')
+    @patch('builtins.open', create=True)
+    def test_eos_silence_adds_padding(self, mock_file_open, mock_open_audio_file, mock_av_open):
+        """Test that EOS silence padding is added correctly"""
+        from palabra_ai.internal.audio import simple_preprocess_audio_file
+
+        # Mock file read
+        mock_file = MagicMock()
+        mock_file.read.return_value = b"audio_data"
+        mock_file.__enter__.return_value = mock_file
+        mock_file_open.return_value = mock_file
+
+        # Mock av container
+        mock_container = MagicMock()
+        mock_stream = MagicMock()
+        mock_stream.type = "audio"
+        mock_stream.sample_rate = 16000
+        mock_stream.duration = 16000
+        mock_stream.time_base = 1/16000
+        mock_stream.channels = 1
+        mock_container.streams = [mock_stream]
+        mock_av_open.return_value = mock_container
+
+        # Mock audio processing - return 1 second of audio (16000 samples)
+        audio_array = np.zeros(16000, dtype=np.float32)
+        mock_open_audio_file.return_value = audio_array
+
+        # Test with 5 seconds of silence padding
+        eos_silence_s = 5.0
+        result_bytes, metadata = simple_preprocess_audio_file(
+            "test.wav",
+            target_rate=16000,
+            eos_silence_s=eos_silence_s
+        )
+
+        # Convert result back to int16 array
+        result_array = np.frombuffer(result_bytes, dtype=np.int16)
+
+        # Expected: 16000 original samples + 5*16000 silence samples = 96000 total
+        expected_length = 16000 + int(eos_silence_s * 16000)
+        assert len(result_array) == expected_length
+
+        # Check that last samples are zeros (silence)
+        silence_samples = int(eos_silence_s * 16000)
+        assert np.all(result_array[-silence_samples:] == 0)
+
+    @patch('palabra_ai.internal.audio.av.open')
+    @patch('palabra_ai.internal.audio.open_audio_file')
+    @patch('builtins.open', create=True)
+    def test_eos_silence_zero_no_padding(self, mock_file_open, mock_open_audio_file, mock_av_open):
+        """Test that eos_silence_s=0 does not add padding"""
+        from palabra_ai.internal.audio import simple_preprocess_audio_file
+
+        # Mock file read
+        mock_file = MagicMock()
+        mock_file.read.return_value = b"audio_data"
+        mock_file.__enter__.return_value = mock_file
+        mock_file_open.return_value = mock_file
+
+        # Mock av container
+        mock_container = MagicMock()
+        mock_stream = MagicMock()
+        mock_stream.type = "audio"
+        mock_stream.sample_rate = 16000
+        mock_stream.duration = 16000
+        mock_stream.time_base = 1/16000
+        mock_stream.channels = 1
+        mock_container.streams = [mock_stream]
+        mock_av_open.return_value = mock_container
+
+        # Mock audio processing - return 1 second of audio
+        audio_array = np.zeros(16000, dtype=np.float32)
+        mock_open_audio_file.return_value = audio_array
+
+        # Test with 0 seconds of silence
+        result_bytes, metadata = simple_preprocess_audio_file(
+            "test.wav",
+            target_rate=16000,
+            eos_silence_s=0.0
+        )
+
+        result_array = np.frombuffer(result_bytes, dtype=np.int16)
+
+        # Should be exactly 16000 samples, no padding
+        assert len(result_array) == 16000
+
+    @patch('palabra_ai.internal.audio.av.open')
+    @patch('palabra_ai.internal.audio.open_audio_file')
+    @patch('builtins.open', create=True)
+    def test_eos_silence_negative_no_padding(self, mock_file_open, mock_open_audio_file, mock_av_open):
+        """Test that negative eos_silence_s does not add padding"""
+        from palabra_ai.internal.audio import simple_preprocess_audio_file
+
+        # Mock file read
+        mock_file = MagicMock()
+        mock_file.read.return_value = b"audio_data"
+        mock_file.__enter__.return_value = mock_file
+        mock_file_open.return_value = mock_file
+
+        # Mock av container
+        mock_container = MagicMock()
+        mock_stream = MagicMock()
+        mock_stream.type = "audio"
+        mock_stream.sample_rate = 16000
+        mock_stream.duration = 16000
+        mock_stream.time_base = 1/16000
+        mock_stream.channels = 1
+        mock_container.streams = [mock_stream]
+        mock_av_open.return_value = mock_container
+
+        # Mock audio processing
+        audio_array = np.zeros(16000, dtype=np.float32)
+        mock_open_audio_file.return_value = audio_array
+
+        # Test with negative value
+        result_bytes, metadata = simple_preprocess_audio_file(
+            "test.wav",
+            target_rate=16000,
+            eos_silence_s=-5.0
+        )
+
+        result_array = np.frombuffer(result_bytes, dtype=np.int16)
+
+        # Should be exactly 16000 samples, no padding
+        assert len(result_array) == 16000
+
+    @patch('palabra_ai.internal.audio.av.open')
+    @patch('palabra_ai.internal.audio.open_audio_file')
+    @patch('builtins.open', create=True)
+    def test_eos_silence_various_durations(self, mock_file_open, mock_open_audio_file, mock_av_open):
+        """Test EOS silence with various durations (1s, 5s, 15s)"""
+        from palabra_ai.internal.audio import simple_preprocess_audio_file
+
+        # Mock file read
+        mock_file = MagicMock()
+        mock_file.read.return_value = b"audio_data"
+        mock_file.__enter__.return_value = mock_file
+        mock_file_open.return_value = mock_file
+
+        # Mock av container
+        mock_container = MagicMock()
+        mock_stream = MagicMock()
+        mock_stream.type = "audio"
+        mock_stream.sample_rate = 16000
+        mock_stream.duration = 16000
+        mock_stream.time_base = 1/16000
+        mock_stream.channels = 1
+        mock_container.streams = [mock_stream]
+        mock_av_open.return_value = mock_container
+
+        # Mock audio processing
+        audio_array = np.zeros(16000, dtype=np.float32)
+        mock_open_audio_file.return_value = audio_array
+
+        # Test various durations
+        for duration in [1.0, 5.0, 15.0]:
+            result_bytes, metadata = simple_preprocess_audio_file(
+                "test.wav",
+                target_rate=16000,
+                eos_silence_s=duration
+            )
+
+            result_array = np.frombuffer(result_bytes, dtype=np.int16)
+            expected_length = 16000 + int(duration * 16000)
+            assert len(result_array) == expected_length
+
+    @patch('palabra_ai.internal.audio.av.open')
+    @patch('palabra_ai.internal.audio.open_audio_file')
+    @patch('builtins.open', create=True)
+    def test_eos_silence_sample_accuracy(self, mock_file_open, mock_open_audio_file, mock_av_open):
+        """Test that silence padding sample count matches formula exactly"""
+        from palabra_ai.internal.audio import simple_preprocess_audio_file
+
+        # Mock file read
+        mock_file = MagicMock()
+        mock_file.read.return_value = b"audio_data"
+        mock_file.__enter__.return_value = mock_file
+        mock_file_open.return_value = mock_file
+
+        # Mock av container with 24kHz sample rate
+        mock_container = MagicMock()
+        mock_stream = MagicMock()
+        mock_stream.type = "audio"
+        mock_stream.sample_rate = 24000
+        mock_stream.duration = 24000
+        mock_stream.time_base = 1/24000
+        mock_stream.channels = 1
+        mock_container.streams = [mock_stream]
+        mock_av_open.return_value = mock_container
+
+        # Mock audio processing
+        audio_array = np.zeros(24000, dtype=np.float32)
+        mock_open_audio_file.return_value = audio_array
+
+        # Test with 10 seconds at 24kHz
+        eos_silence_s = 10.0
+        target_rate = 24000
+        result_bytes, metadata = simple_preprocess_audio_file(
+            "test.wav",
+            target_rate=target_rate,
+            eos_silence_s=eos_silence_s
+        )
+
+        result_array = np.frombuffer(result_bytes, dtype=np.int16)
+
+        # Formula: silence_samples = int(eos_silence_s * sample_rate)
+        expected_silence_samples = int(eos_silence_s * target_rate)
+        expected_total = 24000 + expected_silence_samples
+
+        assert len(result_array) == expected_total
+        assert expected_silence_samples == 240000

@@ -75,7 +75,7 @@ class FileReader(Reader):
                 target_rate=self.cfg.mode.input_sample_rate,
                 normalize=normalize,
                 progress_callback=progress_callback,
-                eof_silence_duration_s=self.cfg.mode.eof_silence_duration_s,
+                eos_silence_s=self.cfg.eos_silence_s,
             )
             # Simple mode uses config as-is
             debug(
