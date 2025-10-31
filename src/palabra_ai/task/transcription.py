@@ -26,15 +26,15 @@ class Transcription(Task):
     _callbacks: dict[str, Callable] = field(default_factory=dict, init=False)
 
     def __post_init__(self):
-        # Collect callbacks by language
+        # Register callback for ALL language variants
         if self.cfg.source.on_transcription:
-            self._callbacks[self.cfg.source.lang.code] = (
-                self.cfg.source.on_transcription
-            )
+            for variant in self.cfg.source.lang.variants:
+                self._callbacks[variant] = self.cfg.source.on_transcription
 
         for target in self.cfg.targets:
             if target.on_transcription:
-                self._callbacks[target.lang.code] = target.on_transcription
+                for variant in target.lang.variants:
+                    self._callbacks[variant] = target.on_transcription
 
     async def boot(self):
         self._out_q = self.io.out_msg_foq.subscribe(self, maxsize=0).q
