@@ -51,11 +51,15 @@ class FileReader(Reader):
     # Streaming state field (for streaming mode only)
     _source_exhausted: bool = field(default=False, init=False, repr=False)
 
+    # Concurrency protection
+    _read_lock: asyncio.Lock = field(default=None, init=False, repr=False)
+
     def __post_init__(self):
         self.path = Path(self.path)
         if not self.path.exists():
             raise FileNotFoundError(f"File not found: {self.path}")
         self._buffer = deque()
+        self._read_lock = asyncio.Lock()
 
     def _preprocess_audio(self):
         """Preprocess audio with configurable pipeline."""
@@ -144,58 +148,75 @@ class FileReader(Reader):
         )
         debug(f"{self.name} processed {seconds_processed:.1f}s ({progress_pct:.1f}%)")
 
+        # CRITICAL: Check if padding is in progress during shutdown
+        if self._padding_started and self._padding_remaining > 0:
+            remaining_seconds = self._padding_remaining / (
+                self.cfg.mode.input_sample_rate * BYTES_PER_SAMPLE
+            )
+            warning(
+                f"{self.name}: exit() called while EOS padding in progress! "
+                f"Remaining: {self._padding_remaining} bytes ({remaining_seconds:.2f}s). "
+                f"Output audio may be truncated. This indicates premature shutdown."
+            )
+
         if self._container:
-            self._container.close()
-            self._container = None
+            try:
+                self._container.close()
+                self._container = None
+            except Exception as e:
+                # Don't fail shutdown on container close errors
+                error(f"{self.name}: error closing container during exit: {e}")
 
     async def read(self, size: int) -> bytes | None:
         await self.ready
 
-        # If in padding mode (streaming only), deliver padding chunks
-        if self._padding_started:
-            return self._deliver_padding(size)
+        # Protect against concurrent reads (CRITICAL: prevents race conditions)
+        async with self._read_lock:
+            # If in padding mode (streaming only), deliver padding chunks
+            if self._padding_started:
+                return self._deliver_padding(size)
 
-        if not self._preprocessed:
-            # Fill buffer if needed (streaming mode)
-            await self._ensure_buffer_has_data(size)
+            if not self._preprocessed:
+                # Fill buffer if needed (streaming mode)
+                await self._ensure_buffer_has_data(size)
 
-        # Extract from buffer (same logic for both preprocessed and streaming)
-        if not self._buffer:
-            # Buffer exhausted - check if we need padding (streaming mode only)
-            if not self._preprocessed and self._source_exhausted:
-                return await self._start_padding(
-                    f"streaming source exhausted at position {self._position}", size
-                )
+            # Extract from buffer (same logic for both preprocessed and streaming)
+            if not self._buffer:
+                # Buffer exhausted - check if we need padding (streaming mode only)
+                if not self._preprocessed and self._source_exhausted:
+                    return await self._start_padding(
+                        f"streaming source exhausted at position {self._position}", size
+                    )
 
-            # No padding needed (preprocessed mode) or no padding configured
-            debug(f"{self.name}: EOF at position {self._position}")
-            +self.eof  # noqa
-            return None
+                # No padding needed (preprocessed mode) or no padding configured
+                debug(f"{self.name}: EOF at position {self._position}")
+                +self.eof  # noqa
+                return None
 
-        result = bytearray()
-        while self._buffer and len(result) < size:
-            chunk = self._buffer.popleft()
-            if len(result) + len(chunk) <= size:
-                result.extend(chunk)
+            result = bytearray()
+            while self._buffer and len(result) < size:
+                chunk = self._buffer.popleft()
+                if len(result) + len(chunk) <= size:
+                    result.extend(chunk)
+                else:
+                    # Split chunk
+                    needed = size - len(result)
+                    result.extend(chunk[:needed])
+                    self._buffer.appendleft(chunk[needed:])
+                    break
+
+            if result:
+                self._position += len(result)
+                return bytes(result)
             else:
-                # Split chunk
-                needed = size - len(result)
-                result.extend(chunk[:needed])
-                self._buffer.appendleft(chunk[needed:])
-                break
+                # Buffer became empty during extraction
+                if not self._preprocessed and self._source_exhausted:
+                    return await self._start_padding(
+                        f"streaming buffer empty at position {self._position}", size
+                    )
 
-        if result:
-            self._position += len(result)
-            return bytes(result)
-        else:
-            # Buffer became empty during extraction
-            if not self._preprocessed and self._source_exhausted:
-                return await self._start_padding(
-                    f"streaming buffer empty at position {self._position}", size
-                )
-
-            +self.eof  # noqa
-            return None
+                +self.eof  # noqa
+                return None
 
     async def _ensure_buffer_has_data(self, needed_size: int):
         """Ensure buffer has enough data for read request"""
@@ -203,6 +224,10 @@ class FileReader(Reader):
 
         if current_size >= needed_size:
             return  # Already enough data
+
+        # Check if iterator already exhausted (prevents next(None) TypeError)
+        if self._iterator is None:
+            return  # Source already exhausted, can't read more
 
         # Read a few frames to fill buffer
         chunk_bytes = self.cfg.mode.input_chunk_bytes
@@ -212,6 +237,10 @@ class FileReader(Reader):
             min(frames_to_read, MAX_FRAMES_PER_READ)
         ):  # Limit to avoid blocking
             try:
+                # Double-check iterator not None (race condition protection)
+                if self._iterator is None:
+                    break
+
                 frame = await asyncio.to_thread(next, self._iterator)
 
                 # Resample frame to target format
@@ -235,12 +264,40 @@ class FileReader(Reader):
                     break
 
             except StopIteration:
+                # Direct StopIteration (shouldn't happen with asyncio.to_thread but kept for safety)
                 self._iterator = None
                 self._source_exhausted = True
-                debug(f"{self.name}: streaming source exhausted")
+                debug(f"{self.name}: streaming source exhausted (StopIteration)")
                 break
+            except RuntimeError as e:
+                # asyncio.to_thread wraps StopIteration in RuntimeError because
+                # StopIteration cannot be raised into a Future in async contexts
+                # Check __cause__ chain for StopIteration (more reliable than string matching)
+                is_stop_iteration = (
+                    isinstance(getattr(e, "__cause__", None), StopIteration)
+                    or isinstance(getattr(e, "__context__", None), StopIteration)
+                    or "StopIteration" in str(e)  # Fallback for edge cases
+                )
+
+                if is_stop_iteration:
+                    self._iterator = None
+                    self._source_exhausted = True
+                    debug(
+                        f"{self.name}: streaming source exhausted (RuntimeError wrapping StopIteration)"
+                    )
+                    break
+                else:
+                    error(f"{self.name}: unexpected RuntimeError reading frame: {e}")
+                    # CRITICAL: Ensure padding is triggered even on unexpected errors
+                    self._iterator = None
+                    self._source_exhausted = True
+                    break
             except Exception as e:
-                debug(f"Error reading frame: {e}")
+                # CRITICAL: Handle resampler/conversion exceptions (corrupt frames, etc)
+                # Must set _source_exhausted to guarantee padding is triggered
+                error(f"{self.name}: error reading/processing frame: {e}")
+                self._iterator = None
+                self._source_exhausted = True
                 break
 
 

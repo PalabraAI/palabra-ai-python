@@ -12,7 +12,7 @@ from palabra_ai.constant import (
     SLEEP_INTERVAL_LONG,
 )
 from palabra_ai.task.base import Task, TaskEvent
-from palabra_ai.util.logger import debug, trace
+from palabra_ai.util.logger import debug, success, trace
 
 if TYPE_CHECKING:
     from palabra_ai.audio import AudioFrame
@@ -54,7 +54,7 @@ class PaddingMixin:
 
         Args:
             context_msg: Context-specific message for logging.
-            size: Requested chunk size for recursive read call.
+            size: Requested chunk size for direct delivery (no recursive call).
 
         Returns:
             First padding chunk if padding configured, None otherwise.
@@ -62,11 +62,17 @@ class PaddingMixin:
         self._padding_remaining = self._calculate_padding_bytes()
         if self._padding_remaining > 0:
             self._padding_started = True
+            success(
+                f"✨ {self.name}: Starting EOS padding - "
+                f"{self._padding_remaining} bytes ({self.cfg.eos_silence_s}s) "
+                f"| Reason: {context_msg}"
+            )
             debug(
                 f"{self.name}: {context_msg}, "
                 f"starting {self._padding_remaining} bytes of EOS padding"
             )
-            return await self.read(size)
+            # Directly deliver first padding chunk (avoid recursive read() call)
+            return self._deliver_padding(size)
         else:
             +self.eof  # noqa
             debug(f"{self.name}: EOF reached at {context_msg} (no padding)")

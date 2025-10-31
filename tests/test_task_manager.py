@@ -8,7 +8,7 @@ from palabra_ai.internal.rest import SessionCredentials
 from palabra_ai.task.adapter.base import Reader, Writer
 from palabra_ai.task.adapter.dummy import DummyWriter
 from palabra_ai.task.base import TaskEvent
-from palabra_ai.constant import BOOT_TIMEOUT, SAFE_PUBLICATION_END_DELAY
+from palabra_ai.constant import BOOT_TIMEOUT
 
 class MockReader(Reader):
     """Mock reader for testing"""

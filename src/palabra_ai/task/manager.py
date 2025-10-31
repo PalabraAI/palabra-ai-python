@@ -6,7 +6,6 @@ from dataclasses import KW_ONLY, dataclass, field
 from palabra_ai.config import Config
 from palabra_ai.constant import (
     BOOT_TIMEOUT,
-    SAFE_PUBLICATION_END_DELAY,
     SHUTDOWN_TIMEOUT,
     SINGLE_TARGET_SUPPORTED_COUNT,
     SLEEP_INTERVAL_DEFAULT,
@@ -210,10 +209,6 @@ class Manager(Task):
                 warning(f"☠️ {self.name}.do() error: {e}, breaking!")
                 break
             if any(t.eof for t in self.tasks) or any(t.stopper for t in self.tasks):
-                try:
-                    await asyncio.sleep(SAFE_PUBLICATION_END_DELAY)
-                except asyncio.CancelledError:
-                    debug(f"🔚 {self.name}.do() sleep cancelled, exiting...")
                 debug(f"🔚 {self.name}.do() received EOF or stopper, exiting...")
                 success("🏁 Done! ⏻ Shutting down...")
                 self._graceful_completion = True
@@ -282,14 +277,6 @@ class Manager(Task):
                 f"🔧 {self.name}.graceful_exit() reader and sender shutdown cancelled"
             )
 
-        debug(
-            f"🔧 {self.name}.graceful_exit() waiting {SAFE_PUBLICATION_END_DELAY=}..."
-        )
-        try:
-            await asyncio.sleep(SAFE_PUBLICATION_END_DELAY)
-        except asyncio.CancelledError:
-            debug(f"🔧 {self.name}.graceful_exit() sleep cancelled")
-        debug(f"🔧 {self.name}.graceful_exit() {SAFE_PUBLICATION_END_DELAY=} waited!")
         debug(f"🔧 {self.name}.graceful_exit() gathering... ")
         try:
             await asyncio.gather(

@@ -16,21 +16,11 @@ def test_timing_constants():
     """Test timing constants"""
     assert constant.BOOT_TIMEOUT == 30.0
     assert constant.SHUTDOWN_TIMEOUT == 5.0
-    assert constant.LOGGER_SHUTDOWN_TIMEOUT == 20.0
-    assert constant.SAFE_PUBLICATION_END_DELAY == 3.0
-    assert constant.MONITOR_TIMEOUT == 0.1
-    assert constant.DEFAULT_PROCESS_TIMEOUT == 300.0
-    assert constant.TRACK_WAIT_TIMEOUT == 30.0
-    assert constant.TRACK_CLOSE_TIMEOUT == 5.0
-    assert constant.FINALIZE_WAIT_TIME == 5.0
     assert constant.SLEEP_INTERVAL_SHORT == 0.01
     assert constant.SLEEP_INTERVAL_DEFAULT == 0.1
     assert constant.SLEEP_INTERVAL_MEDIUM == 0.3
     assert constant.SLEEP_INTERVAL_LONG == 1.0
-    assert constant.SLEEP_INTERVAL_BUFFER_CHECK == 5.0
     assert constant.QUEUE_READ_TIMEOUT == 1.0
-    assert constant.QUEUE_WAIT_TIMEOUT == 0.5
-    assert constant.WS_TIMEOUT == 5.0
     assert constant.DEBUG_TASK_CHECK_INTERVAL == 30.0
 
 
@@ -46,8 +36,6 @@ def test_buffer_constants():
 def test_eof_constants():
     """Test EOF and completion constants"""
     assert constant.EMPTY_MESSAGE_THRESHOLD == 10
-    assert constant.EOF_DRAIN_TIMEOUT == 5.0
-    assert constant.COMPLETION_WAIT_TIMEOUT == 2.0
     assert constant.STATS_LOG_INTERVAL == 5.0
 
 

@@ -359,6 +359,12 @@ def simple_preprocess_audio_file(
     audio_int16 = (audio_array * np.iinfo(np.int16).max).astype(np.int16)
 
     # Add silence padding at the end
+    # TODO: Consider removing this preprocessing padding in favor of
+    # unified Reader-level padding mechanism (PaddingMixin).
+    # Currently both mechanisms coexist:
+    # - Preprocessed mode: padding added here during preprocessing
+    # - Streaming mode: padding added by Reader._start_padding()
+    # See: src/palabra_ai/task/adapter/base.py PaddingMixin
     if eos_silence_s > 0:
         silence_samples = int(eos_silence_s * final_rate)
         audio_int16 = np.concatenate(
