@@ -22,7 +22,7 @@ if __name__ == "__main__":
         "-acodec",
         "pcm_s16le",
         "-ar",
-        "48000",  # 48kHz
+        "16000",  # 48kHz
         "-ac",
         "1",  # mono
         "-",  # output to stdout
@@ -34,7 +34,14 @@ if __name__ == "__main__":
     palabra = PalabraAI()
     reader = BufferReader(pipe_buffer)
     writer = BufferWriter(es_buffer)
-    cfg = Config(SourceLang(AR, reader), [TargetLang(EN, writer)])
+
+    async def p(*args):
+        print(f"{args}")
+
+    cfg = Config(
+        SourceLang(AR, reader, on_transcription=print),
+        [TargetLang(EN, writer, on_transcription=print)],
+    )
     palabra.run(cfg)
 
     print(
