@@ -370,3 +370,34 @@ def test_no_undefined_languages_in_valid_sets():
 
     for lang in VALID_TARGET_LANGUAGES:
         assert lang.target_code is not None, f"{lang.code} in VALID_TARGET but has no target_code"
+
+
+def test_base_language_variants_includes_all():
+    """Test that base language variants include code, source_code, and target_code"""
+    variants = EN.variants
+    assert "en" in variants
+    assert "en-us" in variants  # target_code
+    assert len(variants) == 2
+
+
+def test_regional_language_variants():
+    """Test that regional language variants include own code and source/target"""
+    variants = EN_US.variants
+    assert "en-us" in variants  # own code
+    assert "en" in variants  # source_code
+    assert len(variants) == 2
+
+
+def test_ar_variants():
+    """Test AR language variants"""
+    variants = AR.variants
+    assert "ar" in variants
+    assert len(variants) == 1  # code, source_code, target_code are all "ar"
+
+
+def test_variants_no_none_values():
+    """Test that variants never include None values"""
+    # Test with language that has None codes
+    variants = AZ.variants  # source_code=None, target_code="az"
+    assert None not in variants
+    assert "az" in variants

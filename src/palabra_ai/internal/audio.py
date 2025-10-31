@@ -20,7 +20,7 @@ from av.error import (
 from av.filter import Graph as FilterGraph
 
 from palabra_ai.exc import ApiError
-from palabra_ai.util.logger import debug, error, info
+from palabra_ai.util.logger import debug, error, info, success
 
 
 async def write_to_disk(file_path: str | Path, body: bytes) -> int:
@@ -364,7 +364,10 @@ def simple_preprocess_audio_file(
         audio_int16 = np.concatenate(
             [audio_int16, np.zeros(silence_samples, dtype=np.int16)]
         )
-        debug(f"Added {eos_silence_s}s ({silence_samples} samples) of silence padding")
+        success(
+            f"✨ Preprocessing: Added {eos_silence_s}s EOS padding "
+            f"({silence_samples} samples at {final_rate}Hz)"
+        )
 
     processed_data = audio_int16.tobytes()
 
