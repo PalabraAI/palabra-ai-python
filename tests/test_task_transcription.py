@@ -21,17 +21,20 @@ def mock_config():
     config.source = MagicMock()
     config.source.lang = MagicMock()
     config.source.lang.code = "en"
+    config.source.lang.variants = {"en"}  # Mock variants
     config.source.on_transcription = MagicMock()
 
     # Target language configs
     target1 = MagicMock()
     target1.lang = MagicMock()
     target1.lang.code = "es"
+    target1.lang.variants = {"es"}  # Mock variants
     target1.on_transcription = MagicMock()
 
     target2 = MagicMock()
     target2.lang = MagicMock()
     target2.lang.code = "fr"
+    target2.lang.variants = {"fr"}  # Mock variants
     target2.on_transcription = None  # No callback
 
     config.targets = [target1, target2]
@@ -282,3 +285,33 @@ class TestTranscription:
 
             with pytest.raises(Exception, match="Callback error"):
                 await trans._call_callback(callback, data)
+
+    async def test_callback_routing_with_language_variants(self, mock_io):
+        """Test that callback works when server returns language variant (en-us) but config has base (EN)"""
+        from palabra_ai.lang import EN
+
+        callback = MagicMock()
+        config = MagicMock()
+        config.source = MagicMock()
+        config.source.on_transcription = callback
+        config.source.lang = EN  # Base language
+        config.targets = []
+
+        trans = Transcription(cfg=config, io=mock_io)
+
+        # Verify all EN variants registered
+        assert "en" in trans._callbacks
+        assert "en-us" in trans._callbacks  # target_code
+        assert trans._callbacks["en"] == callback
+        assert trans._callbacks["en-us"] == callback
+
+        # Create message with variant language (server returns en-us)
+        msg = MagicMock(spec=TranscriptionMessage)
+        msg.language = MagicMock()
+        msg.language.code = "en-us"
+
+        # Process - should find callback via simple .get()
+        await trans._process_message(msg)
+
+        # Verify callback would be found (checked in _process_message)
+        assert trans._callbacks.get("en-us") == callback

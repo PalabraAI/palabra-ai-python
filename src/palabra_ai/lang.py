@@ -67,6 +67,11 @@ class Language:
     def bcp47(self) -> str:
         return self.code
 
+    @property
+    def variants(self) -> set[str]:
+        """Return all language code variants for this language."""
+        return {v for v in [self.code, self.source_code, self.target_code] if v}
+
     @classmethod
     def get_by_bcp47(
         cls, code: str, registry: LanguageRegistry | None = None
