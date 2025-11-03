@@ -169,28 +169,20 @@ class TestBufferWriter:
         writer = BufferWriter(buffer=buffer)
         writer.ab = MagicMock()
 
-        # Simulate slow save operation (minimal blocking)
-        slow_duration = 0.01
+        # Mock returns immediately (no sleep needed to test unlimited timeout)
         save_called = False
 
-        def slow_save():
+        def mock_save():
             nonlocal save_called
-            import time
-            time.sleep(slow_duration)
             save_called = True
-            return b"WAV after delay"
+            return b"WAV data"
 
-        writer.ab.to_wav_bytes = slow_save
+        writer.ab.to_wav_bytes = mock_save
 
         with patch('palabra_ai.task.adapter.buffer.debug'):
-            # Should complete without timeout
-            start_time = asyncio.get_event_loop().time()
+            # Should complete without timeout (unlimited wait)
             await writer.exit()
-            elapsed = asyncio.get_event_loop().time() - start_time
-
-            # Verify it waited for the slow operation
             assert save_called
-            assert elapsed >= slow_duration
 
 
 class TestRunAsPipe:

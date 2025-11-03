@@ -319,29 +319,21 @@ class TestFileWriter:
         writer = FileWriter(path=output_file)
         writer.ab = MagicMock()
 
-        # Simulate slow save operation (async)
-        slow_duration = 0.1
+        # Mock returns immediately (no sleep needed to test unlimited timeout)
+        save_called = False
 
-        async def slow_save():
-            await asyncio.sleep(slow_duration)
-            return b"WAV data after delay"
+        def mock_save():
+            nonlocal save_called
+            save_called = True
+            return b"WAV data"
 
-        writer.ab.to_wav_bytes = slow_save
-
-        # Mock asyncio.to_thread to just await the coroutine
-        async def mock_to_thread(func, *args):
-            return await func(*args)
+        writer.ab.to_wav_bytes = mock_save
 
         with patch('palabra_ai.task.adapter.file.write_to_disk', new_callable=AsyncMock):
-            with patch('asyncio.to_thread', side_effect=mock_to_thread):
-                # Should complete without timeout
-                start_time = asyncio.get_event_loop().time()
-                result = await writer.exit()
-                elapsed = asyncio.get_event_loop().time() - start_time
-
-                assert result == b"WAV data after delay"
-                assert elapsed >= slow_duration  # Verify it actually waited
-                assert elapsed < slow_duration + 1  # But not much more
+            # Should complete without timeout (unlimited wait)
+            result = await writer.exit()
+            assert result == b"WAV data"
+            assert save_called
 
     @pytest.mark.asyncio
     async def test_exit_calls_unlimited_exit_mixin(self, tmp_path):

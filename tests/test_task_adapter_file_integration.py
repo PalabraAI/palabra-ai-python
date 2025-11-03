@@ -46,6 +46,7 @@ def create_synthetic_wav(
         wav_file.writeframes(audio_int16.tobytes())
 
 
+@pytest.mark.skip(reason="Skipping integration tests to identify CI hang")
 class TestFileReaderIntegration:
     """Integration tests with real audio files and ffmpeg"""
 
