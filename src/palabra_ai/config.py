@@ -541,6 +541,7 @@ class Config(BaseModel):
     eos_silence_s: SkipJsonSchema[float] = Field(
         default=EOS_SILENCE_S_ENV, exclude=True
     )
+    deduplicate_transcriptions: SkipJsonSchema[bool] = Field(default=True, exclude=True)
 
     def __init__(
         self,
