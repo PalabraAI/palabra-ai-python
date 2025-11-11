@@ -162,6 +162,7 @@ class TestTranscription:
         trans = Transcription(cfg=mock_config, io=mock_io)
 
         msg = MagicMock(spec=TranscriptionMessage)
+        msg.id_ = "test-msg-1"
         msg.language = MagicMock()
         msg.language.code = "en"
 
@@ -205,6 +206,7 @@ class TestTranscription:
         trans = Transcription(cfg=mock_config, io=mock_io)
 
         msg = MagicMock(spec=TranscriptionMessage)
+        msg.id_ = "test-msg-error"
         msg.language = MagicMock()
         msg.language.code = "en"
 
@@ -315,3 +317,29 @@ class TestTranscription:
 
         # Verify callback would be found (checked in _process_message)
         assert trans._callbacks.get("en-us") == callback
+
+    @pytest.mark.asyncio
+    async def test_process_message_deduplication(self, mock_config, mock_io):
+        """Test that duplicate messages (same ID) are deduplicated"""
+        trans = Transcription(cfg=mock_config, io=mock_io)
+
+        # Create two messages with same ID
+        msg1 = MagicMock(spec=TranscriptionMessage)
+        msg1.id_ = "test-msg-123"
+        msg1.language = MagicMock()
+        msg1.language.code = "en"
+
+        msg2 = MagicMock(spec=TranscriptionMessage)
+        msg2.id_ = "test-msg-123"  # Same ID - duplicate
+        msg2.language = MagicMock()
+        msg2.language.code = "en"
+
+        with patch.object(trans, '_call_callback', new_callable=AsyncMock) as mock_call:
+            await trans._process_message(msg1)
+            await trans._process_message(msg2)  # Duplicate should be ignored
+
+            # Callback should be called only ONCE (first message)
+            mock_call.assert_called_once_with(
+                mock_config.source.on_transcription,
+                msg1
+            )

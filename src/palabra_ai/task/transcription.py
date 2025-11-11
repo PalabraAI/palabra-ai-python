@@ -24,6 +24,7 @@ class Transcription(Task):
     suppress_callback_errors: bool = True
     _out_q: asyncio.Queue | None = field(default=None, init=False)
     _callbacks: dict[str, Callable] = field(default_factory=dict, init=False)
+    _seen_message_ids: set[str] = field(default_factory=set, init=False, repr=False)
 
     def __post_init__(self):
         # Register callback for ALL language variants
@@ -66,6 +67,11 @@ class Transcription(Task):
         try:
             if not isinstance(msg, TranscriptionMessage):
                 return
+
+            # Deduplicate by message ID (WebRTC may send duplicates)
+            if msg.id_ in self._seen_message_ids:
+                return
+            self._seen_message_ids.add(msg.id_)
 
             callback = self._callbacks.get(msg.language.code)
             if not callback:
