@@ -69,9 +69,10 @@ class Transcription(Task):
                 return
 
             # Deduplicate by message ID (WebRTC may send duplicates)
-            if msg.id_ in self._seen_message_ids:
-                return
-            self._seen_message_ids.add(msg.id_)
+            if self.cfg.deduplicate_transcriptions:
+                if msg.id_ in self._seen_message_ids:
+                    return
+                self._seen_message_ids.add(msg.id_)
 
             callback = self._callbacks.get(msg.language.code)
             if not callback:
