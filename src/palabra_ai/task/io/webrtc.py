@@ -127,6 +127,26 @@ class WebrtcIo(Io):
         _dbg.calc_dawn_ts(self.global_start_perf_ts)
         debug(f"Received packet: {data}"[:100])
         msg = Message.decode(data.data)
+
+        # DEBUG: Log VALIDATED messages to track duplicates
+        from datetime import datetime
+
+        if hasattr(msg, "type_") and msg.type_ in (
+            Message.Type.VALIDATED_TRANSCRIPTION,
+            Message.Type.TRANSLATED_TRANSCRIPTION,
+        ):
+            ts = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+            msg_id = getattr(msg, "id_", "NO_ID")
+            msg_text = getattr(msg, "text", "NO_TEXT")[:30]
+            msg_lang = (
+                getattr(msg.language, "code", "NO_LANG")
+                if hasattr(msg, "language")
+                else "NO_LANG"
+            )
+            print(
+                f"[{ts}] DATA_CHANNEL: type={msg.type_} id={msg_id} lang={msg_lang} text={msg_text}..."
+            )
+
         msg._dbg = _dbg
         self.out_msg_foq.publish(msg)
         if isinstance(msg, EosMessage):

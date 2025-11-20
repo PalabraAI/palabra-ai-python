@@ -8,7 +8,7 @@ from palabra_ai.message import (
     Message, KnownRaw, KnownRawType, Dbg,
     EmptyMessage, EndTaskMessage, EosMessage, SetTaskMessage, GetTaskMessage,
     QueueStatusMessage, ErrorMessage, UnknownMessage, PipelineTimingsMessage,
-    TranscriptionMessage, TranscriptionSegment, CurrentTaskMessage,
+    TtsBufferStatsMessage, TranscriptionMessage, TranscriptionSegment, CurrentTaskMessage,
     Channel, Direction
 )
 from palabra_ai.lang import Language, EN, ES
@@ -261,6 +261,107 @@ def test_pipeline_timings_message():
 
     dump = msg.model_dump()
     assert dump == data
+
+
+def test_tts_buffer_stats_message_without_language():
+    """Test TtsBufferStatsMessage without language data (early stage)"""
+    data = {
+        "message_type": "tts_buffer_stats",
+        "data": {
+            "stats": {
+                "timestamp": 1763602383.2865267
+            }
+        }
+    }
+    msg = TtsBufferStatsMessage.model_validate(data)
+    assert msg.type_ == Message.Type.TTS_BUFFER_STATS
+    assert msg.timestamp == 1763602383.2865267
+    assert msg.language is None
+    assert msg.current_queue_level_ms is None
+    assert msg.max_queue_level_ms is None
+
+    dump = msg.model_dump()
+    assert dump["message_type"] == "tts_buffer_stats"
+    assert dump["data"]["timestamp"] == 1763602383.2865267
+
+
+def test_tts_buffer_stats_message_with_language():
+    """Test TtsBufferStatsMessage with language data (active TTS)"""
+    data = {
+        "message_type": "tts_buffer_stats",
+        "data": {
+            "stats": {
+                "es": {
+                    "current_queue_level_ms": 760,
+                    "max_queue_level_ms": 20000
+                },
+                "timestamp": 1763602390.286889
+            }
+        }
+    }
+    msg = TtsBufferStatsMessage.model_validate(data)
+    assert msg.type_ == Message.Type.TTS_BUFFER_STATS
+    assert msg.timestamp == 1763602390.286889
+    assert msg.language.code == "es"
+    assert msg.current_queue_level_ms == 760
+    assert msg.max_queue_level_ms == 20000
+
+    dump = msg.model_dump()
+    assert dump["message_type"] == "tts_buffer_stats"
+    assert dump["data"]["stats"]["es"]["current_queue_level_ms"] == 760
+    assert dump["data"]["stats"]["es"]["max_queue_level_ms"] == 20000
+    assert dump["data"]["stats"]["timestamp"] == 1763602390.286889
+
+
+def test_tts_buffer_stats_message_from_detected_without_language():
+    """Test TtsBufferStatsMessage creation from detected data without language"""
+    kr = KnownRaw(
+        type=KnownRawType.json,
+        data={
+            "message_type": "tts_buffer_stats",
+            "data": {
+                "stats": {
+                    "timestamp": 1763602383.2865267
+                }
+            }
+        }
+    )
+    msg = Message.from_detected(kr)
+    assert isinstance(msg, TtsBufferStatsMessage)
+    assert msg.type_ == Message.Type.TTS_BUFFER_STATS
+    assert msg.timestamp == 1763602383.2865267
+    assert msg.language is None
+
+
+def test_tts_buffer_stats_message_from_detected_with_language():
+    """Test TtsBufferStatsMessage creation from detected data with language"""
+    kr = KnownRaw(
+        type=KnownRawType.json,
+        data={
+            "message_type": "tts_buffer_stats",
+            "data": {
+                "stats": {
+                    "en": {
+                        "current_queue_level_ms": 1500,
+                        "max_queue_level_ms": 20000
+                    },
+                    "timestamp": 1763602395.123456
+                }
+            }
+        }
+    )
+    msg = Message.from_detected(kr)
+    assert isinstance(msg, TtsBufferStatsMessage)
+    assert msg.type_ == Message.Type.TTS_BUFFER_STATS
+    assert msg.language.code == "en"
+    assert msg.current_queue_level_ms == 1500
+    assert msg.max_queue_level_ms == 20000
+    assert msg.timestamp == 1763602395.123456
+
+
+def test_tts_buffer_stats_in_allowed_types():
+    """Test that TTS_BUFFER_STATS is in ALLOWED_TYPES"""
+    assert Message.Type.TTS_BUFFER_STATS in Message.ALLOWED_TYPES
 
 
 def test_transcription_message():

@@ -17,7 +17,7 @@ from palabra_ai.benchmark.report import format_report
 from palabra_ai.benchmark.report import INPUT_CHUNK_DURATION_S
 from palabra_ai.benchmark.report import Report
 from palabra_ai.benchmark.report import save_benchmark_files
-from palabra_ai.config import WsMode
+from palabra_ai.config import WsMode, WebrtcMode
 from palabra_ai.lang import Language
 from palabra_ai.task.adapter.dummy import DummyWriter
 from palabra_ai.task.adapter.file import FileReader
@@ -95,9 +95,10 @@ def main():
             config.benchmark = True
             config.allowed_message_types = BENCHMARK_ALLOWED_MESSAGE_TYPES
 
-            # Force benchmark mode with 100ms buffer regardless of config
-            # Config loaded from JSON defaults to 320ms chunks, but benchmark needs 100ms for optimal performance
-            config.mode = WsMode(input_chunk_duration_ms=INPUT_CHUNK_DURATION_S * 1000)
+            # Preserve WebRTC mode from config, otherwise use WsMode with 100ms chunks
+            # WebRTC uses default 320ms chunks, WsMode benchmark uses 100ms for optimal performance
+            if not isinstance(config.mode, WebrtcMode):
+                config.mode = WsMode(input_chunk_duration_ms=INPUT_CHUNK_DURATION_S * 1000)
 
             source_lang = config.source.lang.code
             target_lang = config.targets[0].lang.code
