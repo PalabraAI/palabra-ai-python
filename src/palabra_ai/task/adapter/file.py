@@ -241,7 +241,10 @@ class FileReader(Reader):
                 if self._iterator is None:
                     break
 
-                frame = await asyncio.to_thread(next, self._iterator)
+                # Add timeout to prevent Python 3.11 hang (asyncio.to_thread bug with StopIteration)
+                frame = await asyncio.wait_for(
+                    asyncio.to_thread(next, self._iterator), timeout=DECODE_TIMEOUT
+                )
 
                 # Resample frame to target format
                 for resampled in self._resampler.resample(frame):
@@ -292,6 +295,15 @@ class FileReader(Reader):
                     self._iterator = None
                     self._source_exhausted = True
                     break
+            except TimeoutError:
+                # Python 3.11 bug: asyncio.to_thread can hang on exhausted iterators
+                # Timeout means iterator is likely exhausted or stuck
+                error(
+                    f"{self.name}: timeout waiting for next frame (iterator likely exhausted)"
+                )
+                self._iterator = None
+                self._source_exhausted = True
+                break
             except Exception as e:
                 # CRITICAL: Handle resampler/conversion exceptions (corrupt frames, etc)
                 # Must set _source_exhausted to guarantee padding is triggered
