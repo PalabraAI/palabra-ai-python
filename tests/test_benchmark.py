@@ -1382,15 +1382,15 @@ def test_tts_buffer_breakdown_in_report():
 
     # Verify TTS BUFFER BREAKDOWN section is present
     assert "TTS BUFFER BREAKDOWN" in report_text, "Report should contain TTS BUFFER BREAKDOWN section"
-    assert "Queue Level (ms)" in report_text, "Section should have Queue Level column"
-    assert "Max Level (ms)" in report_text, "Section should have Max Level column"
+    assert "Queue Level (s)" in report_text, "Section should have Queue Level column"
+    assert "Max Level (s)" in report_text, "Section should have Max Level column"
     assert "Active TTS" in report_text, "Section should show Active TTS status"
     assert "Idle" in report_text, "Section should show Idle status"
 
-    # Verify some data points appear
-    assert "500" in report_text, "Should show queue level 500"
-    assert "1200" in report_text, "Should show queue level 1200"
-    assert "20000" in report_text, "Should show max level 20000"
+    # Verify some data points appear (in seconds: 500ms = 0.50s, 1200ms = 1.20s, 20000ms = 20.00s)
+    assert "0.50" in report_text, "Should show queue level 0.50s"
+    assert "1.20" in report_text, "Should show queue level 1.20s"
+    assert "20.00" in report_text, "Should show max level 20.00s"
 
 
 def test_tts_buffer_breakdown_not_shown_when_empty():
