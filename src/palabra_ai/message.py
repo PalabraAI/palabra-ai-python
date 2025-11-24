@@ -115,6 +115,7 @@ class Message(BaseModel):
         VALIDATED_TRANSCRIPTION = "validated_transcription"
         PARTIAL_TRANSLATED_TRANSCRIPTION = "partial_translated_transcription"
         PIPELINE_TIMINGS = "pipeline_timings"
+        TTS_BUFFER_STATS = "tts_buffer_stats"
         ERROR = "error"  # For error messages
         END_TASK = "end_task"  # For end_task messages
         SET_TASK = "set_task"  # For set_task messages
@@ -134,7 +135,10 @@ class Message(BaseModel):
 
     IN_PROCESS_TYPES: ClassVar[set[Type]] = TRANSCRIPTION_TYPES
 
-    ALLOWED_TYPES: ClassVar[set[Type]] = {Type.PIPELINE_TIMINGS} | TRANSCRIPTION_TYPES
+    ALLOWED_TYPES: ClassVar[set[Type]] = {
+        Type.PIPELINE_TIMINGS,
+        Type.TTS_BUFFER_STATS,
+    } | TRANSCRIPTION_TYPES
 
     STR_TRANSCRIPTION_TYPES: ClassVar[set[str]] = {
         mt.value for mt in TRANSCRIPTION_TYPES
@@ -167,6 +171,7 @@ class Message(BaseModel):
         "EmptyMessage",
         "QueueStatusMessage",
         "PipelineTimingsMessage",
+        "TtsBufferStatsMessage",
         "TranscriptionMessage",
         "UnknownMessage",
         "ErrorMessage",
@@ -205,6 +210,10 @@ class Message(BaseModel):
                 # Pipeline timings
                 case {"message_type": Message.Type.PIPELINE_TIMINGS.value, "data": _}:
                     return PipelineTimingsMessage.create(known_raw)
+
+                # TTS buffer stats
+                case {"message_type": Message.Type.TTS_BUFFER_STATS.value, "data": _}:
+                    return TtsBufferStatsMessage.create(known_raw)
 
                 case {"message_type": Message.Type.CURRENT_TASK.value, "data": _}:
                     return CurrentTaskMessage.create(known_raw)
@@ -505,6 +514,60 @@ class PipelineTimingsMessage(Message):
                 "transcription_id": self.transcription_id,
                 "timings": self.timings,
             },
+        }
+
+
+class TtsBufferStatsMessage(Message):
+    """TTS buffer statistics message"""
+
+    type_: Message.Type = Message.Type.TTS_BUFFER_STATS
+    timestamp: float
+    language: Language | None = None
+    current_queue_level_ms: int | None = None
+    max_queue_level_ms: int | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def extract_from_nested(cls, values: dict[str, Any]) -> dict[str, Any]:
+        if "data" in values and "message_type" in values:
+            data = values["data"]
+            stats = data.get("stats", {})
+
+            result = {
+                "message_type": values["message_type"],
+                "timestamp": stats.get("timestamp", data.get("timestamp", 0)),
+            }
+
+            lang_keys = [k for k in stats.keys() if k != "timestamp"]
+            if lang_keys:
+                lang_code = lang_keys[0]
+                lang_stats = stats[lang_code]
+                result["language"] = Language.get_or_create(lang_code)
+                result["current_queue_level_ms"] = lang_stats.get(
+                    "current_queue_level_ms"
+                )
+                result["max_queue_level_ms"] = lang_stats.get("max_queue_level_ms")
+
+            return result
+        return values
+
+    def model_dump(self, **kwargs) -> dict[str, Any]:
+        data = {"timestamp": self.timestamp}
+
+        if self.language and self.current_queue_level_ms is not None:
+            data["stats"] = {
+                self.language.code: {
+                    "current_queue_level_ms": self.current_queue_level_ms,
+                    "max_queue_level_ms": self.max_queue_level_ms,
+                }
+            }
+            data["stats"]["timestamp"] = self.timestamp
+        else:
+            data["stats"] = {"timestamp": self.timestamp}
+
+        return {
+            "message_type": self.type_.value,
+            "data": data,
         }
 
 

@@ -25,7 +25,7 @@ from palabra_ai.message import IoEvent
 
 from palabra_ai.model import IoData
 
-from palabra_ai.util.orjson import to_json
+from palabra_ai.util.orjson import to_json, from_json
 
 INPUT_CHUNK_DURATION_S = 0.1 # 100ms
 FOCUSED = re.compile(r"^(?!.*_part_[1-9]\d*).*$") # without part_1+ suffix
@@ -149,6 +149,7 @@ class Report:
     metrics_summary: dict[str, dict[str, float]] = field(default_factory=dict) # metric_name -> {min, max, avg, p50, p90, p95}
     set_task_e: IoEvent | None = None
     current_task_e: IoEvent | None = None
+    tts_buffer_events: list[IoEvent] = field(default_factory=list)
 
     @staticmethod
     def predecessor(d: dict[float, T], x: float) -> tuple[float, T] | None:
@@ -196,6 +197,7 @@ class Report:
         extra_parts: list[IoEvent] = []
         in_evs: list[IoEvent] = []
         out_evs: list[IoEvent] = []
+        tts_buffer_events: list[IoEvent] = []
         set_task_e: IoEvent|None = None
         current_task_e: IoEvent|None = None
         for e in sorted(io_data.events, key=lambda x: x.head.idx):
@@ -217,14 +219,24 @@ class Report:
                 if current_task_e is not None:
                     raise ValueError("Multiple current_task events found, old: {}, new: {}".format(current_task_e, e))
                 current_task_e = e
+            elif e.mtype == "tts_buffer_stats":
+                tts_buffer_events.append(e)
 
         focused_by_tid = defaultdict(list)
         for fe in focused:
             focused_by_tid[fe.tid].append(fe)
 
-        in_evs_by_dawn = {e.head.dawn_ts:e for e in in_evs}
-        in_audio_canvas, in_audio_stat = cls.playback(in_evs, io_data.in_sr, io_data.channels)
-        out_audio_canvas, out_audio_stat = cls.playback(out_evs, io_data.out_sr, io_data.channels)
+        # WebRTC mode: no audio playback (no input_audio_data/output_audio_data events)
+        if io_data.mode == "webrtc":
+            in_audio_canvas = np.zeros(0, dtype=np.int16)
+            out_audio_canvas = np.zeros(0, dtype=np.int16)
+            in_audio_stat = None
+            out_audio_stat = None
+            in_evs_by_dawn = {}
+        else:
+            in_evs_by_dawn = {e.head.dawn_ts:e for e in in_evs}
+            in_audio_canvas, in_audio_stat = cls.playback(in_evs, io_data.in_sr, io_data.channels)
+            out_audio_canvas, out_audio_stat = cls.playback(out_evs, io_data.out_sr, io_data.channels)
 
         for raw_tid, fes in focused_by_tid.items():
             mtypes = {}
@@ -237,47 +249,76 @@ class Report:
             translated = mtypes.get("translated_transcription")
             out_audio = mtypes.get("output_audio_data")
 
-            # Require validated, translated, out_audio + (partial OR validated)
-            if not all([validated, translated, out_audio]):
-                continue
+            # WebRTC mode: only need validated + translated (no audio)
+            # WS mode: need validated + translated + out_audio
+            if io_data.mode == "webrtc":
+                if not all([validated, translated]):
+                    continue
+            else:
+                if not all([validated, translated, out_audio]):
+                    continue
 
             # Handle missing partial_transcription by falling back to validated_transcription
             if not partial:
-                # Use validated_transcription as fallback for timing calculations
                 timing_source = validated
-                partial_text = ""  # No partial text available
-                partial_ts = None  # No partial timestamp available
+                partial_text = ""
+                partial_ts = None
             else:
                 timing_source = partial
                 partial_text = partial.body["data"]["transcription"]["text"]
                 partial_ts = partial.head.dawn_ts
 
-            asr_start = timing_source.body["data"]["transcription"]["segments"][0]["start"]
-            nearest_in = cls.predecessor(in_evs_by_dawn, asr_start)
-            if not nearest_in:
-                continue
-            _, nearest_in_ev = nearest_in
-            local_start_ts = nearest_in_ev.head.dawn_ts
+            # WebRTC mode: use validated timestamp as local_start (no input audio)
+            # WS mode: find nearest input audio chunk
+            if io_data.mode == "webrtc":
+                local_start_ts = validated.head.dawn_ts
+                local_start_chunk_idx = 0
+            else:
+                asr_start = timing_source.body["data"]["transcription"]["segments"][0]["start"]
+                nearest_in = cls.predecessor(in_evs_by_dawn, asr_start)
+                if not nearest_in:
+                    continue
+                _, nearest_in_ev = nearest_in
+                local_start_ts = nearest_in_ev.head.dawn_ts
+                local_start_chunk_idx = nearest_in_ev.head.idx
 
-            playback_tts_ts = out_audio_stat.tids_with_actual_tts_playback.get(raw_tid)
-
-            sentences[raw_tid] = Sentence(
-                transcription_id=raw_tid,
-                local_start_ts=local_start_ts,
-                local_start_chunk_idx=nearest_in_ev.head.idx,
-                partial_ts=partial_ts,
-                validated_ts=validated.head.dawn_ts,
-                translated_ts=translated.head.dawn_ts,
-                tts_api_ts=out_audio.head.dawn_ts,
-                partial_text=partial_text,
-                validated_text=validated.body["data"]["transcription"]["text"],
-                translated_text=translated.body["data"]["transcription"]["text"],
-                metric_partial=partial_ts - local_start_ts if partial_ts else None,
-                metric_validated=validated.head.dawn_ts - local_start_ts,
-                metric_translated=translated.head.dawn_ts - local_start_ts,
-                metric_tts_api=out_audio.head.dawn_ts - local_start_ts,
-                metric_tts_playback=(playback_tts_ts - local_start_ts) if playback_tts_ts else None,
-            )
+            # WebRTC mode: no TTS metrics (no output audio)
+            # WS mode: calculate TTS metrics
+            if io_data.mode == "webrtc":
+                sentences[raw_tid] = Sentence(
+                    transcription_id=raw_tid,
+                    local_start_ts=local_start_ts,
+                    local_start_chunk_idx=local_start_chunk_idx,
+                    partial_ts=partial_ts,
+                    validated_ts=validated.head.dawn_ts,
+                    translated_ts=translated.head.dawn_ts,
+                    partial_text=partial_text,
+                    validated_text=validated.body["data"]["transcription"]["text"],
+                    translated_text=translated.body["data"]["transcription"]["text"],
+                    metric_partial=partial_ts - local_start_ts if partial_ts else None,
+                    metric_validated=validated.head.dawn_ts - local_start_ts,
+                    metric_translated=translated.head.dawn_ts - local_start_ts,
+                    # TTS metrics stay None for WebRTC
+                )
+            else:
+                playback_tts_ts = out_audio_stat.tids_with_actual_tts_playback.get(raw_tid)
+                sentences[raw_tid] = Sentence(
+                    transcription_id=raw_tid,
+                    local_start_ts=local_start_ts,
+                    local_start_chunk_idx=local_start_chunk_idx,
+                    partial_ts=partial_ts,
+                    validated_ts=validated.head.dawn_ts,
+                    translated_ts=translated.head.dawn_ts,
+                    tts_api_ts=out_audio.head.dawn_ts,
+                    partial_text=partial_text,
+                    validated_text=validated.body["data"]["transcription"]["text"],
+                    translated_text=translated.body["data"]["transcription"]["text"],
+                    metric_partial=partial_ts - local_start_ts if partial_ts else None,
+                    metric_validated=validated.head.dawn_ts - local_start_ts,
+                    metric_translated=translated.head.dawn_ts - local_start_ts,
+                    metric_tts_api=out_audio.head.dawn_ts - local_start_ts,
+                    metric_tts_playback=(playback_tts_ts - local_start_ts) if playback_tts_ts else None,
+                )
 
         # Build registry of base_tid -> local_start_ts for parent sentences
         parent_timestamps = {}
@@ -332,7 +373,7 @@ class Report:
             if values:
                 metrics_summary[metric_name] = calculate_stats(values)
 
-        return cls(sentences=sentences, in_audio_stat=in_audio_stat, out_audio_stat=out_audio_stat, metrics_summary=metrics_summary, set_task_e=set_task_e, current_task_e=current_task_e), in_audio_canvas, out_audio_canvas
+        return cls(sentences=sentences, in_audio_stat=in_audio_stat, out_audio_stat=out_audio_stat, metrics_summary=metrics_summary, set_task_e=set_task_e, current_task_e=current_task_e, tts_buffer_events=tts_buffer_events), in_audio_canvas, out_audio_canvas
 
 
 def create_histogram(values: list[float], bins: int = 20, width: int = 50) -> str:
@@ -497,7 +538,14 @@ def format_report(report: Report, io_data: IoData, source_lang: str, target_lang
         lines.append("SENTENCES BREAKDOWN")
         lines.append("-" * 80)
         table = PrettyTable()
-        table.field_names = ["Start", "ID", "Validated", "Translated", "Part", "Valid", "Trans", "TTS API", "TTS Play"]
+
+        # WebRTC mode: hide TTS columns (no audio playback)
+        is_webrtc = io_data.mode == "webrtc"
+        if is_webrtc:
+            table.field_names = ["Start", "ID", "Validated", "Translated", "Part", "Valid", "Trans"]
+        else:
+            table.field_names = ["Start", "ID", "Validated", "Translated", "Part", "Valid", "Trans", "TTS API", "TTS Play"]
+
         table.align["ID"] = "l"
         table.align["Validated"] = "l"
         table.align["Translated"] = "l"
@@ -510,7 +558,7 @@ def format_report(report: Report, io_data: IoData, source_lang: str, target_lang
 
             if sentence.has_metrics:
                 start_time = sentence.local_start_ts - global_start
-                table.add_row([
+                row = [
                     f"{start_time:.1f}s",
                     tid.display,
                     truncate_text(sentence.validated_text),
@@ -518,18 +566,95 @@ def format_report(report: Report, io_data: IoData, source_lang: str, target_lang
                     f"{sentence.metric_partial:.2f}" if sentence.metric_partial is not None else "-",
                     f"{sentence.metric_validated:.2f}" if sentence.metric_validated else "-",
                     f"{sentence.metric_translated:.2f}" if sentence.metric_translated else "-",
-                    f"{sentence.metric_tts_api:.2f}" if sentence.metric_tts_api else "-",
-                    f"{sentence.metric_tts_playback:.2f}" if sentence.metric_tts_playback else "-"
-                ])
+                ]
+                if not is_webrtc:
+                    row.extend([
+                        f"{sentence.metric_tts_api:.2f}" if sentence.metric_tts_api else "-",
+                        f"{sentence.metric_tts_playback:.2f}" if sentence.metric_tts_playback else "-"
+                    ])
+                table.add_row(row)
             else:
                 # Text-only row for extra_parts (_part_1+)
-                table.add_row([
+                row = [
                     "",  # no start time
                     tid.display,
                     truncate_text(sentence.validated_text),
                     truncate_text(sentence.translated_text),
-                    "", "", "", "", ""  # no metrics
-                ])
+                    "", "", ""  # no metrics
+                ]
+                if not is_webrtc:
+                    row.extend(["", ""])  # TTS columns empty
+                table.add_row(row)
+
+        lines.append(str(table))
+        lines.append("")
+
+    # TTS Buffer breakdown (WebRTC only - server-side buffer stats)
+    if report.tts_buffer_events and io_data.mode == "webrtc":
+        lines.append("TTS BUFFER BREAKDOWN")
+        lines.append("-" * 80)
+        table = PrettyTable()
+        table.field_names = ["Time", "Language", "Queue Level (s)", "Max Level (s)", "Status"]
+        table.align["Time"] = "r"
+        table.align["Language"] = "c"
+        table.align["Queue Level (s)"] = "r"
+        table.align["Max Level (s)"] = "r"
+        table.align["Status"] = "l"
+
+        # Get global start from first sentence or first valid tts event
+        if report.sentences:
+            sorted_sentences_for_buffer = sorted(report.sentences.items(), key=lambda x: x[1].local_start_ts)
+            global_start_for_buffer = sorted_sentences_for_buffer[0][1].local_start_ts
+        else:
+            # Find first event with valid dawn_ts (WebRTC: some events may arrive before first audio frame)
+            global_start_for_buffer = None
+            for evt in report.tts_buffer_events:
+                if evt.head.dawn_ts is not None:
+                    global_start_for_buffer = evt.head.dawn_ts
+                    break
+            if global_start_for_buffer is None:
+                # No valid timestamps, skip section
+                return "\n".join(lines)
+
+        for event in report.tts_buffer_events:
+            # Skip events with no dawn_ts (WebRTC: arrived before first audio frame sent)
+            if event.head.dawn_ts is None:
+                continue
+            # Calculate relative time
+            relative_time = event.head.dawn_ts - global_start_for_buffer
+            # Skip events before global start (negative time)
+            if relative_time < 0:
+                continue
+
+            # Extract fields directly from event.body
+            body = event.body if isinstance(event.body, dict) else from_json(event.body)
+            stats = body.get("data", {}).get("stats", {})
+
+            # Extract timestamp and language data
+            language = None
+            queue_level = None
+            max_level = None
+
+            for key, value in stats.items():
+                if key != "timestamp" and isinstance(value, dict):
+                    language = key
+                    queue_level = value.get("current_queue_level_ms")
+                    max_level = value.get("max_queue_level_ms")
+                    break
+
+            # Format for display
+            language_str = language if language else "-"
+            queue_level_str = f"{queue_level / 1000:.2f}" if queue_level is not None else "-"
+            max_level_str = f"{max_level / 1000:.2f}" if max_level is not None else "-"
+            status = "Active TTS" if language else "Idle"
+
+            table.add_row([
+                f"{relative_time:.1f}s",
+                language_str,
+                queue_level_str,
+                max_level_str,
+                status
+            ])
 
         lines.append(str(table))
         lines.append("")

@@ -14,6 +14,7 @@ from palabra_ai.enum import Channel, Direction, Kind
 from palabra_ai.message import (
     Dbg,
     EosMessage,
+    IoEvent,
     Message,
 )
 from palabra_ai.task.io.base import Io
@@ -117,18 +118,42 @@ class WebrtcIo(Io):
             debug(f"Closed audio stream for {lang!r}")
 
     def on_data_received(self, data: rtc.DataPacket):
+        perf_ts = get_perf_ts()
         _dbg = Dbg(
             Kind.MESSAGE,
             Channel.WEBRTC,
             Direction.OUT,
             idx=next(self._idx),
             num=next(self._out_msg_num),
+            perf_ts=perf_ts,
         )
         _dbg.calc_dawn_ts(self.global_start_perf_ts)
         debug(f"Received packet: {data}"[:100])
         msg = Message.decode(data.data)
+
+        # DEBUG: Log VALIDATED messages to track duplicates
+        from datetime import datetime
+
+        if hasattr(msg, "type_") and msg.type_ in (
+            Message.Type.VALIDATED_TRANSCRIPTION,
+            Message.Type.TRANSLATED_TRANSCRIPTION,
+        ):
+            ts = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+            msg_id = getattr(msg, "id_", "NO_ID")
+            msg_text = getattr(msg, "text", "NO_TEXT")[:30]
+            msg_lang = (
+                getattr(msg.language, "code", "NO_LANG")
+                if hasattr(msg, "language")
+                else "NO_LANG"
+            )
+            print(
+                f"[{ts}] DATA_CHANNEL: type={msg.type_} id={msg_id} lang={msg_lang} text={msg_text}..."
+            )
+
         msg._dbg = _dbg
         self.out_msg_foq.publish(msg)
+        # Log to io_events for benchmark
+        self.io_events.append(IoEvent(_dbg, data.data))
         if isinstance(msg, EosMessage):
             debug(f"End of stream received: {msg}")
             +self.eof  # noqa
@@ -143,7 +168,8 @@ class WebrtcIo(Io):
         await self.room.local_participant.publish_data(msg_data, reliable=True)
 
     async def send_frame(self, frame: AudioFrame, raw: bytes | None = None) -> None:
-        self.init_global_start_ts()
+        if self.global_start_perf_ts is None:
+            self.init_global_start_ts()
         return await self.in_audio_source.capture_frame(frame.to_rtc())
 
     async def boot(self):

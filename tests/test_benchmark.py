@@ -1286,3 +1286,167 @@ def test_fallback_non_container():
     # Not expected by signature, but ensure graceful behavior
     got = flatten_container_to_paths(42, prefix="weird")  # type: ignore[arg-type]
     assert got == [("weird", 42)]
+
+
+def test_tts_buffer_breakdown_in_report():
+    """Test that TTS BUFFER BREAKDOWN section appears in report when tts_buffer_events exist"""
+    from palabra_ai.benchmark.report import Report, format_report
+    from palabra_ai.model import IoData
+    from palabra_ai.message import IoEvent, Dbg, Kind
+    from palabra_ai.config import Config
+    from palabra_ai.lang import Language
+    from palabra_ai import SourceLang, TargetLang
+    from palabra_ai.util.orjson import to_json
+    import base64
+    import numpy as np
+
+    def make_event(idx, tid, mtype, dawn_ts, text="test", language=None, queue_level=None, max_level=None):
+        if mtype == "tts_buffer_stats":
+            stats_data = {"timestamp": dawn_ts}
+            if language and queue_level is not None and max_level is not None:
+                stats_data[language] = {
+                    "current_queue_level_ms": queue_level,
+                    "max_queue_level_ms": max_level
+                }
+            body_dict = {
+                "message_type": mtype,
+                "data": {"stats": stats_data}
+            }
+        elif mtype in ("input_audio_data", "output_audio_data"):
+            audio_samples = np.zeros(160, dtype=np.int16)
+            audio_b64 = base64.b64encode(audio_samples.tobytes()).decode('utf-8')
+            if mtype == "input_audio_data":
+                body_dict = {"message_type": mtype, "data": {"data": audio_b64}}
+            else:
+                body_dict = {"message_type": mtype, "data": {"data": audio_b64, "transcription_id": tid}}
+        else:
+            body_dict = {
+                "message_type": mtype,
+                "data": {
+                    "transcription": {
+                        "text": text,
+                        "segments": [{"start": dawn_ts, "end": dawn_ts + 1.0}],
+                        "transcription_id": tid
+                    }
+                }
+            }
+
+        return IoEvent(
+            head=Dbg(kind=Kind.MESSAGE, ch=None, dir=None, idx=idx, dawn_ts=dawn_ts, dur_s=0.1),
+            body=to_json(body_dict),
+            tid=None,
+            mtype=None
+        )
+
+    base_ts = 0.0
+    events = [
+        # Input and transcription events
+        make_event(0, None, "input_audio_data", base_ts),
+        make_event(10, "s1", "partial_transcription", base_ts + 0.5, "Hello"),
+        make_event(11, "s1", "validated_transcription", base_ts + 0.6, "Hello"),
+        make_event(12, "s1", "translated_transcription", base_ts + 0.7, "Hola"),
+        make_event(13, "s1", "output_audio_data", base_ts + 0.8),
+
+        # TTS buffer stats events
+        make_event(100, None, "tts_buffer_stats", base_ts + 1.0, language="es", queue_level=500, max_level=20000),
+        make_event(101, None, "tts_buffer_stats", base_ts + 2.0, language="es", queue_level=1200, max_level=20000),
+        make_event(102, None, "tts_buffer_stats", base_ts + 3.0),  # Idle state
+    ]
+
+    io_data = IoData(
+        start_perf_ts=base_ts,
+        start_utc_ts=base_ts,
+        in_sr=16000,
+        out_sr=24000,
+        mode="webrtc",
+        channels=1,
+        events=events,
+        count_events=len(events)
+    )
+
+    # Parse the report
+    report, in_canvas, out_canvas = Report.parse(io_data)
+
+    # Verify tts_buffer_events were collected
+    assert len(report.tts_buffer_events) == 3, f"Expected 3 tts_buffer_events, got {len(report.tts_buffer_events)}"
+
+    # Create config
+    config = Config(
+        source=SourceLang(Language.get_or_create("en"), None),
+        targets=[TargetLang(Language.get_or_create("es"), None)],
+        benchmark=True
+    )
+
+    # Format report
+    report_text = format_report(report, io_data, "en", "es", "test.wav", "out.wav", config)
+
+    # Verify TTS BUFFER BREAKDOWN section is present
+    assert "TTS BUFFER BREAKDOWN" in report_text, "Report should contain TTS BUFFER BREAKDOWN section"
+    assert "Queue Level (s)" in report_text, "Section should have Queue Level column"
+    assert "Max Level (s)" in report_text, "Section should have Max Level column"
+    assert "Active TTS" in report_text, "Section should show Active TTS status"
+    assert "Idle" in report_text, "Section should show Idle status"
+
+    # Verify some data points appear (in seconds: 500ms = 0.50s, 1200ms = 1.20s, 20000ms = 20.00s)
+    assert "0.50" in report_text, "Should show queue level 0.50s"
+    assert "1.20" in report_text, "Should show queue level 1.20s"
+    assert "20.00" in report_text, "Should show max level 20.00s"
+
+
+def test_tts_buffer_breakdown_not_shown_when_empty():
+    """Test that TTS BUFFER BREAKDOWN section is not shown when no tts_buffer_events"""
+    from palabra_ai.benchmark.report import Report, format_report
+    from palabra_ai.model import IoData
+    from palabra_ai.message import IoEvent, Dbg, Kind
+    from palabra_ai.config import Config
+    from palabra_ai.lang import Language
+    from palabra_ai import SourceLang, TargetLang
+    from palabra_ai.util.orjson import to_json
+    import base64
+    import numpy as np
+
+    def make_event(idx, tid, mtype, dawn_ts, text="test"):
+        audio_samples = np.zeros(160, dtype=np.int16)
+        audio_b64 = base64.b64encode(audio_samples.tobytes()).decode('utf-8')
+        if mtype == "input_audio_data":
+            body_dict = {"message_type": mtype, "data": {"data": audio_b64}}
+        else:
+            body_dict = {"message_type": mtype, "data": {"data": audio_b64, "transcription_id": tid}}
+
+        return IoEvent(
+            head=Dbg(kind=Kind.MESSAGE, ch=None, dir=None, idx=idx, dawn_ts=dawn_ts, dur_s=0.1),
+            body=to_json(body_dict),
+            tid=None,
+            mtype=None
+        )
+
+    base_ts = 0.0
+    events = [
+        make_event(0, None, "input_audio_data", base_ts),
+        make_event(1, "s1", "output_audio_data", base_ts + 0.1),
+    ]
+
+    io_data = IoData(
+        start_perf_ts=base_ts,
+        start_utc_ts=base_ts,
+        in_sr=16000,
+        out_sr=24000,
+        mode="ws",
+        channels=1,
+        events=events,
+        count_events=len(events)
+    )
+
+    report, _, _ = Report.parse(io_data)
+    assert len(report.tts_buffer_events) == 0, "Should have no tts_buffer_events"
+
+    config = Config(
+        source=SourceLang(Language.get_or_create("en"), None),
+        targets=[TargetLang(Language.get_or_create("es"), None)],
+        benchmark=True
+    )
+
+    report_text = format_report(report, io_data, "en", "es", "test.wav", "out.wav", config)
+
+    # Verify TTS BUFFER BREAKDOWN section is NOT present
+    assert "TTS BUFFER BREAKDOWN" not in report_text, "Report should NOT contain TTS BUFFER BREAKDOWN when no events"

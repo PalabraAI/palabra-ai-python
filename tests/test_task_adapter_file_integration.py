@@ -46,7 +46,6 @@ def create_synthetic_wav(
         wav_file.writeframes(audio_int16.tobytes())
 
 
-@pytest.mark.skip(reason="Skipping integration tests to identify CI hang")
 class TestFileReaderIntegration:
     """Integration tests with real audio files and ffmpeg"""
 
@@ -81,8 +80,9 @@ class TestFileReaderIntegration:
         total_bytes = 0
         padding_bytes = 0
         padding_started = False
+        max_iterations = 1000  # Safety limit to prevent infinite loop on CI
 
-        while True:
+        for _ in range(max_iterations):
             chunk = await reader.read(1024)
             if chunk is None:
                 break
@@ -95,6 +95,8 @@ class TestFileReaderIntegration:
                 padding_bytes += len(chunk)
 
             total_bytes += len(chunk)
+        else:
+            pytest.fail(f"Read loop exceeded {max_iterations} iterations without EOF")
 
         # 5. Verify
         assert reader.eof.is_set()
@@ -136,11 +138,14 @@ class TestFileReaderIntegration:
 
         # Read all
         total_bytes = 0
-        while True:
+        max_iterations = 1000  # Safety limit
+        for _ in range(max_iterations):
             chunk = await reader.read(1024)
             if chunk is None:
                 break
             total_bytes += len(chunk)
+        else:
+            pytest.fail(f"Read loop exceeded {max_iterations} iterations without EOF")
 
         # Verify
         assert reader.eof.is_set()
@@ -171,10 +176,13 @@ class TestFileReaderIntegration:
 
         with patch("palabra_ai.task.adapter.base.success") as mock_success:
             # Read until padding
-            while True:
+            max_iterations = 1000  # Safety limit
+            for _ in range(max_iterations):
                 chunk = await reader.read(1024)
                 if chunk is None:
                     break
+            else:
+                pytest.fail(f"Read loop exceeded {max_iterations} iterations without EOF")
 
             # Verify success() was called
             mock_success.assert_called_once()
@@ -206,11 +214,14 @@ class TestFileReaderIntegration:
         # Simulate concurrent reads from multiple coroutines
         async def read_worker(worker_id):
             bytes_read = 0
-            while True:
+            max_iterations = 1000  # Safety limit
+            for _ in range(max_iterations):
                 chunk = await reader.read(512)
                 if chunk is None:
                     break
                 bytes_read += len(chunk)
+            else:
+                raise TimeoutError(f"Worker {worker_id} exceeded {max_iterations} iterations")
             return worker_id, bytes_read
 
         # Run 3 concurrent workers
@@ -278,13 +289,16 @@ class TestFileReaderIntegration:
         # Read until EOF
         total_bytes = 0
         padding_started = False
-        while True:
+        max_iterations = 1000  # Safety limit
+        for _ in range(max_iterations):
             chunk = await reader.read(1024)
             if chunk is None:
                 break
             if reader._padding_started and not padding_started:
                 padding_started = True
             total_bytes += len(chunk)
+        else:
+            pytest.fail(f"Read loop exceeded {max_iterations} iterations without EOF")
 
         # CRITICAL: Verify padding was triggered despite exception
         assert padding_started, "Padding should have started even after resampler exception"

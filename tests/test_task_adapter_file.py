@@ -175,6 +175,63 @@ class TestFileReader:
             assert any("processed" in call and "5.0s" in call for call in debug_calls)
             assert any("50.0%" in call for call in debug_calls)
 
+    def test_no_resampling_for_16khz_preprocessed(self):
+        """Test that 16kHz files are not resampled in preprocessed mode"""
+        from pathlib import Path
+        from palabra_ai.internal.audio import simple_preprocess_audio_file
+
+        # Use real 16kHz file
+        test_file = Path("examples/speech/nbc.wav")
+        if not test_file.exists():
+            pytest.skip("Test file examples/speech/nbc.wav not found")
+
+        with patch('palabra_ai.internal.audio.debug') as mock_debug:
+            data, metadata = simple_preprocess_audio_file(
+                file_path=test_file,
+                target_rate=16000,
+                normalize=False,
+                eos_silence_s=0.0
+            )
+
+            # Verify no resampling occurred
+            assert metadata['resampled'] is False
+            assert metadata['original_rate'] == 16000
+            assert metadata['final_rate'] == 16000
+
+            # Verify debug log
+            debug_calls = [str(call) for call in mock_debug.call_args_list]
+            assert any("Audio already at 16000Hz" in call for call in debug_calls)
+
+    def test_no_resampling_for_16khz_streaming(self):
+        """Test that 16kHz files are not resampled in streaming mode"""
+        from pathlib import Path
+        from palabra_ai.internal.audio import simple_setup_streaming_audio
+
+        # Use real 16kHz file
+        test_file = Path("examples/speech/nbc.wav")
+        if not test_file.exists():
+            pytest.skip("Test file examples/speech/nbc.wav not found")
+
+        with patch('palabra_ai.internal.audio.debug') as mock_debug:
+            container, resampler, final_rate, metadata = simple_setup_streaming_audio(
+                file_path=test_file,
+                target_rate=16000,
+                timeout=10.0
+            )
+
+            try:
+                # Verify no resampling occurred
+                assert metadata['resampled'] is False
+                assert metadata['original_rate'] == 16000
+                assert metadata['final_rate'] == 16000
+                assert final_rate == 16000
+
+                # Verify debug log
+                debug_calls = [str(call) for call in mock_debug.call_args_list]
+                assert any("16000Hz -> 16000Hz (resample: False)" in call for call in debug_calls)
+            finally:
+                container.close()
+
 
 class TestFileWriter:
     """Test FileWriter class"""
