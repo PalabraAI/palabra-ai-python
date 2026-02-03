@@ -1,12 +1,17 @@
 """Tests for benchmark config loading"""
+import base64
 import json
 import tempfile
 from pathlib import Path
-import pytest
 from unittest.mock import patch, MagicMock
 
+import numpy as np
+from palabra_ai.benchmark.report import Report
 from palabra_ai.benchmark.utils import flatten_container_to_paths
 from palabra_ai.config import Config
+from palabra_ai.message import IoEvent, Dbg, Kind
+from palabra_ai.model import IoData
+from palabra_ai.util.orjson import to_json
 
 
 def test_benchmark_loads_config_from_json():
@@ -919,6 +924,84 @@ def test_benchmark_handles_sentence_splitter_case():
     tid1 = Tid.parse("base_sentence_part_1")
     assert tid1.base == "base_sentence"
     assert tid1.part_num == 1
+
+
+def test_benchmark_handles_partial_translated_transcription():
+    """Test that sentences are created even when partial_translated_transcription is present and set as source for translation metrics"""
+
+    def make_event(idx: int, tid: str, mtype: str, dawn_ts: float, text="test"):
+        if mtype in ("input_audio_data", "output_audio_data"):
+            audio_samples = np.zeros(160, dtype=np.int16)
+            audio_b64 = base64.b64encode(audio_samples.tobytes()).decode('utf-8')
+            if mtype == "input_audio_data":
+                body_dict = {
+                    "message_type": mtype,
+                    "data": {"data": audio_b64}
+                }
+            else:  # output_audio_data
+                body_dict = {
+                    "message_type": mtype,
+                    "data": {"data": audio_b64, "transcription_id": tid}
+                }
+        else:  # transcription messages
+            body_dict = {
+                "message_type": mtype,
+                "data": {
+                    "transcription": {
+                        "text": text,
+                        "segments": [{"start": dawn_ts, "end": dawn_ts + 1.0}],
+                        "transcription_id": tid
+                    }
+                }
+            }
+        return IoEvent(
+            head=Dbg(kind=Kind.MESSAGE if "transcription" in mtype or mtype == "input_audio_data" else Kind.AUDIO,
+                     ch=None, dir=None, idx=idx, dawn_ts=dawn_ts, dur_s=0.1),
+            body=to_json(body_dict),
+            tid=None,
+            mtype=None
+        )
+
+    base_tid = "test123_part_0"
+    base_ts = 0.5
+
+    # Create events: input, validated, translated, output_audio (no partial)
+    events = [
+        make_event(0, None, "input_audio_data", base_ts),
+        make_event(10, base_tid, "partial_transcription", base_ts + 0.5, "validated text"),
+        make_event(11, base_tid, "partial_translated_transcription", base_ts + 1.0, "partial translated text"),
+        make_event(12, base_tid, "validated_transcription", base_ts + 1.5, "validated text"),
+        make_event(13, base_tid, "translated_transcription", base_ts + 2.0, "translated text"),
+        make_event(14, base_tid, "output_audio_data", base_ts + 2.5),
+    ]
+
+    # Create IoData
+    io_data = IoData(
+        start_perf_ts=base_ts, start_utc_ts=base_ts, in_sr=16000, out_sr=24000,
+        mode="test", channels=1, events=events, count_events=len(events)
+    )
+
+    # Parse with Report - should handle missing partial_transcription
+    report, _, _ = Report.parse(io_data, translated_metric_key="partial_translated_transcription")
+
+    # Verify sentence was created despite missing partial_transcription
+    assert len(report.sentences) == 1
+    sentence = report.sentences[base_tid]
+
+    # Check fallback behavior
+    assert sentence.partial_text == "validated text"  # Should use validated
+    assert sentence.validated_text == "validated text"  # Should use validated
+    assert sentence.translated_text == "partial translated text"  # Should use partial translated
+
+    # Timing should be calculated correctly
+    assert sentence.validated_ts == base_ts + 1.5
+    assert sentence.translated_ts == base_ts + 1.0
+    assert sentence.tts_api_ts == base_ts + 2.5
+
+    # Metrics should still be calculated (using validated timing calculations)
+    assert sentence.metric_partial > 0  # Should be positive
+    assert sentence.metric_validated > 0  # Should be positive
+    assert sentence.metric_translated > 0  # Should be positive
 
 
 def test_benchmark_handles_missing_partial_transcription():
