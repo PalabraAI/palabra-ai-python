@@ -8,6 +8,7 @@ import tempfile
 from dataclasses import fields
 from io import StringIO
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -35,9 +36,26 @@ from palabra_ai.task.manager import Manager
 from palabra_ai.util.orjson import to_json
 
 
-def make_event(idx: int, tid: str, mtype: str, dawn_ts: float, text: str = "test") -> IoEvent:
+def make_event(
+    idx: int,
+    tid: str | None,
+    mtype: str,
+    dawn_ts: float,
+    text: str = "test",
+    language: str | None = None,
+    queue_level: int | None = None,
+    max_level: int | None = None,
+) -> IoEvent:
     # Create dummy audio data (empty PCM samples)
-    if mtype in ("input_audio_data", "output_audio_data"):
+    if mtype == "tts_buffer_stats":
+        stats_data: dict[str, Any] = {"timestamp": dawn_ts}
+        if language and queue_level is not None and max_level is not None:
+            stats_data[language] = {
+                "current_queue_level_ms": queue_level,
+                "max_queue_level_ms": max_level,
+            }
+        body_dict = {"message_type": mtype, "data": {"stats": stats_data}}
+    elif mtype in ("input_audio_data", "output_audio_data"):
         audio_samples = np.zeros(160, dtype=np.int16)  # 10ms @ 16khz
         audio_b64 = base64.b64encode(audio_samples.tobytes()).decode("utf-8")
         body_dict = {
@@ -61,7 +79,9 @@ def make_event(idx: int, tid: str, mtype: str, dawn_ts: float, text: str = "test
     return IoEvent(
         head=Dbg(
             kind=Kind.MESSAGE
-            if "transcription" in mtype or mtype == "input_audio_data"
+            if mtype
+            in Message.STR_TRANSCRIPTION_TYPES
+            | {"input_audio_data", "tts_buffer_stats"}
             else Kind.AUDIO,
             ch=None,
             dir=None,
@@ -805,31 +825,6 @@ def test_benchmark_parse_handles_orphan_extra_parts():
     """Test that _part_1+ without parent prints warning and is skipped"""
     base_ts = 0.0
 
-    def make_event(idx, tid, mtype, dawn_ts, text="test"):
-        body_dict = {
-            "message_type": mtype,
-            "data": {
-                "transcription": {
-                    "text": text,
-                    "segments": [{"start": dawn_ts, "end": dawn_ts + 1.0}],
-                    "transcription_id": tid,
-                }
-            },
-        }
-        return IoEvent(
-            head=Dbg(
-                kind=Kind.MESSAGE,
-                ch=None,
-                dir=None,
-                idx=idx,
-                dawn_ts=dawn_ts,
-                dur_s=0.1,
-            ),
-            body=to_json(body_dict),
-            tid=None,
-            mtype=None,
-        )
-
     events = [
         # Orphan _part_1 without parent
         make_event(
@@ -988,44 +983,6 @@ def test_benchmark_handles_sentence_splitter_case():
 def test_benchmark_handles_partial_translated_transcription():
     """Test that sentences are created even when partial_translated_transcription is present and set as source for translation metrics"""
 
-    def make_event(idx: int, tid: str, mtype: str, dawn_ts: float, text="test"):
-        if mtype in ("input_audio_data", "output_audio_data"):
-            audio_samples = np.zeros(160, dtype=np.int16)
-            audio_b64 = base64.b64encode(audio_samples.tobytes()).decode("utf-8")
-            if mtype == "input_audio_data":
-                body_dict = {"message_type": mtype, "data": {"data": audio_b64}}
-            else:  # output_audio_data
-                body_dict = {
-                    "message_type": mtype,
-                    "data": {"data": audio_b64, "transcription_id": tid},
-                }
-        else:  # transcription messages
-            body_dict = {
-                "message_type": mtype,
-                "data": {
-                    "transcription": {
-                        "text": text,
-                        "segments": [{"start": dawn_ts, "end": dawn_ts + 1.0}],
-                        "transcription_id": tid,
-                    }
-                },
-            }
-        return IoEvent(
-            head=Dbg(
-                kind=Kind.MESSAGE
-                if "transcription" in mtype or mtype == "input_audio_data"
-                else Kind.AUDIO,
-                ch=None,
-                dir=None,
-                idx=idx,
-                dawn_ts=dawn_ts,
-                dur_s=0.1,
-            ),
-            body=to_json(body_dict),
-            tid=None,
-            mtype=None,
-        )
-
     base_tid = "test123_part_0"
     base_ts = 0.5
 
@@ -1087,45 +1044,6 @@ def test_benchmark_handles_partial_translated_transcription():
 
 def test_benchmark_handles_missing_partial_transcription():
     """Test that sentences are created even when partial_transcription is missing"""
-
-    def make_event(idx, tid, mtype, dawn_ts, text="test"):
-        if mtype in ("input_audio_data", "output_audio_data"):
-            audio_samples = np.zeros(160, dtype=np.int16)
-            audio_b64 = base64.b64encode(audio_samples.tobytes()).decode("utf-8")
-            if mtype == "input_audio_data":
-                body_dict = {"message_type": mtype, "data": {"data": audio_b64}}
-            else:  # output_audio_data
-                body_dict = {
-                    "message_type": mtype,
-                    "data": {"data": audio_b64, "transcription_id": tid},
-                }
-        else:  # transcription messages
-            body_dict = {
-                "message_type": mtype,
-                "data": {
-                    "transcription": {
-                        "text": text,
-                        "segments": [{"start": dawn_ts, "end": dawn_ts + 1.0}],
-                        "transcription_id": tid,
-                    }
-                },
-            }
-        return IoEvent(
-            head=Dbg(
-                kind=Kind.MESSAGE
-                if "transcription" in mtype or mtype == "input_audio_data"
-                else Kind.AUDIO,
-                ch=None,
-                dir=None,
-                idx=idx,
-                dawn_ts=dawn_ts,
-                dur_s=0.1,
-            ),
-            body=to_json(body_dict),
-            tid=None,
-            mtype=None,
-        )
-
     base_tid = "test123_part_0"
     base_ts = 0.5
 
@@ -1442,61 +1360,6 @@ def test_fallback_non_container():
 
 def test_tts_buffer_breakdown_in_report():
     """Test that TTS BUFFER BREAKDOWN section appears in report when tts_buffer_events exist"""
-
-    def make_event(
-        idx,
-        tid,
-        mtype,
-        dawn_ts,
-        text="test",
-        language=None,
-        queue_level=None,
-        max_level=None,
-    ):
-        if mtype == "tts_buffer_stats":
-            stats_data = {"timestamp": dawn_ts}
-            if language and queue_level is not None and max_level is not None:
-                stats_data[language] = {
-                    "current_queue_level_ms": queue_level,
-                    "max_queue_level_ms": max_level,
-                }
-            body_dict = {"message_type": mtype, "data": {"stats": stats_data}}
-        elif mtype in ("input_audio_data", "output_audio_data"):
-            audio_samples = np.zeros(160, dtype=np.int16)
-            audio_b64 = base64.b64encode(audio_samples.tobytes()).decode("utf-8")
-            if mtype == "input_audio_data":
-                body_dict = {"message_type": mtype, "data": {"data": audio_b64}}
-            else:
-                body_dict = {
-                    "message_type": mtype,
-                    "data": {"data": audio_b64, "transcription_id": tid},
-                }
-        else:
-            body_dict = {
-                "message_type": mtype,
-                "data": {
-                    "transcription": {
-                        "text": text,
-                        "segments": [{"start": dawn_ts, "end": dawn_ts + 1.0}],
-                        "transcription_id": tid,
-                    }
-                },
-            }
-
-        return IoEvent(
-            head=Dbg(
-                kind=Kind.MESSAGE,
-                ch=None,
-                dir=None,
-                idx=idx,
-                dawn_ts=dawn_ts,
-                dur_s=0.1,
-            ),
-            body=to_json(body_dict),
-            tid=None,
-            mtype=None,
-        )
-
     base_ts = 0.0
     events = [
         # Input and transcription events
@@ -1539,7 +1402,7 @@ def test_tts_buffer_breakdown_in_report():
     )
 
     # Parse the report
-    report, in_canvas, out_canvas = Report.parse(io_data)
+    report, _, _ = Report.parse(io_data)
 
     # Verify tts_buffer_events were collected
     assert len(report.tts_buffer_events) == 3, (
@@ -1575,32 +1438,6 @@ def test_tts_buffer_breakdown_in_report():
 
 def test_tts_buffer_breakdown_not_shown_when_empty():
     """Test that TTS BUFFER BREAKDOWN section is not shown when no tts_buffer_events"""
-
-    def make_event(idx, tid, mtype, dawn_ts, text="test"):
-        audio_samples = np.zeros(160, dtype=np.int16)
-        audio_b64 = base64.b64encode(audio_samples.tobytes()).decode("utf-8")
-        if mtype == "input_audio_data":
-            body_dict = {"message_type": mtype, "data": {"data": audio_b64}}
-        else:
-            body_dict = {
-                "message_type": mtype,
-                "data": {"data": audio_b64, "transcription_id": tid},
-            }
-
-        return IoEvent(
-            head=Dbg(
-                kind=Kind.MESSAGE,
-                ch=None,
-                dir=None,
-                idx=idx,
-                dawn_ts=dawn_ts,
-                dur_s=0.1,
-            ),
-            body=to_json(body_dict),
-            tid=None,
-            mtype=None,
-        )
-
     base_ts = 0.0
     events = [
         make_event(0, None, "input_audio_data", base_ts),
