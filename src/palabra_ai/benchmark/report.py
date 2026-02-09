@@ -1,12 +1,8 @@
 import bisect
 import re
 from base64 import b64decode
-
 from collections import defaultdict
-
-from dataclasses import dataclass
-
-from dataclasses import field
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal, NamedTuple, Self, TypeVar
 
@@ -14,25 +10,30 @@ import numpy as np
 from numpy.typing import NDArray
 from prettytable import PrettyTable
 
-from palabra_ai import Config
-from palabra_ai import Message
+from palabra_ai import Config, Message
 from palabra_ai.audio import save_wav
-from palabra_ai.benchmark.utils import flatten_container_to_paths, _format_value
-
+from palabra_ai.benchmark.utils import _format_value, flatten_container_to_paths
 from palabra_ai.message import IoEvent
-
 from palabra_ai.model import IoData
+from palabra_ai.util.orjson import from_json, to_json
 
-from palabra_ai.util.orjson import to_json, from_json
-
-INPUT_CHUNK_DURATION_S = 0.1 # 100ms
-FOCUSED = re.compile(r"^(?!.*_part_[1-9]\d*).*$") # without part_1+ suffix
+INPUT_CHUNK_DURATION_S = 0.1  # 100ms
+FOCUSED = re.compile(r"^(?!.*_part_[1-9]\d*).*$")  # without part_1+ suffix
 BENCHMARK_ALLOWED_MESSAGE_TYPES = [mt.value for mt in Message.ALLOWED_TYPES]
+METRIC_DEFINITIONS: str = """
+Metric definitions, given that 'local_start' is the timestamp when input audio chunk containing the start of the current sentence was sent:
+- 'Partial': local_start → first partial transcription
+- 'Validated': local_start → validated transcription
+- 'Translated': local_start → translated transcription
+- 'TTS API': local_start → first TTS output chunk arrived from API
+- 'TTS Playback': local_start → when TTS can actually play (accounting for queue)
+"""
 T = TypeVar("T")
 
 
 class Tid(NamedTuple):
     """Parsed transcription ID with base and optional part number"""
+
     base: str
     part_num: int | None
 
@@ -59,7 +60,7 @@ class Tid(NamedTuple):
             sentence_2_part_0 -> Tid(base='sentence_2', part_num=0)
             sentence_2_part_1 -> Tid(base='sentence_2', part_num=1)
         """
-        match = re.search(r'^(.+)_part_(\d+)$', raw_tid)
+        match = re.search(r"^(.+)_part_(\d+)$", raw_tid)
         if match:
             return cls(base=match.group(1), part_num=int(match.group(2)))
         return cls(base=raw_tid, part_num=None)
@@ -97,17 +98,20 @@ class Sentence:
     - metric_tts_api: local_start → first TTS output chunk arrived from API
     - metric_tts_playback: local_start → when TTS can actually play (accounting for queue)
     """
+
     transcription_id: str
 
     # Core timestamps
-    local_start_ts: float   # Input chunk where this sentence started
+    local_start_ts: float  # Input chunk where this sentence started
     local_start_chunk_idx: int
 
     # Event timestamps (when events occurred)
     partial_ts: float | None = None
     validated_ts: float | None = None
     translated_ts: float | None = None
-    tts_api_ts: float | None = None  # When first output chunk with this transcription_id arrived
+    tts_api_ts: float | None = (
+        None  # When first output chunk with this transcription_id arrived
+    )
 
     # Calculated metrics (populated by analyze stage)
     metric_partial: float | None = None
@@ -116,9 +120,13 @@ class Sentence:
     metric_tts_api: float | None = None
     metric_tts_playback: float | None = None
 
-    in_deltas: dict[int, float] = field(default_factory=dict) # chunk idx -> delta to apply
-    out_deltas: dict[int, float] = field(default_factory=dict) # chunk idx
-    out_tids_with_playback: dict[str, float] = field(default_factory=dict) # tid -> actual playback start pos
+    in_deltas: dict[int, float] = field(
+        default_factory=dict
+    )  # chunk idx -> delta to apply
+    out_deltas: dict[int, float] = field(default_factory=dict)  # chunk idx
+    out_tids_with_playback: dict[str, float] = field(
+        default_factory=dict
+    )  # tid -> actual playback start pos
 
     # Text content
     partial_text: str = ""
@@ -135,16 +143,20 @@ class Sentence:
 @dataclass
 class AudioStat:
     length_s: float
-    tids_with_actual_tts_playback: dict[str, float] # tid -> actual playback start pos
-    deltas: dict[int, float] # chunk idx -> delta to apply
+    tids_with_actual_tts_playback: dict[str, float]  # tid -> actual playback start pos
+    deltas: dict[int, float]  # chunk idx -> delta to apply
 
 
 @dataclass
 class Report:
-    sentences: dict[str, Sentence] = field(default_factory=dict) # transcription_id -> Sentence
+    sentences: dict[str, Sentence] = field(
+        default_factory=dict
+    )  # transcription_id -> Sentence
     in_audio_stat: AudioStat | None = None
     out_audio_stat: AudioStat | None = None
-    metrics_summary: dict[str, dict[str, float]] = field(default_factory=dict) # metric_name -> {min, max, avg, p50, p90, p95}
+    metrics_summary: dict[str, dict[str, float]] = field(
+        default_factory=dict
+    )  # metric_name -> {min, max, avg, p50, p90, p95}
     set_task_e: IoEvent | None = None
     current_task_e: IoEvent | None = None
     tts_buffer_events: list[IoEvent] = field(default_factory=list)
@@ -159,16 +171,20 @@ class Report:
         return k, d[k]
 
     @classmethod
-    def put_audio_to_canvas(cls, audio_canvas: np.typing.NDArray, start_idx: int, e: IoEvent):
+    def put_audio_to_canvas(
+        cls, audio_canvas: np.typing.NDArray, start_idx: int, e: IoEvent
+    ):
         raw_samples = b64decode(e.body["data"]["data"])
         chunk = np.frombuffer(raw_samples, dtype=np.int16)
-        audio_canvas[start_idx:start_idx + len(chunk)] += chunk
+        audio_canvas[start_idx : start_idx + len(chunk)] += chunk
 
     @classmethod
     def playback(cls, events: list[IoEvent], sr: int, ch: int):
         playback_pos = 0.0
-        tids_with_actual_tts_playback: dict[str, float] = {} # tid -> actual playback start pos
-        deltas: dict[int, float] = {} # chunk idx -> delta to apply
+        tids_with_actual_tts_playback: dict[
+            str, float
+        ] = {}  # tid -> actual playback start pos
+        deltas: dict[int, float] = {}  # chunk idx -> delta to apply
         audio_map: dict[float, IoEvent] = {}
         for e in events:
             deltas[e.head.idx] = playback_pos - e.head.dawn_ts
@@ -182,15 +198,18 @@ class Report:
             start_idx_rough = int(start_pos * sr * ch)
             start_idx_aligned = round(start_idx_rough / ch) * ch
             cls.put_audio_to_canvas(audio_canvas, start_idx_aligned, e)
-        return audio_canvas, AudioStat(playback_pos, tids_with_actual_tts_playback, deltas)
+        return audio_canvas, AudioStat(
+            playback_pos, tids_with_actual_tts_playback, deltas
+        )
         return playback_pos, audio_canvas, deltas, tids_with_actual_tts_playback
-
 
     @classmethod
     def parse(
         cls,
         io_data: IoData,
-        translated_metric_key: Literal["translated_transcription", "partial_translated_transcription"] = "translated_transcription",
+        translated_metric_key: Literal[
+            "translated_transcription", "partial_translated_transcription"
+        ] = "translated_transcription",
     ) -> tuple[Self, NDArray[np.int16], NDArray[np.int16]]:
         sentences = {}
 
@@ -200,8 +219,8 @@ class Report:
         in_evs: list[IoEvent] = []
         out_evs: list[IoEvent] = []
         tts_buffer_events: list[IoEvent] = []
-        set_task_e: IoEvent|None = None
-        current_task_e: IoEvent|None = None
+        set_task_e: IoEvent | None = None
+        current_task_e: IoEvent | None = None
         for e in sorted(io_data.events, key=lambda x: x.head.idx):
             if e.tid:
                 all_with_tid.append(e)
@@ -215,11 +234,15 @@ class Report:
                 out_evs.append(e)
             elif e.mtype == "set_task":
                 if set_task_e is not None:
-                    raise ValueError("Multiple set_task events found, old: {}, new: {}".format(set_task_e, e))
+                    raise ValueError(
+                        f"Multiple set_task events found, old: {set_task_e}, new: {e}"
+                    )
                 set_task_e = e
             elif e.mtype == "current_task" and not current_task_e:
                 if current_task_e is not None:
-                    raise ValueError("Multiple current_task events found, old: {}, new: {}".format(current_task_e, e))
+                    raise ValueError(
+                        f"Multiple current_task events found, old: {current_task_e}, new: {e}"
+                    )
                 current_task_e = e
             elif e.mtype == "tts_buffer_stats":
                 tts_buffer_events.append(e)
@@ -236,9 +259,13 @@ class Report:
             out_audio_stat = None
             in_evs_by_dawn = {}
         else:
-            in_evs_by_dawn = {e.head.dawn_ts:e for e in in_evs}
-            in_audio_canvas, in_audio_stat = cls.playback(in_evs, io_data.in_sr, io_data.channels)
-            out_audio_canvas, out_audio_stat = cls.playback(out_evs, io_data.out_sr, io_data.channels)
+            in_evs_by_dawn = {e.head.dawn_ts: e for e in in_evs}
+            in_audio_canvas, in_audio_stat = cls.playback(
+                in_evs, io_data.in_sr, io_data.channels
+            )
+            out_audio_canvas, out_audio_stat = cls.playback(
+                out_evs, io_data.out_sr, io_data.channels
+            )
 
         for raw_tid, fes in focused_by_tid.items():
             mtypes = {}
@@ -276,7 +303,9 @@ class Report:
                 local_start_ts = validated.head.dawn_ts
                 local_start_chunk_idx = 0
             else:
-                asr_start = timing_source.body["data"]["transcription"]["segments"][0]["start"]
+                asr_start = timing_source.body["data"]["transcription"]["segments"][0][
+                    "start"
+                ]
                 nearest_in = cls.predecessor(in_evs_by_dawn, asr_start)
                 if not nearest_in:
                     continue
@@ -303,7 +332,9 @@ class Report:
                     # TTS metrics stay None for WebRTC
                 )
             else:
-                playback_tts_ts = out_audio_stat.tids_with_actual_tts_playback.get(raw_tid)
+                playback_tts_ts = out_audio_stat.tids_with_actual_tts_playback.get(
+                    raw_tid
+                )
                 sentences[raw_tid] = Sentence(
                     transcription_id=raw_tid,
                     local_start_ts=local_start_ts,
@@ -319,7 +350,9 @@ class Report:
                     metric_validated=validated.head.dawn_ts - local_start_ts,
                     metric_translated=translated.head.dawn_ts - local_start_ts,
                     metric_tts_api=out_audio.head.dawn_ts - local_start_ts,
-                    metric_tts_playback=(playback_tts_ts - local_start_ts) if playback_tts_ts else None,
+                    metric_tts_playback=(playback_tts_ts - local_start_ts)
+                    if playback_tts_ts
+                    else None,
                 )
 
         # Build registry of base_tid -> local_start_ts for parent sentences
@@ -354,15 +387,21 @@ class Report:
 
             if parent_ts is None:
                 # DEPRECATED: This warning should no longer occur after fallback implementation
-                print(f"⚠️  WARNING: No parent sentence found for {raw_tid} (base: {_tid.base})")
+                print(
+                    f"⚠️  WARNING: No parent sentence found for {raw_tid} (base: {_tid.base})"
+                )
                 continue
 
             sentences[raw_tid] = Sentence(
                 transcription_id=raw_tid,
                 local_start_ts=parent_ts,  # Use parent's timestamp for sorting
                 local_start_chunk_idx=0,  # Not used for extra_parts
-                validated_text=validated.body["data"]["transcription"]["text"] if validated else "",
-                translated_text=translated.body["data"]["transcription"]["text"] if translated else "",
+                validated_text=validated.body["data"]["transcription"]["text"]
+                if validated
+                else "",
+                translated_text=translated.body["data"]["transcription"]["text"]
+                if translated
+                else "",
                 # All metrics stay None
             )
 
@@ -370,12 +409,34 @@ class Report:
 
         # Calculate metrics summary
         metrics_summary = {}
-        for metric_name in ["metric_partial", "metric_validated", "metric_translated", "metric_tts_api", "metric_tts_playback"]:
-            values = [getattr(s, metric_name) for s in sentences.values() if s.has_metrics and getattr(s, metric_name) is not None]
+        for metric_name in [
+            "metric_partial",
+            "metric_validated",
+            "metric_translated",
+            "metric_tts_api",
+            "metric_tts_playback",
+        ]:
+            values = [
+                getattr(s, metric_name)
+                for s in sentences.values()
+                if s.has_metrics and getattr(s, metric_name) is not None
+            ]
             if values:
                 metrics_summary[metric_name] = calculate_stats(values)
 
-        return cls(sentences=sentences, in_audio_stat=in_audio_stat, out_audio_stat=out_audio_stat, metrics_summary=metrics_summary, set_task_e=set_task_e, current_task_e=current_task_e, tts_buffer_events=tts_buffer_events), in_audio_canvas, out_audio_canvas
+        return (
+            cls(
+                sentences=sentences,
+                in_audio_stat=in_audio_stat,
+                out_audio_stat=out_audio_stat,
+                metrics_summary=metrics_summary,
+                set_task_e=set_task_e,
+                current_task_e=current_task_e,
+                tts_buffer_events=tts_buffer_events,
+            ),
+            in_audio_canvas,
+            out_audio_canvas,
+        )
 
 
 def create_histogram(values: list[float], bins: int = 20, width: int = 50) -> str:
@@ -412,7 +473,9 @@ def truncate_text(text: str, max_len: int = 25) -> str:
     return f"{text[:max_len]}...(+{remaining})"
 
 
-def merge_task_settings(sent_paths: list[tuple[str, Any]], applied_paths: list[tuple[str, Any]]) -> list[tuple[str, Any, Any]]:
+def merge_task_settings(
+    sent_paths: list[tuple[str, Any]], applied_paths: list[tuple[str, Any]]
+) -> list[tuple[str, Any, Any]]:
     """Merge sent and applied task settings into full outer join.
 
     Args:
@@ -451,7 +514,15 @@ def merge_task_settings(sent_paths: list[tuple[str, Any]], applied_paths: list[t
     return result
 
 
-def format_report(report: Report, io_data: IoData, source_lang: str, target_lang: str, in_file: str, out_file: str, config: Config) -> str:
+def format_report(
+    report: Report,
+    io_data: IoData,
+    source_lang: str,
+    target_lang: str,
+    in_file: str,
+    out_file: str,
+    config: Config,
+) -> str:
     """Format report as text with tables and histogram"""
     lines = []
     lines.append("=" * 80)
@@ -465,17 +536,25 @@ def format_report(report: Report, io_data: IoData, source_lang: str, target_lang
 
     # Input/Output info
     in_dur = f"{report.in_audio_stat.length_s:.1f}s" if report.in_audio_stat else "?.?s"
-    out_dur = f"{report.out_audio_stat.length_s:.1f}s" if report.out_audio_stat else "?.?s"
+    out_dur = (
+        f"{report.out_audio_stat.length_s:.1f}s" if report.out_audio_stat else "?.?s"
+    )
     lines.append(f"Input:  [{in_dur}, {io_data.in_sr}hz, 16bit, PCM] {in_file}")
     lines.append(f"Output: [{out_dur}, {io_data.out_sr}hz, 16bit, PCM] {out_file}")
 
     # TTS autotempo info
-    queue_config = config.translation_queue_configs.global_ if config.translation_queue_configs else None
+    queue_config = (
+        config.translation_queue_configs.global_
+        if config.translation_queue_configs
+        else None
+    )
     if queue_config:
         if queue_config.auto_tempo:
-            lines.append(f"TTS autotempo: ✅ on ({queue_config.min_tempo}-{queue_config.max_tempo})")
+            lines.append(
+                f"TTS autotempo: ✅ on ({queue_config.min_tempo}-{queue_config.max_tempo})"
+            )
         else:
-            lines.append(f"TTS autotempo: ❌ off")
+            lines.append("TTS autotempo: ❌ off")
 
     # CONFIG - comparison of sent vs applied settings
     lines.append("")
@@ -483,10 +562,16 @@ def format_report(report: Report, io_data: IoData, source_lang: str, target_lang
     lines.append("-" * 80)
 
     set_task_data = report.set_task_e.body["data"] if report.set_task_e else {}
-    current_task_data = report.current_task_e.body["data"] if report.current_task_e else {}
+    current_task_data = (
+        report.current_task_e.body["data"] if report.current_task_e else {}
+    )
 
-    sent_paths = [(k, _format_value(v)) for k,v in flatten_container_to_paths(set_task_data)]
-    applied_paths = [(k, _format_value(v)) for k,v in flatten_container_to_paths(current_task_data)]
+    sent_paths = [
+        (k, _format_value(v)) for k, v in flatten_container_to_paths(set_task_data)
+    ]
+    applied_paths = [
+        (k, _format_value(v)) for k, v in flatten_container_to_paths(current_task_data)
+    ]
 
     # Merge settings using full outer join
     merged_settings = merge_task_settings(sent_paths, applied_paths)
@@ -517,22 +602,26 @@ def format_report(report: Report, io_data: IoData, source_lang: str, target_lang
             "metric_validated": "Validated",
             "metric_translated": "Translated",
             "metric_tts_api": "TTS API",
-            "metric_tts_playback": "TTS Playback"
+            "metric_tts_playback": "TTS Playback",
         }
 
         for metric_name, stats in report.metrics_summary.items():
             label = metric_labels.get(metric_name, metric_name)
-            table.add_row([
-                label,
-                f"{stats['min']:.3f}",
-                f"{stats['max']:.3f}",
-                f"{stats['avg']:.3f}",
-                f"{stats['p50']:.3f}",
-                f"{stats['p90']:.3f}",
-                f"{stats['p95']:.3f}"
-            ])
+            table.add_row(
+                [
+                    label,
+                    f"{stats['min']:.3f}",
+                    f"{stats['max']:.3f}",
+                    f"{stats['avg']:.3f}",
+                    f"{stats['p50']:.3f}",
+                    f"{stats['p90']:.3f}",
+                    f"{stats['p95']:.3f}",
+                ]
+            )
 
         lines.append(str(table))
+        lines.append("")
+        lines.append(METRIC_DEFINITIONS)
         lines.append("")
 
     # Sentences breakdown
@@ -544,15 +633,35 @@ def format_report(report: Report, io_data: IoData, source_lang: str, target_lang
         # WebRTC mode: hide TTS columns (no audio playback)
         is_webrtc = io_data.mode == "webrtc"
         if is_webrtc:
-            table.field_names = ["Start", "ID", "Validated", "Translated", "Part", "Valid", "Trans"]
+            table.field_names = [
+                "Start",
+                "ID",
+                "Validated",
+                "Translated",
+                "Part",
+                "Valid",
+                "Trans",
+            ]
         else:
-            table.field_names = ["Start", "ID", "Validated", "Translated", "Part", "Valid", "Trans", "TTS API", "TTS Play"]
+            table.field_names = [
+                "Start",
+                "ID",
+                "Validated",
+                "Translated",
+                "Part",
+                "Valid",
+                "Trans",
+                "TTS API",
+                "TTS Play",
+            ]
 
         table.align["ID"] = "l"
         table.align["Validated"] = "l"
         table.align["Translated"] = "l"
 
-        sorted_sentences = sorted(report.sentences.items(), key=lambda x: x[1].local_start_ts)
+        sorted_sentences = sorted(
+            report.sentences.items(), key=lambda x: x[1].local_start_ts
+        )
         global_start = sorted_sentences[0][1].local_start_ts if sorted_sentences else 0
 
         for raw_tid, sentence in sorted_sentences:
@@ -565,15 +674,27 @@ def format_report(report: Report, io_data: IoData, source_lang: str, target_lang
                     tid.display,
                     truncate_text(sentence.validated_text),
                     truncate_text(sentence.translated_text),
-                    f"{sentence.metric_partial:.2f}" if sentence.metric_partial is not None else "-",
-                    f"{sentence.metric_validated:.2f}" if sentence.metric_validated else "-",
-                    f"{sentence.metric_translated:.2f}" if sentence.metric_translated else "-",
+                    f"{sentence.metric_partial:.2f}"
+                    if sentence.metric_partial is not None
+                    else "-",
+                    f"{sentence.metric_validated:.2f}"
+                    if sentence.metric_validated
+                    else "-",
+                    f"{sentence.metric_translated:.2f}"
+                    if sentence.metric_translated
+                    else "-",
                 ]
                 if not is_webrtc:
-                    row.extend([
-                        f"{sentence.metric_tts_api:.2f}" if sentence.metric_tts_api else "-",
-                        f"{sentence.metric_tts_playback:.2f}" if sentence.metric_tts_playback else "-"
-                    ])
+                    row.extend(
+                        [
+                            f"{sentence.metric_tts_api:.2f}"
+                            if sentence.metric_tts_api
+                            else "-",
+                            f"{sentence.metric_tts_playback:.2f}"
+                            if sentence.metric_tts_playback
+                            else "-",
+                        ]
+                    )
                 table.add_row(row)
             else:
                 # Text-only row for extra_parts (_part_1+)
@@ -582,7 +703,9 @@ def format_report(report: Report, io_data: IoData, source_lang: str, target_lang
                     tid.display,
                     truncate_text(sentence.validated_text),
                     truncate_text(sentence.translated_text),
-                    "", "", ""  # no metrics
+                    "",
+                    "",
+                    "",  # no metrics
                 ]
                 if not is_webrtc:
                     row.extend(["", ""])  # TTS columns empty
@@ -596,7 +719,13 @@ def format_report(report: Report, io_data: IoData, source_lang: str, target_lang
         lines.append("TTS BUFFER BREAKDOWN")
         lines.append("-" * 80)
         table = PrettyTable()
-        table.field_names = ["Time", "Language", "Queue Level (s)", "Max Level (s)", "Status"]
+        table.field_names = [
+            "Time",
+            "Language",
+            "Queue Level (s)",
+            "Max Level (s)",
+            "Status",
+        ]
         table.align["Time"] = "r"
         table.align["Language"] = "c"
         table.align["Queue Level (s)"] = "r"
@@ -605,7 +734,9 @@ def format_report(report: Report, io_data: IoData, source_lang: str, target_lang
 
         # Get global start from first sentence or first valid tts event
         if report.sentences:
-            sorted_sentences_for_buffer = sorted(report.sentences.items(), key=lambda x: x[1].local_start_ts)
+            sorted_sentences_for_buffer = sorted(
+                report.sentences.items(), key=lambda x: x[1].local_start_ts
+            )
             global_start_for_buffer = sorted_sentences_for_buffer[0][1].local_start_ts
         else:
             # Find first event with valid dawn_ts (WebRTC: some events may arrive before first audio frame)
@@ -646,17 +777,21 @@ def format_report(report: Report, io_data: IoData, source_lang: str, target_lang
 
             # Format for display
             language_str = language if language else "-"
-            queue_level_str = f"{queue_level / 1000:.2f}" if queue_level is not None else "-"
+            queue_level_str = (
+                f"{queue_level / 1000:.2f}" if queue_level is not None else "-"
+            )
             max_level_str = f"{max_level / 1000:.2f}" if max_level is not None else "-"
             status = "Active TTS" if language else "Idle"
 
-            table.add_row([
-                f"{relative_time:.1f}s",
-                language_str,
-                queue_level_str,
-                max_level_str,
-                status
-            ])
+            table.add_row(
+                [
+                    f"{relative_time:.1f}s",
+                    language_str,
+                    queue_level_str,
+                    max_level_str,
+                    status,
+                ]
+            )
 
         lines.append(str(table))
         lines.append("")
@@ -665,7 +800,11 @@ def format_report(report: Report, io_data: IoData, source_lang: str, target_lang
     if "metric_tts_playback" in report.metrics_summary:
         lines.append("TTS PLAYBACK HISTOGRAM")
         lines.append("-" * 80)
-        playback_values = [s.metric_tts_playback for s in report.sentences.values() if s.metric_tts_playback is not None]
+        playback_values = [
+            s.metric_tts_playback
+            for s in report.sentences.values()
+            if s.metric_tts_playback is not None
+        ]
         lines.append(create_histogram(playback_values))
         lines.append("")
 
@@ -686,7 +825,7 @@ def save_benchmark_files(
     target_lang: str,
     report_text: str,
     input_file_path: str,
-    file_prefix: str = "bench"
+    file_prefix: str = "bench",
 ) -> None:
     """Save benchmark files to output directory"""
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -696,7 +835,9 @@ def save_benchmark_files(
     out_wav_name = f"{timestamp}_{file_prefix}_out_{target_lang}.wav"
 
     # Define file paths
-    raw_result_path = output_dir / f"{timestamp}_{file_prefix}_raw_result.json" if result else None
+    raw_result_path = (
+        output_dir / f"{timestamp}_{file_prefix}_raw_result.json" if result else None
+    )
     io_data_path = output_dir / f"{timestamp}_{file_prefix}_io_data.json"
     report_path = output_dir / f"{timestamp}_{file_prefix}_report.json"
     report_txt_path = output_dir / f"{timestamp}_{file_prefix}_report.txt"

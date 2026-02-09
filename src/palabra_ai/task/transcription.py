@@ -9,9 +9,7 @@ from palabra_ai.constant import SLEEP_INTERVAL_DEFAULT
 from palabra_ai.message import Message, TranscriptionMessage
 from palabra_ai.task.base import Task
 from palabra_ai.task.io.base import Io
-
-# from palabra_ai.task.realtime import Realtime
-from palabra_ai.util.logger import debug, error, warning
+from palabra_ai.util.logger import debug, error
 
 
 @dataclass
@@ -69,10 +67,6 @@ class Transcription(Task):
 
             callback = self._callbacks.get(msg.language.code)
             if not callback:
-                warning(
-                    f"No callback registered for language '{msg.language.code}'. "
-                    f"Registered: {list(self._callbacks.keys())}"
-                )
                 return
 
             # Call the callback
