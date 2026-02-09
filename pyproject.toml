@@ -28,7 +28,7 @@ dependencies = [
     "tqdm>=4.66.0",
     "uvloop>=0.17",
     "wat>=0.6.0",
-    "websockets>=13,<16",
+    "websockets>=13,<17",
 ]
 license = "MIT"
 keywords = ["speech-translation", "dubbing", "voice-synthesis", "api-client", "palabra-ai"]
