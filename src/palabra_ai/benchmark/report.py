@@ -8,12 +8,10 @@ from dataclasses import dataclass
 
 from dataclasses import field
 from pathlib import Path
-from typing import Any
-from typing import NamedTuple
-from typing import Self
-from typing import TypeVar
+from typing import Any, Literal, NamedTuple, Self, TypeVar
 
 import numpy as np
+from numpy.typing import NDArray
 from prettytable import PrettyTable
 
 from palabra_ai import Config
@@ -189,7 +187,11 @@ class Report:
 
 
     @classmethod
-    def parse(cls, io_data: IoData) -> Self:
+    def parse(
+        cls,
+        io_data: IoData,
+        translated_metric_key: Literal["translated_transcription", "partial_translated_transcription"] = "translated_transcription",
+    ) -> tuple[Self, NDArray[np.int16], NDArray[np.int16]]:
         sentences = {}
 
         all_with_tid: list[IoEvent] = []
@@ -246,7 +248,7 @@ class Report:
 
             partial = mtypes.get("partial_transcription")
             validated = mtypes.get("validated_transcription")
-            translated = mtypes.get("translated_transcription")
+            translated = mtypes.get(translated_metric_key)
             out_audio = mtypes.get("output_audio_data")
 
             # WebRTC mode: only need validated + translated (no audio)
@@ -340,7 +342,7 @@ class Report:
                     mtypes[ep.mtype] = ep
 
             validated = mtypes.get("validated_transcription")
-            translated = mtypes.get("translated_transcription")
+            translated = mtypes.get(translated_metric_key)
 
             # Show what we have - need at least one of validated or translated
             if not validated and not translated:

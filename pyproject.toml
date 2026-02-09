@@ -6,12 +6,12 @@ readme = "README.md"
 authors = [
     { name = "Andrei Kobyshev", email = "a.kobyshev@palabra.ai" }
 ]
-requires-python = ">=3.11,<4.0"
+requires-python = ">=3.11,<3.14"
 dependencies = [
     "aiofile>=3.8,<4",
     "aiohttp>=3.9,<4",
     "aioshutdown>=0.0.4",
-    "av>=13.0.0",
+    "av>=16",
     "certifi>=2023.0.0",
     "environs>=14.1,<14.2",
     "httpx>=0.28.1",
