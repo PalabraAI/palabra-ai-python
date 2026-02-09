@@ -1112,7 +1112,7 @@ wheels = [
 
 [[package]]
 name = "palabra-ai"
-version = "0.6.9"
+version = "0.6.10"
 source = { editable = "." }
 dependencies = [
     { name = "aiofile" },
@@ -1158,7 +1158,7 @@ requires-dist = [
     { name = "aioshutdown", specifier = ">=0.0.4" },
     { name = "av", specifier = ">=16" },
     { name = "certifi", specifier = ">=2023.0.0" },
-    { name = "environs", specifier = ">=14.1,<14.2" },
+    { name = "environs", specifier = ">=14.1,<14.6" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "jinja2", specifier = ">=3.1.0" },
     { name = "librosa", specifier = ">=0.10.2" },
@@ -1173,7 +1173,7 @@ requires-dist = [
     { name = "tqdm", specifier = ">=4.66.0" },
     { name = "uvloop", specifier = ">=0.17" },
     { name = "wat", specifier = ">=0.6.0" },
-    { name = "websockets", specifier = ">=13,<16" },
+    { name = "websockets", specifier = ">=13,<17" },
 ]
 
 [package.metadata.requires-dev]
