@@ -116,6 +116,7 @@ class Message(BaseModel):
         PARTIAL_TRANSLATED_TRANSCRIPTION = "partial_translated_transcription"
         PIPELINE_TIMINGS = "pipeline_timings"
         TTS_BUFFER_STATS = "tts_buffer_stats"
+        TTS_TEXT = "tts_text"
         ERROR = "error"  # For error messages
         END_TASK = "end_task"  # For end_task messages
         SET_TASK = "set_task"  # For set_task messages
@@ -131,6 +132,7 @@ class Message(BaseModel):
         Type.TRANSLATED_TRANSCRIPTION,
         Type.VALIDATED_TRANSCRIPTION,
         Type.PARTIAL_TRANSLATED_TRANSCRIPTION,
+        Type.TTS_TEXT,
     }
 
     IN_PROCESS_TYPES: ClassVar[set[Type]] = TRANSCRIPTION_TYPES
@@ -586,7 +588,7 @@ class TranscriptionMessage(Message):
     id_: str = Field(alias="transcription_id")
     text: str
     language: Language
-    segments: list[TranscriptionSegment]
+    segments: list[TranscriptionSegment] = Field(default_factory=list)
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -604,13 +606,15 @@ class TranscriptionMessage(Message):
             transcription = values["data"]["transcription"]
             # Convert language string to Language object
             lang_code = transcription["language"]
-            return {
+            result = {
                 "message_type": values["message_type"],
                 "transcription_id": transcription["transcription_id"],
                 "language": Language.get_or_create(lang_code),
-                "segments": transcription["segments"],
                 "text": transcription["text"],
             }
+            if values["message_type"] != "tts_text":
+                result["segments"] = transcription["segments"]
+            return result
         return values
 
     def model_dump(self, **kwargs) -> dict[str, Any]:

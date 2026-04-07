@@ -32,6 +32,7 @@ def test_transcription_message_types():
         "translated_transcription",
         "validated_transcription",
         "partial_translated_transcription",
+        "tts_text",
     }
     assert TRANSCRIPTION_MESSAGE_TYPES == expected
 
@@ -44,6 +45,7 @@ def test_allowed_message_types():
         "translated_transcription",
         "validated_transcription",
         "partial_translated_transcription",
+        "tts_text",
     }
     assert ALLOWED_MESSAGE_TYPES == expected
 

@@ -7,6 +7,7 @@ class MessageType(StrEnum):
     VALIDATED_TRANSCRIPTION = "validated_transcription"
     PARTIAL_TRANSLATED_TRANSCRIPTION = "partial_translated_transcription"
     PIPELINE_TIMINGS = "pipeline_timings"
+    TTS_TEXT = "tts_text"
     _QUEUE_STATUS = "queue_status"  # For "es" messages
     _EMPTY = "empty"  # For empty {} messages
     _UNKNOWN = "unknown"  # For unrecognized message formats
@@ -19,6 +20,7 @@ TRANSCRIPTION_MESSAGE_TYPES = {
         MessageType.TRANSLATED_TRANSCRIPTION,
         MessageType.VALIDATED_TRANSCRIPTION,
         MessageType.PARTIAL_TRANSLATED_TRANSCRIPTION,
+        MessageType.TTS_TEXT,
     )
 }
 ALLOWED_MESSAGE_TYPES = {
