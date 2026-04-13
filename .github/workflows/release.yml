@@ -206,7 +206,7 @@ jobs:
       # No 'with' parameters needed - OIDC authentication is automatic
 
     - name: Create Release
-      uses: softprops/action-gh-release@v2
+      uses: softprops/action-gh-release@v3
       with:
         tag_name: ${{ steps.get_version.outputs.TAG_NAME }}
         name: Release ${{ steps.get_version.outputs.TAG_NAME }}
