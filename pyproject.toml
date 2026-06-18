@@ -1,0 +1,73 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "palabra-ai"
+version = "1.0.0"
+description = "Simple Python client for Palabra AI real-time speech-to-speech translation"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+keywords = ["palabra", "translation", "speech-to-speech", "tts", "realtime", "websocket"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Multimedia :: Sound/Audio :: Speech",
+    "Typing :: Typed",
+]
+dependencies = [
+    "httpx>=0.25",
+    "websockets>=14",
+]
+
+[project.urls]
+Homepage = "https://palabra.ai"
+Documentation = "https://docs.palabra.ai"
+Source = "https://github.com/PalabraAI/palabra-ai-python"
+
+[project.optional-dependencies]
+audio = ["av>=12"]          # decode/resample mp3, ogg, ...
+devices = ["sounddevice>=0.4", "numpy>=1.24"]  # mic / speaker examples
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.8",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 110
+target-version = "py310"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W",   # pycodestyle
+    "F",        # pyflakes
+    "I",        # isort
+    "UP",       # pyupgrade
+    "B",        # bugbear
+    "C4",       # comprehensions
+    "SIM",      # simplify
+    "RUF",      # ruff-specific
+    "ASYNC",    # async pitfalls
+]
+ignore = [
+    "SIM105",   # contextlib.suppress already used where it reads better
+    "SIM108",   # an if/else often reads better than a long ternary
+]
+
+[tool.ruff.lint.per-file-ignores]
+"examples/*" = ["E402"]
+
+[tool.ruff.format]
+quote-style = "double"

@@ -1,0 +1,36 @@
+# Secrets — the client reads PALABRA_CLIENT_ID / PALABRA_CLIENT_SECRET from the
+# environment; never commit a local .env with real credentials.
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+.eggs/
+
+# Test / lint / type-check caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.pyright/
+.coverage
+coverage.xml
+htmlcov/
+
+# Build artifacts
+dist/
+build/
+
+# Virtual environments
+.venv/
+venv/
+
+# Editor / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+*.log
