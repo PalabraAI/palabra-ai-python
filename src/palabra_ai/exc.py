@@ -1,6 +1,3 @@
-"""Palabra client exceptions."""
-
-
 class PalabraError(Exception):
     """Base error for the Palabra client."""
 

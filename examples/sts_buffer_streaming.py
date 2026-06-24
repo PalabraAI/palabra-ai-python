@@ -1,11 +1,3 @@
-#!/usr/bin/env python3
-"""Real-time streaming: audio chunks come from an abstract buffer.
-
-Replace feed_source() with your real audio source (microphone, VoIP call
-leg, incoming network stream). Requirements: PCM s16le, 24 kHz, mono,
-pushed at real-time rate, ~320 ms per chunk.
-"""
-
 import asyncio
 import math
 import struct
@@ -33,7 +25,7 @@ async def feed_source():
 
 
 async def main():
-    palabra = Palabra()
+    palabra = Palabra() # set your credentials here or vie ENV
 
     async with palabra.translation(source="en", targets=["es"]) as session:
 

@@ -1,6 +1,6 @@
 # Palabra AI Python Client
 
-Simple Python client for [Palabra AI](https://palabra.ai) **real-time** streaming APIs: speech-to-speech translation and low-latency text-to-speech.
+Simple Python client for [Palabra AI](https://palabra.ai) **real-time** streaming APIs: speech-to-speech translation, speech-to-text, and low-latency text-to-speech.
 
 ```bash
 uv add palabra-ai          # or: pip install palabra-ai
@@ -8,12 +8,13 @@ uv add palabra-ai          # or: pip install palabra-ai
 
 Full API documentation: [docs.palabra.ai](https://docs.palabra.ai).
 
-Palabra has two separate streaming products, and the client mirrors that at the top level:
+Palabra has three separate streaming APIs, and the client mirrors that at the top level:
 
-| Product | Entry point | What it is |
-|---|---|---|
-| [**Speech-to-Speech Translation API**](#speech-to-speech-translation-api) | `palabra.translation(...)` | full pipeline: ASR -> translation -> TTS |
-| [**Realtime TTS API**](#realtime-tts-api) | `palabra.tts(...)` | synthesis only: stream text in (e.g. from an LLM), audio out |
+| Product                                                                            | Entry point                | What it is                                                                           |
+|------------------------------------------------------------------------------------|----------------------------|--------------------------------------------------------------------------------------|
+| [**Realtime Speech-to-Speech Translation API**](#speech-to-speech-translation-api) | `palabra.translation(...)` | full pipeline translation API                                                        |
+| [**Realtime Speech-to-Text API**](#speech-to-text-api)                             | `palabra.stt(...)`         | transcription API: stream audio in, incremental text (and optional translations) out |
+| [**Realtime TTS API**](#realtime-tts-api)                                          | `palabra.tts(...)`         | speech synthesis API: stream text in (e.g. from an LLM), audio out                   |
 
 Authentication, connection options, [errors](#errors) and [reconnection](#reconnection) are shared between the two.
 
@@ -76,7 +77,7 @@ async def main():
         async def feed():
             # any audio source
             # chunks: PCM s16le, 24 kHz, mono, ~320 ms each, real-time paced
-            while chunk := await my_audio_buffer.get():
+            while chunk := await audio_buffer.get():
                 await session.send_audio(chunk)
             await session.end(eos_timeout=4)  # let the tail finish, then the server closes
 
@@ -109,15 +110,15 @@ This client uses WebSocket transport, which is the recommended option for **serv
 
 Iterating the session yields typed events:
 
-| Event | Fields | Meaning                                                 |
-|---|---|---------------------------------------------------------|
-| `Transcript` | `text, language, id, is_eos, is_translation` | partial/validated transcription & translation           |
-| `Audio` | `pcm, language, last_chunk, id` | TTS chunk (PCM s16le 24 kHz mono)                       |
-| `TaskInfo` | `status, task` | response to `get_task`                                  |
-| `StreamEnd` | — | end-of-stream confirmation after `end(eos_timeout=...)` |
-| `ServerError` | `code, desc` | server-side error                                       |
-| `ServerWarning` | `code, message` | `AUDIO_STREAM_TOO_FAST / TOO_SLOW / STALLED`            |
-| `Raw` | `type, data` | anything else                                           |
+| Event           | Fields                                       | Meaning                                                 |
+|-----------------|----------------------------------------------|---------------------------------------------------------|
+| `Transcript`    | `text, language, id, is_eos, is_translation` | partial/validated transcription & translation           |
+| `Audio`         | `pcm, language, last_chunk, id`              | TTS chunk (PCM s16le 24 kHz mono)                       |
+| `TaskInfo`      | `status, task`                               | response to `get_task`                                  |
+| `StreamEnd`     | —                                            | end-of-stream confirmation after `end(eos_timeout=...)` |
+| `ServerError`   | `code, desc`                                 | server-side error                                       |
+| `ServerWarning` | `code, message`                              | `AUDIO_STREAM_TOO_FAST / TOO_SLOW / STALLED`            |
+| `Raw`           | `type, data`                                 | anything else                                           |
 
 ## Session control
 
@@ -183,6 +184,77 @@ Related helpers: `session.send_file(path)`, `session.send_pcm(pcm)` (chunking + 
 
 ---
 
+# Speech-to-Text API
+
+Standalone transcription API (with optional translation).
+You push raw audio frames in and receive incremental transcriptions back;
+set `translate_languages` to also get a translation of each finalized segment.
+
+All settings are sent as query parameters, audio goes out as raw binary frames.
+
+## Quick start
+
+```python
+import asyncio
+from palabra_ai import Palabra, SttTranscript
+
+async def main():
+    palabra = Palabra()
+
+    async with palabra.stt(language="en") as stt:
+
+        async def feed():
+            # any audio source: PCM s16le, 16 kHz, mono, ~320 ms per chunk, real-time paced
+            while chunk := await audio_buffer.get():
+                await stt.send_audio(chunk)
+
+        feeder = asyncio.create_task(feed())
+
+        async for event in stt:
+            if isinstance(event, SttTranscript):
+                print(event) # "~ [en] partial" / "[en] final"
+
+        await feeder
+
+asyncio.run(main())
+```
+
+Iteration ends when the server closes the connection (or raises `SessionError` if the receive loop crashed).
+
+## Events
+
+Iterating the session yields `SttTranscript` events (anything unrecognized comes through as `Raw`):
+
+| Field                     | Meaning                                                                                  |
+|---------------------------|------------------------------------------------------------------------------------------|
+| `text`                    | `segment.text` — the full segment text so far                                            |
+| `language`                | source language of the segment; the **target** language on a translation                 |
+| `transcription_id`        | stable per segment; shared by all messages (incl. the translation) of one segment        |
+| `is_eos`                  | `False` while the segment is still being updated; `True` once committed/final            |
+| `is_translation`          | `True` for `translated_transcription` (emitted once per target after each final segment) |
+| `start_time` / `end_time` | segment timing in seconds from session start                                             |
+| `delta`                   | text appended since the previous transcript                                              |
+
+With the filler filter enabled the segment tail may be rewritten midsegment,
+so render `text` whole on each message rather than appending `delta`.
+
+## Settings
+
+All settings are keyword arguments of `stt(...)` and become URL query parameters:
+
+```python
+async with Palabra().stt(
+    language="en",                       # source; defaults to auto-detect
+    format="pcm_s16le",                  # see the audio-formats table in the docs
+    sample_rate=16000,                   # required for raw PCM other than 16 kHz pcm_s16le
+    translate_languages=["es", "de"],    # also emit translated_transcription per target
+    enable_filler_filter=True,           # server default: True for every language but ja
+) as stt:
+    ...
+```
+
+---
+
 # Realtime TTS API
 
 Standalone synthesis, no translation pipeline. Designed for incremental text (LLM token streams): send pieces as they come, audio chunks come back with minimal latency.
@@ -194,12 +266,12 @@ async with palabra.tts(language="en", voice_id="default_low") as tts:
     await tts.send_text("The sun was setting over the mountains,")
     await tts.send_text(" casting long golden shadows.", eos=True)
 
-    async for chunk in tts:            # TtsChunk: audio, generation_id, last_chunk, audio_len
+    async for chunk in tts: # TtsChunk: audio, generation_id, last_chunk, audio_len
         play(chunk.audio)
         if chunk.last_chunk:
             break
 
-    await tts.cancel()                 # stop current synthesis, session stays open
+    await tts.cancel() # stop current synthesis, session stays open
 ```
 
 Each `send_text()` message is limited to 256 characters (the server limit); longer text raises `ValueError` -- splitting is up to you.
@@ -213,7 +285,7 @@ async with palabra.tts(language="en", voice_id="default_low") as tts:
 
 ## Options & limits
 
-All `palabra.tts(...)` options (languages, voices, `speed`, output formats, sample rates), rate limits and constraints are described in the [Realtime TTS API docs](https://docs.palabra.ai/docs/streaming_api/realtime_tts). Per-message voice overrides can be passed as keyword arguments of `send_text()`/`synthesize()`.
+All `palabra.tts(...)` options (languages, voices, `speed`, output formats, sample rates), rate limits, and constraints are described in the [Realtime TTS API docs](https://docs.palabra.ai/docs/streaming_api/realtime_tts). Per-message voice overrides can be passed as keyword arguments of `send_text()`/`synthesize()`.
 
 [Connection options](#connection-options) are the same as in `translation()`, including `ws_url=`/`token=` (the TTS endpoint is the `ws_tts_url` field of the session).
 
@@ -223,7 +295,7 @@ All `palabra.tts(...)` options (languages, voices, `speed`, output formats, samp
 
 ## Errors
 
-Shared by both APIs:
+Shared by all APIs:
 
 - `AuthError` — missing/invalid credentials.
 - `SessionError` — REST/WebSocket connection problems (including a crashed receive loop — the original exception is attached as `__cause__`).
@@ -250,13 +322,14 @@ while True:
 
 ## Examples
 
-| File | What it shows |
-|---|---|
-| [`examples/streaming.py`](examples/streaming.py) | feeding chunks + async event loop |
-| [`examples/mic_to_speakers.py`](examples/mic_to_speakers.py) | live microphone translation (`uv add "palabra-ai[devices]"`) |
-| [`examples/realtime_tts.py`](examples/realtime_tts.py) | standalone Realtime TTS API |
-| [`examples/multi_language.py`](examples/multi_language.py) | several targets, per-target voices |
-| [`examples/file_to_file.py`](examples/file_to_file.py) | offline file translation (see the caveat above) |
+| File                                                                   | What it shows                                                                                |
+|------------------------------------------------------------------------|----------------------------------------------------------------------------------------------|
+| [`examples/realtime_tts.py`](examples/realtime_tts.py)                 | Realtime TTS API streaming-in generation example                                             |
+| [`examples/realtime_stt.py`](examples/realtime_stt.py)                 | Realtime Speech-to-Text API example live microphone example (`uv add "palabra-ai[devices]"`) |
+| [`examples/sts_buffer_streaming.py`](examples/sts_buffer_streaming.py) | Realtime Speech-to-Speech API feeding chunks + async event loop                              |
+| [`examples/sts_mic_to_speakers.py`](examples/sts_mic_to_speakers.py)   | Realtime Speech-to-Speech API  live microphone translation (`uv add "palabra-ai[devices]"`)  |
+| [`examples/sts_multi_language.py`](examples/sts_multi_language.py)     | Realtime Speech-to-Speech API  several targets, per-target voices                            |
+| [`examples/sts_file_to_file.py`](examples/sts_file_to_file.py)         | Realtime Speech-to-Speech API  offline file translation (see the caveat above)               |
 
 ## Development
 

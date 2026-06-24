@@ -1,9 +1,3 @@
-"""Audio helpers: stdlib WAV I/O, chunking, optional decoding via av.
-
-Everything operates on raw PCM s16le bytes. Server output is always
-24 kHz mono PCM s16le.
-"""
-
 from __future__ import annotations
 
 import asyncio

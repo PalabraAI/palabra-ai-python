@@ -1,9 +1,3 @@
-"""Typed events parsed from server messages.
-
-Field names follow the server's response models
-(SpeechToSpeechStreamAPIResponseMessage and friends).
-"""
-
 from __future__ import annotations
 
 import base64

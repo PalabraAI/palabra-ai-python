@@ -1,18 +1,3 @@
-"""Palabra real-time translation client (WebSocket transport).
-
-    palabra = Palabra()  # PALABRA_CLIENT_ID / PALABRA_CLIENT_SECRET from env
-    async with palabra.translation(source="en", targets=["es"]) as session:
-        ...  # session.send_audio(chunk) + `async for event in session`
-
-For WebRTC (browser / client-side apps) use JavaScript with livekit-client
-instead -- see the WebRTC Quick Start in the Palabra docs and the official
-TypeScript example: https://github.com/PalabraAI/typescript-speech-to-speech-translation-example
-
-File helpers (translate_file etc.) exist for tests and one-off jobs. The
-service is real-time and input is paced accordingly, so a file takes about
-its own duration to translate.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -34,6 +19,7 @@ from .exc import AuthError, NotReadyError, SessionError, TaskError
 from .task import build_task
 
 if TYPE_CHECKING:
+    from .stt import SttSession
     from .tts import TtsSession
 
 DEFAULT_API_URL = "https://api.palabra.ai"
@@ -214,6 +200,55 @@ class Palabra:
         if ws_url is not None and session is not None:
             raise ValueError("session= is mutually exclusive with ws_url/token")
         return TtsSession(self, init, session=session, ws_url=ws_url, token=token)
+
+    def stt(
+        self,
+        language: str | None = None,
+        *,
+        format: str = "pcm_s16le",
+        sample_rate: int | None = None,
+        translate_languages: str | Sequence[str] | None = None,
+        enable_filler_filter: bool | None = None,
+        session: Session | None = None,
+        ws_url: str | None = None,
+        token: str | None = None,
+    ) -> SttSession:
+        """Open a standalone Realtime Speech-to-Text (ASR) session (use as `async with`).
+
+        Settings are sent as URL query parameters:
+        - language: source language code; defaults to auto-detect when omitted.
+        - format: audio format (pcm_s16le | pcm_f32le/be | pcm_s32le/be | mulaw |
+          alaw | webm | mp3 | aac | ogg | flac | wav); see the docs.
+        - sample_rate: required for raw PCM formats other than 16 kHz pcm_s16le;
+          omitted when None (the server assumes 16000).
+        - translate_languages: target language(s) for translated_transcription
+          (a comma string or a sequence of codes).
+        - enable_filler_filter: server default is True for every language but ja.
+
+        Connection options work like in translation(): default REST session,
+        session=, or ws_url=/token= to connect directly. Unlike the other
+        products the ASR endpoint is fixed (derived from api_url), not taken
+        from the session response.
+        """
+        from .stt import SttSession
+
+        params: dict[str, str] = {"format": format}
+        if sample_rate is not None:
+            params["sample_rate"] = str(sample_rate)
+        if language is not None:
+            params["language"] = language
+        if translate_languages:
+            if not isinstance(translate_languages, str):
+                translate_languages = ",".join(translate_languages)
+            params["translate_languages"] = translate_languages
+        if enable_filler_filter is not None:
+            params["enable_filler_filter"] = "true" if enable_filler_filter else "false"
+
+        if (ws_url is None) != (token is None):
+            raise ValueError("ws_url and token must be passed together")
+        if ws_url is not None and session is not None:
+            raise ValueError("session= is mutually exclusive with ws_url/token")
+        return SttSession(self, params, session=session, ws_url=ws_url, token=token)
 
     async def atranslate_file(
         self,
