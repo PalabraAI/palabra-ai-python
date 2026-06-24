@@ -1,12 +1,3 @@
-"""set_task payload builder.
-
-Produces the structure the server expects in ``set_task``. The client does
-not validate option values -- the server does. For the full list of options
-and their constraints see the API reference: https://docs.palabra.ai
-Only frequently used options get arguments; anything else can be patched
-onto the returned dict or passed per-target via targets={"es": {...}}.
-"""
-
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence

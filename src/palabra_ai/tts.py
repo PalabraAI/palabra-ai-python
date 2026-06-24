@@ -1,23 +1,3 @@
-"""Realtime TTS API client (the standalone text-to-speech WebSocket).
-
-This is a separate Palabra product from the Speech-to-Speech Translation API:
-no translation pipeline, just low-latency synthesis of text you stream in
-(e.g. from an LLM). Entry point: Palabra.tts(). To speak text inside a
-*translation* session, use TranslationSession.speak() instead.
-
-    async with palabra.tts(language="en", voice_id="default_low") as tts:
-        pcm = await tts.synthesize("Hello there!")
-
-    # or stream pieces in (e.g. from an LLM) and consume chunks as they arrive
-    async with palabra.tts(language="en", voice_id="default_low") as tts:
-        await tts.send_text("The sun was setting over the mountains,")
-        await tts.send_text(" casting long shadows below.", eos=True)
-        async for chunk in tts:
-            play(chunk.audio)
-            if chunk.last_chunk:
-                break
-"""
-
 from __future__ import annotations
 
 import asyncio

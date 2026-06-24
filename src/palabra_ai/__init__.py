@@ -21,6 +21,7 @@ from .events import (
     Transcript,
 )
 from .exc import AuthError, NotReadyError, PalabraError, SessionError, TaskError
+from .stt import SttSession, SttTranscript
 from .task import build_task
 from .tts import TtsChunk, TtsSession
 
@@ -43,6 +44,8 @@ __all__ = [
     "Session",
     "SessionError",
     "StreamEnd",
+    "SttSession",
+    "SttTranscript",
     "TaskError",
     "TaskInfo",
     "Transcript",

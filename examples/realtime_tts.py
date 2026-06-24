@@ -1,16 +1,10 @@
-#!/usr/bin/env python3
-"""Standalone Realtime TTS API: stream text in, get audio out.
-
-No translation pipeline involved -- this is the dedicated TTS product.
-"""
-
 import asyncio
 
 from palabra_ai import Palabra, write_wav
 
 
 async def main():
-    palabra = Palabra()
+    palabra = Palabra() # set your credentials here or vie ENV
 
     async with palabra.tts(language="en", voice_id="default_low") as tts:
         # one-shot: send text, collect all chunks

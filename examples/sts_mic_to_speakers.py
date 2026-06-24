@@ -1,9 +1,3 @@
-#!/usr/bin/env python3
-"""Live mic -> translated speech in your speakers.
-
-Requires: pip install palabra-ai[devices]
-"""
-
 import asyncio
 import queue
 
@@ -41,7 +35,7 @@ async def main():
         else:
             outdata.fill(0)
 
-    palabra = Palabra()
+    palabra = Palabra() # set your credentials here or vie ENV
     async with palabra.translation(source="en", targets=["es"]) as session:
 
         async def feed():
