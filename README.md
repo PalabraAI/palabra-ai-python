@@ -67,30 +67,34 @@ Audio comes from *your* source — a microphone, a VoIP call leg, a telephony br
 
 ```python
 import asyncio
+import time
 from palabra_ai import Palabra, Transcript, Audio
+
+CHUNK_MS = 320  # ~320 ms of PCM (s16le, 24 kHz, mono)
 
 async def main():
     palabra = Palabra()
 
     async with palabra.translation(source="en", targets=["es"]) as session:
 
-        async def feed():
-            # any audio source
-            # chunks: PCM s16le, 24 kHz, mono, ~320 ms each, real-time paced
-            while chunk := await audio_buffer.get():
+        async def send_audio():
+            next_send = time.monotonic()
+            while chunk := await audio_buffer.get():  # your audio source
                 await session.send_audio(chunk)
-            await session.end(eos_timeout=4)  # let the tail finish, then the server closes
+                next_send += CHUNK_MS / 1000
+                await asyncio.sleep(max(0, next_send - time.monotonic()))
+            await session.end(eos_timeout=4)
 
-        feeder = asyncio.create_task(feed())
+        sender = asyncio.create_task(send_audio())
 
         async for event in session:
             match event:
                 case Transcript():
-                    print(event)              # "~ [lang] partial" / "[lang] final"
+                    print(event)
                 case Audio():
-                    play(event.pcm)           # s16le, 24 kHz, mono
+                    play(event.pcm)
 
-        await feeder
+        await sender
 
 asyncio.run(main())
 ```
