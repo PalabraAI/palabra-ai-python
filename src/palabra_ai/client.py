@@ -70,7 +70,7 @@ class Palabra:
             )
         return {"ClientID": self.client_id, "ClientSecret": self.client_secret}
 
-    async def create_session(self, subscriber_count: int = 0) -> Session:
+    async def create_session(self) -> Session:
         """Create a streaming session via REST.
 
         Transient failures (network errors, 5xx) are retried up to
@@ -86,7 +86,7 @@ class Palabra:
                         f"{self.api_url}/session-storage/session",
                         headers=self._headers(),
                         json={
-                            "data": {"subscriber_count": subscriber_count, "publisher_can_subscribe": True}
+                            "data": {}
                         },
                     )
             except httpx.TransportError as e:
