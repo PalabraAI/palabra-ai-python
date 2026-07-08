@@ -38,7 +38,6 @@ class Session:
     ws_url: str
     webrtc_url: str = ""
     webrtc_room_name: str = ""
-    ws_tts_url: str = ""
     subscriber: tuple[str, ...] = ()
 
 
@@ -106,7 +105,6 @@ class Palabra:
                 ws_url=data.get("ws_url", ""),
                 webrtc_url=data.get("webrtc_url", ""),
                 webrtc_room_name=data.get("webrtc_room_name", ""),
-                ws_tts_url=data.get("ws_tts_url", ""),
                 subscriber=tuple(data.get("subscriber") or ()),
             )
         raise SessionError(
@@ -179,8 +177,8 @@ class Palabra:
 
         format: pcm (s16le, the client default) | mp3 | wav.
         Connection options work like in translation(): default REST session,
-        or ws_url=/token= to connect directly (the TTS endpoint URL is the
-        ws_tts_url field of the session).
+        or ws_url=/token= to connect directly. Like the ASR endpoint, the TTS
+        endpoint is fixed (TTS_STREAM_URL), not taken from the session response.
         """
         from .tts import TtsSession
 
@@ -226,9 +224,9 @@ class Palabra:
         - enable_filler_filter: server default is True for every language but ja.
 
         Connection options work like in translation(): default REST session,
-        session=, or ws_url=/token= to connect directly. Unlike the other
-        products the ASR endpoint is fixed (derived from api_url), not taken
-        from the session response.
+        session=, or ws_url=/token= to connect directly. Like the TTS endpoint,
+        the ASR endpoint is fixed (derived from api_url), not taken from the
+        session response.
         """
         from .stt import SttSession
 

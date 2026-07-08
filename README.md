@@ -42,7 +42,7 @@ Both `translation()` and `tts()` accept the same three connection modes:
 
 1. **Default** — a session is created via REST on `async with` and deleted on exit. Nothing to manage.
 2. **`session=`** — manually create `Session` with `await palabra.create_session()`; its lifecycle is yours (the client won't delete it).
-3. **`ws_url=` + `token=`** — debug option: connect directly with a direct `ws_url` and already issued `publisher` token. For TTS the endpoint URL is the `ws_tts_url` field of the session. Here is an example:
+3. **`ws_url=` + `token=`** — debug option: connect directly with a direct `ws_url` and already issued `publisher` token. Here is an example:
 
 ```python
 palabra = Palabra()  # credentials not required in this mode
@@ -291,7 +291,7 @@ async with palabra.tts(language="en", voice_id="default_low") as tts:
 
 All `palabra.tts(...)` options (languages, voices, `speed`, output formats, sample rates), rate limits, and constraints are described in the [Realtime TTS API docs](https://docs.palabra.ai/docs/streaming_api/realtime_tts). Per-message voice overrides can be passed as keyword arguments of `send_text()`/`synthesize()`.
 
-[Connection options](#connection-options) are the same as in `translation()`, including `ws_url=`/`token=` (the TTS endpoint is the `ws_tts_url` field of the session).
+[Connection options](#connection-options) are the same as in `translation()`, including `ws_url=`/`token=`. Like the ASR endpoint, the TTS endpoint is a fixed address (`wss://stream.palabra.ai/tts-api/v1/text-to-speech/stream`), not taken from the session response.
 
 ---
 

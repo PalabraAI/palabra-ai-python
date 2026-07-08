@@ -18,6 +18,9 @@ if TYPE_CHECKING:
 
 MAX_TEXT_LEN = 256  # server limit per text message
 
+# The Realtime TTS endpoint is fixed (not taken from the session response).
+TTS_STREAM_URL = "wss://stream.palabra.ai/tts-api/v1/text-to-speech/stream"
+
 
 @dataclass(frozen=True)
 class TtsChunk(Event):
@@ -49,8 +52,8 @@ class TtsSession:
     """One Realtime TTS session over one WebSocket connection.
 
     Created via Palabra.tts(). On enter: create a REST session if needed,
-    connect to ws_tts_url and send init. The session persists until close;
-    settings can be overridden per send_text() call.
+    connect to the fixed TTS endpoint (TTS_STREAM_URL) and send init. The
+    session persists until close; settings can be overridden per send_text() call.
     """
 
     def __init__(
@@ -78,9 +81,7 @@ class TtsSession:
         else:
             if self._session is None:
                 self._session = await self._palabra.create_session()
-            if not self._session.ws_tts_url:
-                raise SessionError("Session has no ws_tts_url (Realtime TTS API not available?)")
-            url = f"{self._session.ws_tts_url}?token={self._session.publisher}"
+            url = f"{TTS_STREAM_URL}?token={self._session.publisher}"
         try:
             self._ws = await websockets.connect(url, ping_interval=10, ping_timeout=30, max_size=None)
         except Exception as e:

@@ -69,14 +69,16 @@ def palabra():
     return Palabra(client_id="test", client_secret="test")
 
 
-def tts_session(palabra, srv):
-    session = Session(id="s1", publisher="tok", ws_url="", ws_tts_url=f"ws://127.0.0.1:{srv.port}")
+def tts_session(palabra, srv, monkeypatch):
+    # the TTS endpoint is a fixed constant; point it at the fake server
+    monkeypatch.setattr("palabra_ai.tts.TTS_STREAM_URL", f"ws://127.0.0.1:{srv.port}")
+    session = Session(id="s1", publisher="tok", ws_url="")
     return palabra.tts("en", voice_id="default_low", speed=0.6, session=session)
 
 
-async def test_init_and_synthesize(palabra):
+async def test_init_and_synthesize(palabra, monkeypatch):
     async with FakeTtsServer() as srv:
-        async with tts_session(palabra, srv) as tts:
+        async with tts_session(palabra, srv, monkeypatch) as tts:
             pcm = await tts.synthesize("Curious minds think alike.", timeout=5)
         assert pcm == b"\x01\x00" * 50
         assert srv.init["voice_options"]["voice_id"] == "default_low"
@@ -88,9 +90,9 @@ async def test_init_and_synthesize(palabra):
         assert len(srv.texts) == 1 and srv.texts[0]["is_eos"]
 
 
-async def test_send_text_streaming_pieces(palabra):
+async def test_send_text_streaming_pieces(palabra, monkeypatch):
     async with FakeTtsServer() as srv:
-        async with tts_session(palabra, srv) as tts:
+        async with tts_session(palabra, srv, monkeypatch) as tts:
             await tts.send_text("The sun was setting,", generation_id="gen-0001")
             await tts.send_text(" casting long shadows.", eos=True, generation_id="gen-0001")
             async for ev in tts:
@@ -100,9 +102,9 @@ async def test_send_text_streaming_pieces(palabra):
         assert [t["is_eos"] for t in srv.texts] == [False, True]
 
 
-async def test_send_text_rejects_oversized_and_empty(palabra):
+async def test_send_text_rejects_oversized_and_empty(palabra, monkeypatch):
     async with FakeTtsServer() as srv:
-        async with tts_session(palabra, srv) as tts:
+        async with tts_session(palabra, srv, monkeypatch) as tts:
             with pytest.raises(ValueError):
                 await tts.send_text("a" * (MAX_TEXT_LEN + 1))
             with pytest.raises(ValueError):
@@ -112,9 +114,9 @@ async def test_send_text_rejects_oversized_and_empty(palabra):
         assert srv.texts == []  # nothing reached the server
 
 
-async def test_cancel(palabra):
+async def test_cancel(palabra, monkeypatch):
     async with FakeTtsServer() as srv:
-        async with tts_session(palabra, srv) as tts:
+        async with tts_session(palabra, srv, monkeypatch) as tts:
             await tts.send_text("abc")
             await tts.cancel()
             await asyncio.sleep(0.1)
