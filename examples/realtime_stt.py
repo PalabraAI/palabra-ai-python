@@ -20,7 +20,7 @@ async def main():
         except queue.Full:
             pass
 
-    palabra = Palabra() # set your credentials here or vie ENV
+    palabra = Palabra()  # set your credentials here or vie ENV
 
     async with palabra.stt(language="ru", translate_languages=["es", "en"]) as stt:
 

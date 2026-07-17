@@ -20,6 +20,7 @@ MAX_TEXT_LEN = 256  # server limit per text message
 
 # The Realtime TTS endpoint is fixed (not taken from the session response).
 TTS_STREAM_URL = "wss://stream.palabra.ai/tts-api/v1/text-to-speech/stream"
+SESSION_INTENT = "tts_api"  # session kind for billing routing
 
 
 @dataclass(frozen=True)
@@ -80,7 +81,7 @@ class TtsSession:
             url = f"{self._direct[0]}?token={self._direct[1]}"
         else:
             if self._session is None:
-                self._session = await self._palabra.create_session()
+                self._session = await self._palabra.create_session(intent=SESSION_INTENT)
             url = f"{TTS_STREAM_URL}?token={self._session.publisher}"
         try:
             self._ws = await websockets.connect(url, ping_interval=10, ping_timeout=30, max_size=None)

@@ -1,6 +1,6 @@
 from palabra_ai import Palabra
 
-palabra = Palabra() # set your credentials here or vie ENV
+palabra = Palabra()  # set your credentials here or vie ENV
 
 results = palabra.translate_file(
     "presentation.mp3",  # mp3 needs: pip install palabra-ai[audio]
