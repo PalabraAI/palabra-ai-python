@@ -35,7 +35,7 @@ async def main():
         else:
             outdata.fill(0)
 
-    palabra = Palabra() # set your credentials here or vie ENV
+    palabra = Palabra()  # set your credentials here or vie ENV
     async with palabra.translation(source="en", targets=["es"]) as session:
 
         async def feed():

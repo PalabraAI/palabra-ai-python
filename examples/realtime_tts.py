@@ -4,7 +4,7 @@ from palabra_ai import Palabra, write_wav
 
 
 async def main():
-    palabra = Palabra() # set your credentials here or vie ENV
+    palabra = Palabra()  # set your credentials here or vie ENV
 
     async with palabra.tts(language="en", voice_id="default_low") as tts:
         # one-shot: send text, collect all chunks

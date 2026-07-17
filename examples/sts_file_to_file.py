@@ -1,6 +1,6 @@
 from palabra_ai import Palabra
 
-palabra = Palabra() # set your credentials here or vie ENV
+palabra = Palabra()  # set your credentials here or vie ENV
 
 palabra.translate_file(
     "speech_en.wav",
