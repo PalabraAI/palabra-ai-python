@@ -27,6 +27,7 @@ READY_TIMEOUT = 30.0
 GET_TASK_INTERVAL = 2.1  # server allows 1 get_task per 2s
 SESSION_RETRIES = 3  # create_session attempts on network errors / 5xx
 RETRY_BACKOFF = 0.5  # seconds; doubles per attempt (0.5, 1.0)
+S2S_SESSION_INTENT = "api"
 
 
 @dataclass(frozen=True)
@@ -69,12 +70,19 @@ class Palabra:
             )
         return {"ClientID": self.client_id, "ClientSecret": self.client_secret}
 
-    async def create_session(self) -> Session:
+    async def create_session(self, *, intent: str | None = None) -> Session:
         """Create a streaming session via REST.
+
+        intent is the session kind sent as data.intent; session-storage routes
+        and bills by it. Each product hardcodes its own value (s2s "api",
+        tts "tts_api", stt "stt") — not a user choice. Omitted when None.
 
         Transient failures (network errors, 5xx) are retried up to
         SESSION_RETRIES times with backoff; 4xx fails immediately.
         """
+        data: dict[str, Any] = {}
+        if intent is not None:
+            data["intent"] = intent
         last_error: Exception | None = None
         for attempt in range(SESSION_RETRIES):
             if attempt:
@@ -84,9 +92,7 @@ class Palabra:
                     resp = await client.post(
                         f"{self.api_url}/session-storage/session",
                         headers=self._headers(),
-                        json={
-                            "data": {}
-                        },
+                        json={"data": data},
                     )
             except httpx.TransportError as e:
                 last_error = e
@@ -332,7 +338,7 @@ class TranslationSession:
 
     async def __aenter__(self) -> TranslationSession:
         if self._session is None:
-            self._session = await self._palabra.create_session()
+            self._session = await self._palabra.create_session(intent=S2S_SESSION_INTENT)
         url = f"{self._session.ws_url}?token={self._session.publisher}"
         try:
             self._ws = await websockets.connect(url, ping_interval=10, ping_timeout=30, max_size=None)

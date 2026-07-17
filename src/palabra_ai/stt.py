@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from .client import Palabra, Session
 
 ASR_STREAM_PATH = "/asr/v1/speech-to-text/stream"
+SESSION_INTENT = "stt"  # session kind for billing routing
 DEFAULT_SAMPLE_RATE = 16000  # ASR recommended/default input rate (translation/TTS use 24k)
 
 _STT_TRANSCRIPT_TYPES = frozenset({"transcription", "translated_transcription"})
@@ -110,7 +111,7 @@ class SttSession:
             base, token = self._direct
         else:
             if self._session is None:
-                self._session = await self._palabra.create_session()
+                self._session = await self._palabra.create_session(intent=SESSION_INTENT)
             base = _asr_ws_url(self._palabra.api_url)
             token = self._session.publisher
         url = f"{base}?{urlencode({'token': token, **self._params}, safe=',')}"
