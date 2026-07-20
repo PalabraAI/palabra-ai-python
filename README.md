@@ -16,44 +16,36 @@ Palabra has three separate streaming APIs, and the client mirrors that at the to
 | [**Realtime Speech-to-Text API**](#speech-to-text-api)                             | `palabra.stt(...)`         | transcription API: stream audio in, incremental text (and optional translations) out |
 | [**Realtime TTS API**](#realtime-tts-api)                                          | `palabra.tts(...)`         | speech synthesis API: stream text in (e.g. from an LLM), audio out                   |
 
-Authentication, connection options, [errors](#errors) and [reconnection](#reconnection) are shared between the two.
+Authentication, regions, [errors](#errors) and [reconnection](#reconnection) are shared by all three.
 
 ## Authentication
 
-Credentials come from the constructor or from the environment:
+Everything is driven by two values — an **API Key** and a **region**; all endpoints are derived from them automatically. Create your API Key on the [Palabra API Keys page](https://platform.palabra.dev/api-keys) and set it via the environment or the constructor:
 
 ```bash
-export PALABRA_CLIENT_ID=...
-export PALABRA_CLIENT_SECRET=...
+export PALABRA_API_KEY=...
+export PALABRA_REGION=eu   # optional, defaults to "eu"
 ```
 
 ```python
 from palabra_ai import Palabra
 
-palabra = Palabra()                                      # reads the env vars
-palabra = Palabra(client_id="...", client_secret="...")  # or explicit
+palabra = Palabra()                            # reads the env vars
+palabra = Palabra(api_key="...", region="eu")  # or explicit
 ```
 
-Credentials are only used for the REST API (session creation/deletion). They are **not required** for the direct-connection mode below.
+The API Key authorizes the WebSocket connection directly: a streaming session is created server-side when you connect and cleaned up when the connection ends — there is nothing to manage.
 
-## Connection options
+## Regions
 
-Both `translation()` and `tts()` accept the same three connection modes:
+Availability per region (more regions and endpoints are being added over time):
 
-1. **Default** — a session is created via REST on `async with` and deleted on exit. Nothing to manage.
-2. **`session=`** — manually create `Session` with `await palabra.create_session()`; its lifecycle is yours (the client won't delete it).
-3. **`ws_url=` + `token=`** — debug option: connect directly with a direct `ws_url` and already issued `publisher` token. Here is an example:
+| Region | Speech-to-Speech Translation | Speech-to-Text | TTS |
+|--------|------------------------------|----------------|-----|
+| `eu`   | ✓                            | ✓              | ✓   |
+| `us`   | —                            | —              | ✓   |
 
-```python
-palabra = Palabra()  # credentials not required in this mode
-async with palabra.translation(
-    source="en",
-    targets=["es"],
-    ws_url=ws_url,
-    token=publisher_token
-) as session:
-    ...
-```
+Opening a stream for a product that is not available in the configured region raises `ValueError` with the list of regions where it is.
 
 ---
 
@@ -99,7 +91,7 @@ async def main():
 asyncio.run(main())
 ```
 
-`async with palabra.translation(...)` does everything for you: creates a session via REST, connects the WebSocket, sends translation task, waits until the pipeline actually confirms the task, and cleans up on exit.
+`async with palabra.translation(...)` does everything for you: connects the WebSocket (your API Key authorizes it; a streaming session is created server-side automatically), sends the translation task, waits until the pipeline actually confirms it, and cleans up on exit.
 
 Two rules for the input stream:
 
@@ -291,7 +283,7 @@ async with palabra.tts(language="en", voice_id="default_low") as tts:
 
 All `palabra.tts(...)` options (languages, voices, `speed`, output formats, sample rates), rate limits, and constraints are described in the [Realtime TTS API docs](https://docs.palabra.ai/docs/streaming_api/realtime_tts). Per-message voice overrides can be passed as keyword arguments of `send_text()`/`synthesize()`.
 
-[Connection options](#connection-options) are the same as in `translation()`, including `ws_url=`/`token=`. Like the ASR endpoint, the TTS endpoint is a fixed address (`wss://stream.palabra.ai/tts-api/v1/text-to-speech/stream`), not taken from the session response.
+TTS is currently available in the `eu` and `us` [regions](#regions).
 
 ---
 
@@ -301,12 +293,11 @@ All `palabra.tts(...)` options (languages, voices, `speed`, output formats, samp
 
 Shared by all APIs:
 
-- `AuthError` — missing/invalid credentials.
-- `SessionError` — REST/WebSocket connection problems (including a crashed receive loop — the original exception is attached as `__cause__`).
+- `AuthError` — missing/invalid API Key.
+- `SessionError` — WebSocket connection problems (including a crashed receive loop — the original exception is attached as `__cause__`).
 - `NotReadyError` — the pipeline didn't confirm `set_task` in time (translation only).
 - `TaskError` — the server rejected `set_task` (raised immediately on `async with`, with the server's `code`/`desc`), or raised by `session.raise_on_error(event)` for server `error` messages; by default in-stream errors are delivered as `ServerError` events so a long-running stream survives recoverable errors.
-
-REST session creation retries transient failures (network errors, 5xx) a few times with backoff; 4xx fails immediately.
+- `ValueError` — the requested product is not available in the configured [region](#regions), or an unknown region was set.
 
 ## Reconnection
 
@@ -341,6 +332,15 @@ while True:
 uv sync --dev   # editable install + pytest/ruff
 make check      # ruff check + tests + format check
 ```
+
+## Migrating from 1.x
+
+| 1.x | 2.0 |
+|---|---|
+| `Palabra(client_id=..., client_secret=...)` / `PALABRA_CLIENT_ID`, `PALABRA_CLIENT_SECRET` | `Palabra(api_key=..., region=...)` / `PALABRA_API_KEY`, `PALABRA_REGION` — create the key at [platform.palabra.dev/api-keys](https://platform.palabra.dev/api-keys) |
+| REST session management: `create_session()` / `delete_session()` / `session=` / `Session` | removed — the API Key authorizes the WebSocket directly, sessions are managed server-side |
+| `Palabra(api_url=...)` | removed — endpoints are derived from `region` (see [Regions](#regions)) |
+| `ws_url=` + `token=` direct mode | removed |
 
 ## Migrating from 0.x
 

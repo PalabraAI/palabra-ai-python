@@ -5,12 +5,12 @@ import base64
 import contextlib
 import json
 import os
+import uuid
 from collections.abc import AsyncIterator, Callable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-import httpx
 import websockets
 
 from .audio import OUTPUT_SAMPLE_RATE, chunks, load_pcm, paced_chunks, write_wav
@@ -22,102 +22,74 @@ if TYPE_CHECKING:
     from .stt import SttSession
     from .tts import TtsSession
 
-DEFAULT_API_URL = "https://api.palabra.ai"
 READY_TIMEOUT = 30.0
 GET_TASK_INTERVAL = 2.1  # server allows 1 get_task per 2s
-SESSION_RETRIES = 3  # create_session attempts on network errors / 5xx
-RETRY_BACKOFF = 0.5  # seconds; doubles per attempt (0.5, 1.0)
+
+DEFAULT_REGION = "eu"
 
 
 @dataclass(frozen=True)
-class Session:
-    """What POST /session-storage/session returns."""
+class Region:
+    """WebSocket endpoints of one Palabra region (None = not available there yet)."""
 
-    id: str
-    publisher: str = field(repr=False)  # the token; kept out of repr/logs
-    ws_url: str
-    webrtc_url: str = ""
-    webrtc_room_name: str = ""
-    subscriber: tuple[str, ...] = ()
+    translation: str | None = None
+    stt: str | None = None
+    tts: str | None = None
+
+
+# Regions and their per-product endpoints; more regions and URLs will be added
+# over time. The translation URL carries a {random_hash} placeholder, filled
+# with a fresh random string per connection (used to distribute connections
+# across translation servers).
+REGIONS: dict[str, Region] = {
+    "eu": Region(
+        translation="wss://streaming.palabra.ai/streaming-api/{random_hash}/v1/speech-to-speech/stream",
+        stt="wss://api.palabra.ai/asr/v1/speech-to-text/stream",
+        tts="wss://stream.palabra.ai/tts-api/v1/text-to-speech/stream",
+    ),
+    "us": Region(
+        tts="wss://stream.us.palabra.ai/tts-api/v1/text-to-speech/stream",
+    ),
+}
 
 
 class Palabra:
-    """Entry point: credentials, session management, stream factory.
+    """Entry point: API Key + region, stream factory.
 
-    Credentials are only needed for the REST API. With a ready ws_url +
-    publisher token (issued by your backend, for example) pass them to
-    translation()/tts() directly and skip REST entirely.
+    The API Key (create one at https://platform.palabra.dev/api-keys) comes
+    from api_key= or $PALABRA_API_KEY. The region comes from region= or
+    $PALABRA_REGION (default "eu"); endpoints are derived from it
+    automatically. The key authorizes the WebSocket connection directly —
+    a streaming session is created server-side and cleaned up when the
+    connection ends.
     """
 
-    def __init__(
-        self,
-        client_id: str | None = None,
-        client_secret: str | None = None,
-        *,
-        api_url: str = DEFAULT_API_URL,
-    ):
-        self.client_id = client_id or os.getenv("PALABRA_CLIENT_ID")
-        self.client_secret = client_secret or os.getenv("PALABRA_CLIENT_SECRET")
-        self.api_url = api_url.rstrip("/")
+    def __init__(self, api_key: str | None = None, *, region: str | None = None):
+        self.api_key = api_key or os.getenv("PALABRA_API_KEY")
+        self.region = (region or os.getenv("PALABRA_REGION") or DEFAULT_REGION).lower()
+        if self.region not in REGIONS:
+            raise ValueError(
+                f"Unknown region {self.region!r}; available regions: {', '.join(sorted(REGIONS))}"
+            )
 
-    def _headers(self) -> dict[str, str]:
-        if not self.client_id or not self.client_secret:
+    def _token(self) -> str:
+        if not self.api_key:
             raise AuthError(
-                "Missing credentials: pass client_id/client_secret or set "
-                "PALABRA_CLIENT_ID / PALABRA_CLIENT_SECRET "
-                "(or pass ws_url= and token= to translation() to skip the REST API)"
+                "Missing API Key: pass api_key= or set PALABRA_API_KEY "
+                "(create one at https://platform.palabra.dev/api-keys)"
             )
-        return {"ClientID": self.client_id, "ClientSecret": self.client_secret}
+        return self.api_key
 
-    async def create_session(self) -> Session:
-        """Create a streaming session via REST.
-
-        Transient failures (network errors, 5xx) are retried up to
-        SESSION_RETRIES times with backoff; 4xx fails immediately.
-        """
-        last_error: Exception | None = None
-        for attempt in range(SESSION_RETRIES):
-            if attempt:
-                await asyncio.sleep(RETRY_BACKOFF * 2 ** (attempt - 1))
-            try:
-                async with httpx.AsyncClient(timeout=30) as client:
-                    resp = await client.post(
-                        f"{self.api_url}/session-storage/session",
-                        headers=self._headers(),
-                        json={
-                            "data": {}
-                        },
-                    )
-            except httpx.TransportError as e:
-                last_error = e
-                continue
-            if resp.status_code >= 500:
-                last_error = SessionError(f"Session creation failed ({resp.status_code}): {resp.text[:500]}")
-                continue
-            if resp.status_code in (401, 403, 404):
-                raise AuthError(f"Session creation failed ({resp.status_code}): check your credentials")
-            if resp.status_code >= 400:
-                raise SessionError(f"Session creation failed ({resp.status_code}): {resp.text[:500]}")
-            data = resp.json().get("data") or {}
-            return Session(
-                id=data.get("id", ""),
-                publisher=data.get("publisher", ""),
-                ws_url=data.get("ws_url", ""),
-                webrtc_url=data.get("webrtc_url", ""),
-                webrtc_room_name=data.get("webrtc_room_name", ""),
-                subscriber=tuple(data.get("subscriber") or ()),
+    def _ws_endpoint(self, product: str) -> str:
+        """Endpoint of `product` ('translation' | 'stt' | 'tts') in the configured region."""
+        url = getattr(REGIONS[self.region], product)
+        if url is None:
+            available = ", ".join(sorted(name for name, r in REGIONS.items() if getattr(r, product)))
+            raise ValueError(
+                f"The {product} API is not available in region {self.region!r} yet;"
+                f" available regions: {available}"
             )
-        raise SessionError(
-            f"Session creation failed after {SESSION_RETRIES} attempts: {last_error}"
-        ) from last_error
-
-    async def delete_session(self, session_id: str) -> None:
-        async with httpx.AsyncClient(timeout=30) as client:
-            with contextlib.suppress(httpx.HTTPError):
-                await client.delete(
-                    f"{self.api_url}/session-storage/sessions/{session_id}",
-                    headers=self._headers(),
-                )
+        return url
 
     def translation(
         self,
@@ -125,20 +97,13 @@ class Palabra:
         targets: str | Sequence[str] | Mapping[str, dict] | None = None,
         *,
         task: dict[str, Any] | None = None,
-        session: Session | None = None,
-        ws_url: str | None = None,
-        token: str | None = None,
         **task_options: Any,
     ) -> TranslationSession:
         """Open a translation stream, use as `async with`.
 
         Settings: either source/targets (+ build_task options), or a complete
-        task= dict.
-
-        Connection: by default a session is created via REST and deleted on
-        exit. ws_url= + token= connect directly with an existing publisher
-        token (no REST, nothing deleted on exit). session= reuses a Session
-        from create_session() whose lifecycle you own.
+        task= dict. The client connects to the region's endpoint with your
+        API Key.
         """
         if task is None:
             if source is None or targets is None:
@@ -147,13 +112,7 @@ class Palabra:
         elif task_options or source or targets:
             raise ValueError("task= is mutually exclusive with source/targets/options")
 
-        if (ws_url is None) != (token is None):
-            raise ValueError("ws_url and token must be passed together")
-        if ws_url is not None:
-            if session is not None:
-                raise ValueError("session= is mutually exclusive with ws_url/token")
-            session = Session(id="", publisher=token, ws_url=ws_url)
-        return TranslationSession(self, task, session=session)
+        return TranslationSession(task, self._ws_endpoint("translation"), self._token())
 
     def tts(
         self,
@@ -165,9 +124,6 @@ class Palabra:
         model: str = "auto",
         format: str = "pcm",
         sample_rate: int = 24000,
-        session: Session | None = None,
-        ws_url: str | None = None,
-        token: str | None = None,
     ) -> TtsSession:
         """Open a standalone Realtime TTS session (use as `async with`).
 
@@ -176,9 +132,7 @@ class Palabra:
         session, use TranslationSession.speak().
 
         format: pcm (s16le, the client default) | mp3 | wav.
-        Connection options work like in translation(): default REST session,
-        or ws_url=/token= to connect directly. Like the ASR endpoint, the TTS
-        endpoint is fixed (TTS_STREAM_URL), not taken from the session response.
+        The client connects to the region's TTS endpoint with your API Key.
         """
         from .tts import TtsSession
 
@@ -193,11 +147,7 @@ class Palabra:
             "voice_options": voice_options,
             "output": {"format": format, "sample_rate": sample_rate},
         }
-        if (ws_url is None) != (token is None):
-            raise ValueError("ws_url and token must be passed together")
-        if ws_url is not None and session is not None:
-            raise ValueError("session= is mutually exclusive with ws_url/token")
-        return TtsSession(self, init, session=session, ws_url=ws_url, token=token)
+        return TtsSession(init, self._ws_endpoint("tts"), self._token())
 
     def stt(
         self,
@@ -207,9 +157,6 @@ class Palabra:
         sample_rate: int | None = None,
         translate_languages: str | Sequence[str] | None = None,
         enable_filler_filter: bool | None = None,
-        session: Session | None = None,
-        ws_url: str | None = None,
-        token: str | None = None,
     ) -> SttSession:
         """Open a standalone Realtime Speech-to-Text (ASR) session (use as `async with`).
 
@@ -223,10 +170,7 @@ class Palabra:
           (a comma string or a sequence of codes).
         - enable_filler_filter: server default is True for every language but ja.
 
-        Connection options work like in translation(): default REST session,
-        session=, or ws_url=/token= to connect directly. Like the TTS endpoint,
-        the ASR endpoint is fixed (derived from api_url), not taken from the
-        session response.
+        The client connects to the region's ASR endpoint with your API Key.
         """
         from .stt import SttSession
 
@@ -242,11 +186,7 @@ class Palabra:
         if enable_filler_filter is not None:
             params["enable_filler_filter"] = "true" if enable_filler_filter else "false"
 
-        if (ws_url is None) != (token is None):
-            raise ValueError("ws_url and token must be passed together")
-        if ws_url is not None and session is not None:
-            raise ValueError("session= is mutually exclusive with ws_url/token")
-        return SttSession(self, params, session=session, ws_url=ws_url, token=token)
+        return SttSession(params, self._ws_endpoint("stt"), self._token())
 
     async def atranslate_file(
         self,
@@ -297,17 +237,17 @@ class Palabra:
 class TranslationSession:
     """One live translation session over one WebSocket connection.
 
-    Created via Palabra.translation(). On enter: create a REST session if needed,
-    connect, send set_task and wait for the pipeline to confirm it. Iterating
-    yields events; iteration stops when the server closes the connection
-    (after end() or on a fatal error).
+    Created via Palabra.translation(). On enter: connect (the API Key in the
+    URL authorizes the connection; the server manages the streaming session),
+    send set_task and wait for the pipeline to confirm it. Iterating yields
+    events; iteration stops when the server closes the connection (after
+    end() or on a fatal error).
     """
 
-    def __init__(self, palabra: Palabra, task: dict[str, Any], *, session: Session | None = None):
-        self._palabra = palabra
+    def __init__(self, task: dict[str, Any], endpoint: str, token: str):
         self._task = task
-        self._session = session
-        self._own_session = session is None
+        self._endpoint = endpoint  # may carry a {random_hash} placeholder
+        self._token = token
         self._ws: websockets.ClientConnection | None = None
         self._events: asyncio.Queue[Event | None] = asyncio.Queue()
         self._recv_task: asyncio.Task | None = None
@@ -321,24 +261,17 @@ class TranslationSession:
         self._in_channels = src.get("channels", 1)
 
     @property
-    def session(self) -> Session:
-        if self._session is None:
-            raise SessionError("Session is not created yet (use 'async with')")
-        return self._session
-
-    @property
     def task(self) -> dict[str, Any]:
         return self._task
 
     async def __aenter__(self) -> TranslationSession:
-        if self._session is None:
-            self._session = await self._palabra.create_session()
-        url = f"{self._session.ws_url}?token={self._session.publisher}"
+        base = self._endpoint
+        if "{random_hash}" in base:
+            base = base.format(random_hash=uuid.uuid4().hex)
+        url = f"{base}?token={self._token}"
         try:
             self._ws = await websockets.connect(url, ping_interval=10, ping_timeout=30, max_size=None)
         except Exception as e:
-            if self._own_session:
-                await self._palabra.delete_session(self._session.id)
             raise SessionError(f"WebSocket connection failed: {e}") from e
         self._recv_task = asyncio.create_task(self._receive_loop())
         try:
@@ -365,8 +298,6 @@ class TranslationSession:
             with contextlib.suppress(Exception):
                 await self._ws.close()
             self._ws = None
-        if self._own_session and self._session is not None:
-            await self._palabra.delete_session(self._session.id)
 
     async def _wait_ready(self) -> None:
         # The server doesn't acknowledge set_task. get_task returns NOT_FOUND

@@ -6,20 +6,14 @@ import contextlib
 import json
 import uuid
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import websockets
 
 from .events import Event, Raw, ServerError, parse_event
 from .exc import SessionError, TaskError
 
-if TYPE_CHECKING:
-    from .client import Palabra, Session
-
 MAX_TEXT_LEN = 256  # server limit per text message
-
-# The Realtime TTS endpoint is fixed (not taken from the session response).
-TTS_STREAM_URL = "wss://stream.palabra.ai/tts-api/v1/text-to-speech/stream"
 
 
 @dataclass(frozen=True)
@@ -51,42 +45,25 @@ def _parse_tts_event(msg: dict[str, Any]) -> Event:
 class TtsSession:
     """One Realtime TTS session over one WebSocket connection.
 
-    Created via Palabra.tts(). On enter: create a REST session if needed,
-    connect to the fixed TTS endpoint (TTS_STREAM_URL) and send init. The
+    Created via Palabra.tts(). On enter: connect to the region's TTS endpoint
+    (the API Key in the URL authorizes the connection) and send init. The
     session persists until close; settings can be overridden per send_text() call.
     """
 
-    def __init__(
-        self,
-        palabra: Palabra,
-        init: dict[str, Any],
-        *,
-        session: Session | None = None,
-        ws_url: str | None = None,
-        token: str | None = None,
-    ):
-        self._palabra = palabra
+    def __init__(self, init: dict[str, Any], endpoint: str, token: str):
         self._init = init
-        self._session = session
-        self._own_session = session is None and ws_url is None
-        self._direct = (ws_url, token) if ws_url else None
+        self._endpoint = endpoint
+        self._token = token
         self._ws: websockets.ClientConnection | None = None
         self._events: asyncio.Queue[Event | None] = asyncio.Queue()
         self._recv_task: asyncio.Task | None = None
         self._recv_error: BaseException | None = None
 
     async def __aenter__(self) -> TtsSession:
-        if self._direct:
-            url = f"{self._direct[0]}?token={self._direct[1]}"
-        else:
-            if self._session is None:
-                self._session = await self._palabra.create_session()
-            url = f"{TTS_STREAM_URL}?token={self._session.publisher}"
+        url = f"{self._endpoint}?token={self._token}"
         try:
             self._ws = await websockets.connect(url, ping_interval=10, ping_timeout=30, max_size=None)
         except Exception as e:
-            if self._own_session and self._session is not None:
-                await self._palabra.delete_session(self._session.id)
             raise SessionError(f"TTS WebSocket connection failed: {e}") from e
         self._recv_task = asyncio.create_task(self._receive_loop())
         await self._send({"type": "init", **self._init})
@@ -105,8 +82,6 @@ class TtsSession:
             with contextlib.suppress(Exception):
                 await self._ws.close()
             self._ws = None
-        if self._own_session and self._session is not None:
-            await self._palabra.delete_session(self._session.id)
 
     async def _receive_loop(self) -> None:
         assert self._ws is not None

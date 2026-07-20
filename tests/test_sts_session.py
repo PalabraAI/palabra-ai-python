@@ -15,7 +15,7 @@ import json
 import pytest
 import websockets
 
-from palabra_ai import Audio, Palabra, Session, StreamEnd, Transcript
+from palabra_ai import Audio, Palabra, Region, StreamEnd, Transcript
 
 pytestmark = pytest.mark.asyncio
 
@@ -27,6 +27,7 @@ class FakeServer:
         self.started = False
         self.server = None
         self.port = None
+        self.path = None  # request path of the last connection (incl. query)
 
     async def __aenter__(self):
         self.server = await websockets.serve(self.handler, "127.0.0.1", 0)
@@ -38,6 +39,7 @@ class FakeServer:
         await self.server.wait_closed()
 
     async def handler(self, ws):
+        self.path = ws.request.path
         async for raw in ws:
             msg = json.loads(raw)
             mtype, data = msg["message_type"], msg.get("data", {})
@@ -109,17 +111,30 @@ class FakeServer:
 
 
 @pytest.fixture
-def palabra(monkeypatch):
-    p = Palabra(client_id="test", client_secret="test")
-    return p
+def palabra():
+    return Palabra(api_key="test-key")
 
 
-async def test_full_stream_flow(palabra):
+def _fake_region(monkeypatch, srv):
+    """Point the 'eu' region's translation endpoint at the fake server,
+    keeping the {random_hash} placeholder the real URL carries."""
+    monkeypatch.setattr(
+        "palabra_ai.client.REGIONS",
+        {
+            "eu": Region(
+                translation=f"ws://127.0.0.1:{srv.port}"
+                "/streaming-api/{random_hash}/v1/speech-to-speech/stream"
+            )
+        },
+    )
+
+
+async def test_full_stream_flow(palabra, monkeypatch):
     async with FakeServer() as srv:
-        session = Session(id="s1", publisher="tok", ws_url=f"ws://127.0.0.1:{srv.port}")
+        _fake_region(monkeypatch, srv)
 
         events = []
-        async with palabra.translation("en", "es", session=session) as s:
+        async with palabra.translation("en", "es") as s:
             chunk = b"\x00\x00" * int(24000 * 0.32)
             await s.send_audio(chunk)
             await s.end(eos_timeout=2)
@@ -127,6 +142,13 @@ async def test_full_stream_flow(palabra):
                 events.append(ev)
 
         assert srv.received_audio_chunks == 1
+        # the API Key went out as the token query parameter, and the
+        # {random_hash} placeholder was replaced with a real value
+        assert "token=test-key" in srv.path
+        assert "{random_hash}" not in srv.path
+        hash_part = srv.path.split("/streaming-api/")[1].split("/")[0]
+        assert len(hash_part) == 32  # uuid4().hex
+
         transcripts = [e for e in events if isinstance(e, Transcript)]
         audio = [e for e in events if isinstance(e, Audio)]
         assert any(t.is_eos and t.is_translation and t.text == "uno dos" for t in transcripts)
@@ -135,56 +157,39 @@ async def test_full_stream_flow(palabra):
         assert any(isinstance(e, StreamEnd) for e in events)
 
 
-async def test_direct_ws_url_token_without_credentials(monkeypatch):
-    """ws_url+token bypass: no credentials, no REST calls at all."""
-    monkeypatch.delenv("PALABRA_CLIENT_ID", raising=False)
-    monkeypatch.delenv("PALABRA_CLIENT_SECRET", raising=False)
-    palabra = Palabra()  # no credentials -- fine for direct connection
-
-    async def boom(*a, **kw):
-        raise AssertionError("REST API must not be used with ws_url/token")
-
-    monkeypatch.setattr(palabra, "create_session", boom)
-    monkeypatch.setattr(palabra, "delete_session", boom)
-
-    async with FakeServer() as srv:
-        async with palabra.translation("en", "es", ws_url=f"ws://127.0.0.1:{srv.port}", token="tok") as s:
-            await s.send_audio(b"\x00\x00" * int(24000 * 0.32))
-            await s.end(eos_timeout=1)
-            async for _ in s:
-                pass
-        assert srv.received_audio_chunks == 1
-
-
-async def test_credentials_required_only_for_rest(monkeypatch):
-    monkeypatch.delenv("PALABRA_CLIENT_ID", raising=False)
-    monkeypatch.delenv("PALABRA_CLIENT_SECRET", raising=False)
+async def test_missing_api_key_raises_auth_error(monkeypatch):
+    monkeypatch.delenv("PALABRA_API_KEY", raising=False)
     from palabra_ai import AuthError
 
     palabra = Palabra()  # does not raise
-    with pytest.raises(AuthError):
-        await palabra.create_session()
+    with pytest.raises(AuthError, match="PALABRA_API_KEY"):
+        palabra.translation("en", "es")
 
 
-async def test_stream_argument_validation(palabra):
-    with pytest.raises(ValueError):
-        palabra.translation("en", "es", ws_url="ws://x")  # token missing
-    with pytest.raises(ValueError):
-        palabra.translation("en", "es", token="tok")  # ws_url missing
-    with pytest.raises(ValueError):
-        palabra.translation(
-            "en",
-            "es",
-            ws_url="ws://x",
-            token="tok",
-            session=Session(id="s", publisher="p", ws_url="ws://y"),
-        )
+async def test_api_key_and_region_from_env(monkeypatch):
+    monkeypatch.setenv("PALABRA_API_KEY", "env-key")
+    monkeypatch.setenv("PALABRA_REGION", "us")
+    palabra = Palabra()
+    assert palabra.api_key == "env-key"
+    assert palabra.region == "us"
 
 
-async def test_send_pcm_paces_realtime(palabra):
+async def test_unknown_region_rejected():
+    with pytest.raises(ValueError, match="available regions"):
+        Palabra(api_key="k", region="mars")
+
+
+async def test_product_not_available_in_region():
+    # the us region has no translation endpoint yet
+    palabra = Palabra(api_key="k", region="us")
+    with pytest.raises(ValueError, match="not available in region 'us'"):
+        palabra.translation("en", "es")
+
+
+async def test_send_pcm_paces_realtime(palabra, monkeypatch):
     async with FakeServer() as srv:
-        session = Session(id="s1", publisher="tok", ws_url=f"ws://127.0.0.1:{srv.port}")
-        async with palabra.translation("en", "es", session=session) as s:
+        _fake_region(monkeypatch, srv)
+        async with palabra.translation("en", "es") as s:
             pcm = b"\x00\x00" * int(24000 * 0.96)  # 960 ms -> 3 chunks of 320 ms
             loop = asyncio.get_event_loop()
             t0 = loop.time()
@@ -197,7 +202,7 @@ async def test_send_pcm_paces_realtime(palabra):
         assert srv.received_audio_chunks == 3
 
 
-async def test_rejected_set_task_fails_fast_with_task_error(palabra):
+async def test_rejected_set_task_fails_fast_with_task_error(palabra, monkeypatch):
     """An ``error`` other than NOT_FOUND before readiness must raise TaskError
     immediately (with the server's reason), not NotReadyError after 30 s."""
     from palabra_ai import TaskError
@@ -216,12 +221,14 @@ async def test_rejected_set_task_fails_fast_with_task_error(palabra):
 
     server = await websockets.serve(handler, "127.0.0.1", 0)
     port = server.sockets[0].getsockname()[1]
+    monkeypatch.setattr(
+        "palabra_ai.client.REGIONS", {"eu": Region(translation=f"ws://127.0.0.1:{port}")}
+    )
     try:
-        session = Session(id="s1", publisher="tok", ws_url=f"ws://127.0.0.1:{port}")
         loop = asyncio.get_event_loop()
         t0 = loop.time()
         with pytest.raises(TaskError) as ei:
-            async with palabra.translation("en", "es", session=session):
+            async with palabra.translation("en", "es"):
                 pass
         assert ei.value.code == "VALIDATION_ERROR"
         assert loop.time() - t0 < 5  # no 30 s readiness timeout
@@ -230,7 +237,7 @@ async def test_rejected_set_task_fails_fast_with_task_error(palabra):
         await server.wait_closed()
 
 
-async def test_receive_loop_failure_surfaces_as_session_error(palabra):
+async def test_receive_loop_failure_surfaces_as_session_error(palabra, monkeypatch):
     """A crash in the receive loop (e.g. corrupt zlib output) must raise
     SessionError on iteration, not end the stream silently."""
     import zlib
@@ -238,95 +245,11 @@ async def test_receive_loop_failure_surfaces_as_session_error(palabra):
     from palabra_ai import SessionError
 
     async with FakeServer() as srv:
-        session = Session(id="s1", publisher="tok", ws_url=f"ws://127.0.0.1:{srv.port}")
+        _fake_region(monkeypatch, srv)
         # zlib output declared, but FakeServer sends plain pcm -> decompress fails
-        async with palabra.translation("en", "es", output_format="zlib_pcm_s16le", session=session) as s:
+        async with palabra.translation("en", "es", output_format="zlib_pcm_s16le") as s:
             await s.send_audio(b"\x00\x00" * int(24000 * 0.32))
             with pytest.raises(SessionError) as ei:
                 async for _ in s:
                     pass
             assert isinstance(ei.value.__cause__, zlib.error)
-
-
-class _FakeHttpResponse:
-    def __init__(self, status, data=None):
-        self.status_code = status
-        self.text = "server error"
-        self._data = data or {}
-
-    def json(self):
-        return {"data": self._data}
-
-
-def _fake_http_client(responses, calls):
-    """httpx.AsyncClient stand-in: pops one canned response per post()."""
-
-    class FakeClient:
-        def __init__(self, *a, **kw):
-            pass
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *exc):
-            pass
-
-        async def post(self, *a, **kw):
-            calls.append(1)
-            resp = responses.pop(0)
-            if isinstance(resp, Exception):
-                raise resp
-            return resp
-
-    return FakeClient
-
-
-async def test_create_session_retries_transient_then_succeeds(palabra, monkeypatch):
-    import httpx
-
-    calls = []
-    responses = [
-        httpx.ConnectError("boom"),
-        _FakeHttpResponse(503),
-        _FakeHttpResponse(200, {"id": "s1", "publisher": "tok", "ws_url": "ws://x"}),
-    ]
-    monkeypatch.setattr("palabra_ai.client.httpx.AsyncClient", _fake_http_client(responses, calls))
-    monkeypatch.setattr("palabra_ai.client.RETRY_BACKOFF", 0)
-
-    session = await palabra.create_session()
-    assert session.id == "s1"
-    assert len(calls) == 3
-
-
-async def test_create_session_does_not_retry_4xx(palabra, monkeypatch):
-    from palabra_ai import AuthError, SessionError
-
-    calls = []
-    monkeypatch.setattr(
-        "palabra_ai.client.httpx.AsyncClient", _fake_http_client([_FakeHttpResponse(401)], calls)
-    )
-    with pytest.raises(AuthError):
-        await palabra.create_session()
-    assert len(calls) == 1  # no retries on auth errors
-
-    calls.clear()
-    monkeypatch.setattr(
-        "palabra_ai.client.httpx.AsyncClient", _fake_http_client([_FakeHttpResponse(422)], calls)
-    )
-    with pytest.raises(SessionError):
-        await palabra.create_session()
-    assert len(calls) == 1  # no retries on client errors
-
-
-async def test_create_session_exhausts_retries(palabra, monkeypatch):
-    from palabra_ai import SessionError
-    from palabra_ai.client import SESSION_RETRIES
-
-    calls = []
-    responses = [_FakeHttpResponse(503)] * SESSION_RETRIES
-    monkeypatch.setattr("palabra_ai.client.httpx.AsyncClient", _fake_http_client(responses, calls))
-    monkeypatch.setattr("palabra_ai.client.RETRY_BACKOFF", 0)
-
-    with pytest.raises(SessionError, match="after 3 attempts"):
-        await palabra.create_session()
-    assert len(calls) == SESSION_RETRIES

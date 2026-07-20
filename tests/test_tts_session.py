@@ -11,7 +11,7 @@ import json
 import pytest
 import websockets
 
-from palabra_ai import Palabra, Session, TtsChunk
+from palabra_ai import Palabra, Region, TtsChunk
 from palabra_ai.tts import MAX_TEXT_LEN
 
 pytestmark = pytest.mark.asyncio
@@ -66,14 +66,16 @@ class FakeTtsServer:
 
 @pytest.fixture
 def palabra():
-    return Palabra(client_id="test", client_secret="test")
+    return Palabra(api_key="test-key")
 
 
 def tts_session(palabra, srv, monkeypatch):
-    # the TTS endpoint is a fixed constant; point it at the fake server
-    monkeypatch.setattr("palabra_ai.tts.TTS_STREAM_URL", f"ws://127.0.0.1:{srv.port}")
-    session = Session(id="s1", publisher="tok", ws_url="")
-    return palabra.tts("en", voice_id="default_low", speed=0.6, session=session)
+    # point the 'eu' region's TTS endpoint at the fake server
+    monkeypatch.setattr(
+        "palabra_ai.client.REGIONS",
+        {"eu": Region(tts=f"ws://127.0.0.1:{srv.port}")},
+    )
+    return palabra.tts("en", voice_id="default_low", speed=0.6)
 
 
 async def test_init_and_synthesize(palabra, monkeypatch):
@@ -123,8 +125,8 @@ async def test_cancel(palabra, monkeypatch):
         assert srv.cancelled == 1
 
 
-async def test_tts_factory_validation(palabra):
-    with pytest.raises(ValueError):
-        palabra.tts("en", ws_url="ws://x")  # token missing
-    with pytest.raises(ValueError):
-        palabra.tts("en", ws_url="ws://x", token="t", session=Session(id="s", publisher="p", ws_url=""))
+async def test_tts_available_in_us_region():
+    # the us region has a TTS endpoint; the factory resolves it without error
+    palabra = Palabra(api_key="k", region="us")
+    tts = palabra.tts("en")
+    assert tts._endpoint.startswith("wss://stream.us.palabra.ai/")

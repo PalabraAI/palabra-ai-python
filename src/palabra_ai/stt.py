@@ -5,7 +5,7 @@ import contextlib
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 from urllib.parse import urlencode
 
 import websockets
@@ -14,10 +14,6 @@ from .audio import chunks, load_pcm, paced_chunks
 from .events import Event, parse_event
 from .exc import AuthError, SessionError
 
-if TYPE_CHECKING:
-    from .client import Palabra, Session
-
-ASR_STREAM_PATH = "/asr/v1/speech-to-text/stream"
 DEFAULT_SAMPLE_RATE = 16000  # ASR recommended/default input rate (translation/TTS use 24k)
 
 _STT_TRANSCRIPT_TYPES = frozenset({"transcription", "translated_transcription"})
@@ -65,40 +61,19 @@ def _parse_stt_event(msg: dict[str, Any]) -> Event:
     return parse_event(msg)  # anything unexpected
 
 
-def _asr_ws_url(api_url: str) -> str:
-    """Derive the ASR WebSocket endpoint from the REST api_url (same host)."""
-    if api_url.startswith("https://"):
-        base = "wss://" + api_url[len("https://") :]
-    elif api_url.startswith("http://"):
-        base = "ws://" + api_url[len("http://") :]
-    else:
-        base = api_url
-    return base.rstrip("/") + ASR_STREAM_PATH
-
-
 class SttSession:
     """One Realtime ASR session over one WebSocket connection.
 
-    Created via Palabra.stt(). On enter: create a REST session if needed,
-    connect to the ASR endpoint with all settings as query parameters, and
-    start receiving. Iterating yields events; iteration stops when the server
+    Created via Palabra.stt(). On enter: connect to the region's ASR endpoint
+    with the API Key and all settings as query parameters, and start
+    receiving. Iterating yields events; iteration stops when the server
     closes the connection.
     """
 
-    def __init__(
-        self,
-        palabra: Palabra,
-        params: dict[str, str],
-        *,
-        session: Session | None = None,
-        ws_url: str | None = None,
-        token: str | None = None,
-    ):
-        self._palabra = palabra
+    def __init__(self, params: dict[str, str], endpoint: str, token: str):
         self._params = params  # query parameters, excluding the token
-        self._session = session
-        self._own_session = session is None and ws_url is None
-        self._direct = (ws_url, token) if ws_url else None
+        self._endpoint = endpoint
+        self._token = token
         self._in_rate = int(params.get("sample_rate") or DEFAULT_SAMPLE_RATE)
         self._ws: websockets.ClientConnection | None = None
         self._events: asyncio.Queue[Event | None] = asyncio.Queue()
@@ -106,24 +81,14 @@ class SttSession:
         self._recv_error: BaseException | None = None
 
     async def __aenter__(self) -> SttSession:
-        if self._direct:
-            base, token = self._direct
-        else:
-            if self._session is None:
-                self._session = await self._palabra.create_session()
-            base = _asr_ws_url(self._palabra.api_url)
-            token = self._session.publisher
-        url = f"{base}?{urlencode({'token': token, **self._params}, safe=',')}"
+        url = f"{self._endpoint}?{urlencode({'token': self._token, **self._params}, safe=',')}"
         try:
             self._ws = await websockets.connect(url, ping_interval=10, ping_timeout=30, max_size=None)
         except Exception as e:
-            if self._own_session and self._session is not None:
-                await self._palabra.delete_session(self._session.id)
-
             # Auth/routing failures surface as the HTTP status of the failed upgrade.
             status = getattr(getattr(e, "response", None), "status_code", None)
             if status == 401:
-                raise AuthError("STT connection rejected (401): invalid or missing token") from e
+                raise AuthError("STT connection rejected (401): invalid or missing API Key") from e
             if status == 409:
                 raise SessionError(
                     "STT connection rejected (409): a session is already active for this identity"
@@ -145,8 +110,6 @@ class SttSession:
             with contextlib.suppress(Exception):
                 await self._ws.close()
             self._ws = None
-        if self._own_session and self._session is not None:
-            await self._palabra.delete_session(self._session.id)
 
     async def _receive_loop(self) -> None:
         assert self._ws is not None

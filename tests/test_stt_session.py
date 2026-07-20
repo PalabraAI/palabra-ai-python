@@ -13,7 +13,7 @@ from urllib.parse import parse_qs, urlsplit
 import pytest
 import websockets
 
-from palabra_ai import Palabra, Session, SttTranscript
+from palabra_ai import Palabra, Region, SttTranscript
 
 pytestmark = pytest.mark.asyncio
 
@@ -34,10 +34,6 @@ class FakeAsrServer:
     async def __aexit__(self, *exc):
         self.server.close()
         await self.server.wait_closed()
-
-    @property
-    def api_url(self):  # what Palabra(api_url=...) should point at
-        return f"http://127.0.0.1:{self.port}"
 
     async def handler(self, ws):
         self.query = parse_qs(urlsplit(ws.request.path).query)
@@ -90,25 +86,29 @@ class FakeAsrServer:
 
 @pytest.fixture
 def palabra():
-    return Palabra(client_id="test", client_secret="test")
+    return Palabra(api_key="test-key")
 
 
-def _session(srv):
-    return Session(id="s1", publisher="tok", ws_url="")
+def _fake_region(monkeypatch, srv):
+    """Point the 'eu' region's STT endpoint at the fake server."""
+    monkeypatch.setattr(
+        "palabra_ai.client.REGIONS",
+        {"eu": Region(stt=f"ws://127.0.0.1:{srv.port}/asr/v1/speech-to-text/stream")},
+    )
 
 
-async def test_connect_query_and_transcription(palabra):
+async def test_connect_query_and_transcription(palabra, monkeypatch):
     async with FakeAsrServer() as srv:
-        palabra.api_url = srv.api_url  # ASR endpoint is derived from api_url
+        _fake_region(monkeypatch, srv)
         events = []
-        async with palabra.stt(language="en", session=_session(srv)) as stt:
+        async with palabra.stt(language="en") as stt:
             await stt.send_audio(b"\x00\x00" * 100)
             async for ev in stt:
                 events.append(ev)
 
         assert srv.audio_frames == 1
-        # settings went out as query parameters, including the session token
-        assert srv.query["token"] == ["tok"]
+        # settings went out as query parameters, including the API Key as token
+        assert srv.query["token"] == ["test-key"]
         assert srv.query["format"] == ["pcm_s16le"]
         assert srv.query["language"] == ["en"]
 
@@ -119,11 +119,11 @@ async def test_connect_query_and_transcription(palabra):
         assert final.end_time == 1.9 and not final.is_translation
 
 
-async def test_translate_languages_query_and_messages(palabra):
+async def test_translate_languages_query_and_messages(palabra, monkeypatch):
     async with FakeAsrServer() as srv:
-        palabra.api_url = srv.api_url
+        _fake_region(monkeypatch, srv)
         events = []
-        async with palabra.stt(language="en", translate_languages=["es", "de"], session=_session(srv)) as stt:
+        async with palabra.stt(language="en", translate_languages=["es", "de"]) as stt:
             await stt.send_audio(b"\x00\x00" * 100)
             async for ev in stt:
                 events.append(ev)
@@ -135,12 +135,10 @@ async def test_translate_languages_query_and_messages(palabra):
         assert all(t.is_eos for t in translations)
 
 
-async def test_enable_filler_filter_query(palabra):
+async def test_enable_filler_filter_query(palabra, monkeypatch):
     async with FakeAsrServer() as srv:
-        palabra.api_url = srv.api_url
-        async with palabra.stt(
-            language="ja", enable_filler_filter=False, sample_rate=48000, session=_session(srv)
-        ) as stt:
+        _fake_region(monkeypatch, srv)
+        async with palabra.stt(language="ja", enable_filler_filter=False, sample_rate=48000) as stt:
             await stt.send_audio(b"\x00\x00" * 100)
             async for _ in stt:
                 pass
@@ -148,10 +146,10 @@ async def test_enable_filler_filter_query(palabra):
         assert srv.query["sample_rate"] == ["48000"]
 
 
-async def test_send_pcm_paces_realtime(palabra):
+async def test_send_pcm_paces_realtime(palabra, monkeypatch):
     async with FakeAsrServer(close_after=2) as srv:
-        palabra.api_url = srv.api_url
-        async with palabra.stt(language="en", session=_session(srv)) as stt:
+        _fake_region(monkeypatch, srv)
+        async with palabra.stt(language="en") as stt:
             # 640 ms at 16 kHz mono -> 2 chunks of 320 ms
             pcm = b"\x00\x00" * int(16000 * 0.64)
             loop = asyncio.get_event_loop()
@@ -163,43 +161,14 @@ async def test_send_pcm_paces_realtime(palabra):
         assert srv.audio_frames == 2
 
 
-async def test_direct_ws_url_token_bypasses_rest(monkeypatch):
-    """ws_url+token: no credentials, no REST calls at all."""
-    monkeypatch.delenv("PALABRA_CLIENT_ID", raising=False)
-    monkeypatch.delenv("PALABRA_CLIENT_SECRET", raising=False)
-    palabra = Palabra()
-
-    async def boom(*a, **kw):
-        raise AssertionError("REST API must not be used with ws_url/token")
-
-    monkeypatch.setattr(palabra, "create_session", boom)
-    monkeypatch.setattr(palabra, "delete_session", boom)
-
-    async with FakeAsrServer() as srv:
-        base = f"ws://127.0.0.1:{srv.port}/asr/v1/speech-to-text/stream"
-        async with palabra.stt(language="en", ws_url=base, token="tok") as stt:
-            await stt.send_audio(b"\x00\x00" * 100)
-            async for _ in stt:
-                pass
-        assert srv.audio_frames == 1
-        assert srv.query["token"] == ["tok"]
+async def test_stt_not_available_in_region():
+    # the us region has no STT endpoint yet
+    palabra = Palabra(api_key="k", region="us")
+    with pytest.raises(ValueError, match="not available in region 'us'"):
+        palabra.stt("en")
 
 
-async def test_stt_factory_validation(palabra):
-    with pytest.raises(ValueError):
-        palabra.stt("en", ws_url="ws://x")  # token missing
-    with pytest.raises(ValueError):
-        palabra.stt("en", token="t")  # ws_url missing
-    with pytest.raises(ValueError):
-        palabra.stt(
-            "en",
-            ws_url="ws://x",
-            token="t",
-            session=Session(id="s", publisher="p", ws_url=""),
-        )
-
-
-async def test_receive_loop_failure_surfaces_as_session_error(palabra):
+async def test_receive_loop_failure_surfaces_as_session_error(palabra, monkeypatch):
     """A crash in the receive loop must raise SessionError on iteration."""
     import palabra_ai.stt as stt_mod
     from palabra_ai import SessionError
@@ -208,11 +177,11 @@ async def test_receive_loop_failure_surfaces_as_session_error(palabra):
         raise RuntimeError("parse exploded")
 
     async with FakeAsrServer() as srv:
-        palabra.api_url = srv.api_url
+        _fake_region(monkeypatch, srv)
         orig = stt_mod._parse_stt_event
         stt_mod._parse_stt_event = boom
         try:
-            async with palabra.stt(language="en", session=_session(srv)) as stt:
+            async with palabra.stt(language="en") as stt:
                 await stt.send_audio(b"\x00\x00" * 100)
                 with pytest.raises(SessionError) as ei:
                     async for _ in stt:

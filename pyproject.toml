@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "palabra-ai"
-version = "1.0.2"
+version = "2.0.0"
 description = "Simple Python client for Palabra AI APIs"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -21,7 +21,6 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
-    "httpx>=0.25",
     "websockets>=14",
 ]
 

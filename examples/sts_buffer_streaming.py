@@ -25,7 +25,7 @@ async def feed_source():
 
 
 async def main():
-    palabra = Palabra() # set your credentials here or vie ENV
+    palabra = Palabra()  # set PALABRA_API_KEY / PALABRA_REGION via ENV, or pass api_key=/region=
 
     async with palabra.translation(source="en", targets=["es"]) as session:
 

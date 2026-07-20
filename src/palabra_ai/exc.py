@@ -3,11 +3,11 @@ class PalabraError(Exception):
 
 
 class AuthError(PalabraError):
-    """Missing or invalid credentials / token."""
+    """Missing or invalid API Key / token."""
 
 
 class SessionError(PalabraError):
-    """Session creation or management failed."""
+    """WebSocket connection or session failure."""
 
 
 class TaskError(PalabraError):
