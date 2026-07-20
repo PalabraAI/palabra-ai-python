@@ -2,7 +2,7 @@
 
 from palabra_ai import Palabra
 
-# reads $PALABRA_API_KEY (create one at https://platform.palabra.dev/api-keys)
+# reads $PALABRA_API_KEY (create one at https://platform.palabra.ai/api-keys)
 # and $PALABRA_REGION (default "eu")
 async with Palabra().translation(source="en", targets=["es"]) as session:
     await session.send_audio(chunk)   # PCM s16le 24kHz mono, ~320 ms

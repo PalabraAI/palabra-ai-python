@@ -20,7 +20,7 @@ Authentication, regions, [errors](#errors) and [reconnection](#reconnection) are
 
 ## Authentication
 
-Everything is driven by two values — an **API Key** and a **region**; all endpoints are derived from them automatically. Create your API Key on the [Palabra API Keys page](https://platform.palabra.dev/api-keys) and set it via the environment or the constructor:
+Everything is driven by two values — an **API Key** and a **region**; all endpoints are derived from them automatically. Create your API Key on the [Palabra API Keys page](https://platform.palabra.ai/api-keys) and set it via the environment or the constructor:
 
 ```bash
 export PALABRA_API_KEY=...
@@ -337,7 +337,7 @@ make check      # ruff check + tests + format check
 
 | 1.x | 2.0 |
 |---|---|
-| `Palabra(client_id=..., client_secret=...)` / `PALABRA_CLIENT_ID`, `PALABRA_CLIENT_SECRET` | `Palabra(api_key=..., region=...)` / `PALABRA_API_KEY`, `PALABRA_REGION` — create the key at [platform.palabra.dev/api-keys](https://platform.palabra.dev/api-keys) |
+| `Palabra(client_id=..., client_secret=...)` / `PALABRA_CLIENT_ID`, `PALABRA_CLIENT_SECRET` | `Palabra(api_key=..., region=...)` / `PALABRA_API_KEY`, `PALABRA_REGION` — create the key at [platform.palabra.dev/api-keys](https://platform.palabra.ai/api-keys) |
 | REST session management: `create_session()` / `delete_session()` / `session=` / `Session` | removed — the API Key authorizes the WebSocket directly, sessions are managed server-side |
 | `Palabra(api_url=...)` | removed — endpoints are derived from `region` (see [Regions](#regions)) |
 | `ws_url=` + `token=` direct mode | removed |

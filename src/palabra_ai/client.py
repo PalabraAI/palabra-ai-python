@@ -56,7 +56,7 @@ REGIONS: dict[str, Region] = {
 class Palabra:
     """Entry point: API Key + region, stream factory.
 
-    The API Key (create one at https://platform.palabra.dev/api-keys) comes
+    The API Key (create one at https://platform.palabra.ai/api-keys) comes
     from api_key= or $PALABRA_API_KEY. The region comes from region= or
     $PALABRA_REGION (default "eu"); endpoints are derived from it
     automatically. The key authorizes the WebSocket connection directly —
@@ -76,7 +76,7 @@ class Palabra:
         if not self.api_key:
             raise AuthError(
                 "Missing API Key: pass api_key= or set PALABRA_API_KEY "
-                "(create one at https://platform.palabra.dev/api-keys)"
+                "(create one at https://platform.palabra.ai/api-keys)"
             )
         return self.api_key
 
