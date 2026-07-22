@@ -44,7 +44,7 @@ class Region:
 REGIONS: dict[str, Region] = {
     "eu": Region(
         translation="wss://streaming.palabra.ai/streaming-api/{random_hash}/v1/speech-to-speech/stream",
-        stt="wss://api.palabra.ai/asr/v1/speech-to-text/stream",
+        stt="wss://stream.palabra.ai/asr/v1/speech-to-text/stream",
         tts="wss://stream.palabra.ai/tts-api/v1/text-to-speech/stream",
     ),
     "us": Region(
