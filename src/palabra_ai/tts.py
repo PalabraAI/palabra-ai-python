@@ -13,7 +13,7 @@ import websockets
 from .events import Event, Raw, ServerError, parse_event
 from .exc import SessionError, TaskError
 
-MAX_TEXT_LEN = 256  # server limit per text message
+MAX_TEXT_LEN = 1024  # server limit per text message
 
 
 @dataclass(frozen=True)
