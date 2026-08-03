@@ -46,4 +46,5 @@ async def main():
         await asyncio.gather(source, pumper)
 
 
-asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())

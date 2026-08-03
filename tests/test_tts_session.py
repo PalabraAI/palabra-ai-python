@@ -112,7 +112,7 @@ async def test_send_text_rejects_oversized_and_empty(palabra, monkeypatch):
             with pytest.raises(ValueError):
                 await tts.send_text("")
             with pytest.raises(ValueError):
-                await tts.synthesize("b" * 300, timeout=1)
+                await tts.synthesize("b" * (MAX_TEXT_LEN + 1), timeout=1)
         assert srv.texts == []  # nothing reached the server
 
 

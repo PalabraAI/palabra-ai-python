@@ -18,6 +18,8 @@ Palabra has three separate streaming APIs, and the client mirrors that at the to
 
 Authentication, regions, [errors](#errors) and [reconnection](#reconnection) are shared by all three.
 
+On top of the streaming APIs there are two management APIs (plain REST, same API Key): [**Voices**](#voices-custom-voices) (`palabra.voices`) for cloning custom voices, and [**Glossaries**](#glossaries) (`palabra.glossaries`) for custom terminology in the S2S Translation API.
+
 ## Authentication
 
 Everything is driven by two values — an **API Key** and a **region**; all endpoints are derived from them automatically. Create your API Key on the [Palabra API Keys page](https://platform.palabra.ai/api-keys) and set it via the environment or the constructor:
@@ -287,6 +289,118 @@ TTS is currently available in the `eu` and `us` [regions](#regions).
 
 ---
 
+# Voices (custom voices)
+
+`palabra.voices` clones a voice from a short audio sample and manages your voices. It's a management REST API (`https://api.palabra.ai`), authorized with the same API Key via the `Authorization: Bearer` header — nothing extra to configure. All methods are async.
+
+Recommended sample: a clean **WAV recording of 5–20 seconds**, one speaker, no background noise (mp3/flac/m4a/webm/mp4 are accepted too, max 10 MB).
+
+```python
+palabra = Palabra()
+
+voice = await palabra.voices.create("voice.wav", name="My voice", language="en")
+print(voice.id, voice.status)   # ready
+```
+
+`create()` does the whole flow: submits the metadata, uploads the file to the returned pre-signed URL, and polls until processing finishes (`wait=False` returns immediately; check later with `get()` / `wait_ready()`). Options: `description=`, `denoise=True` for noisy samples, `labels={"gender": ..., "age_group": ..., "mood": ...}`.
+
+Management:
+
+```python
+await palabra.voices.list()                    # your voices
+await palabra.voices.builtin()                 # built-in voices (default_low, default_high, ...)
+await palabra.voices.get(voice_id)
+await palabra.voices.update(voice_id, name="Renamed")
+await palabra.voices.delete(voice_id)
+```
+
+## Using a voice
+
+A ready `voice.id` works everywhere a `voice_id` is accepted:
+
+**Realtime TTS API** — pass it directly:
+
+```python
+async with palabra.tts(language="en", voice_id=voice.id) as tts:
+    pcm = await tts.synthesize("This is my cloned voice.")
+```
+
+**S2S Translation API** — the voice ID lives in each target's `speech_generation.voice_id`:
+
+```python
+# per-session default for every target
+session = palabra.translation(source="en", targets=["es"], voice_id=voice.id)
+
+# or per target
+session = palabra.translation(
+    source="en",
+    targets={"es": {"speech_generation": {"voice_id": voice.id}}, "fr": {}},
+)
+```
+
+In a raw task dict the same setting is `pipeline.translations[N].speech_generation.voice_id`.
+
+See [`examples/voice_cloning_tts.py`](examples/voice_cloning_tts.py).
+
+---
+
+# Glossaries
+
+`palabra.glossaries` manages custom terminology for the **S2S Translation API** (the other streaming APIs don't use glossaries yet). Same management REST API and auth as voices; all methods are async.
+
+Three kinds:
+
+| Kind           | What it does                                                                        | Entries                      |
+|----------------|-------------------------------------------------------------------------------------|------------------------------|
+| `hotwords`     | tricky words/terms the ASR should pay attention to, so they're recognized correctly | list of terms                |
+| `verification` | after recognition, replace one text with another (same language)                    | `{recognized: replacement}`  |
+| `translation`  | pin the translation of a term for one source → target language pair                 | `{source_term: target_term}` |
+
+```python
+palabra = Palabra()
+
+# translation: en -> es term pairs
+glossary = await palabra.glossaries.create(
+    {"neural network": "red neuronal", "pipeline": "canalización"},
+    name="ML terms", kind="translation", source_language="en", target_language="es",
+)
+
+# hotwords: terms the ASR must get right
+await palabra.glossaries.create(["Palabra", "WebRTC", "Kubernetes"],
+                                name="Tech terms", kind="hotwords", source_language="en")
+
+# verification: post-ASR text replacement
+await palabra.glossaries.create({"palabra a i": "Palabra AI"},
+                                name="ASR fixes", kind="verification", source_language="en")
+```
+
+`create()` uploads the entries in one call (a path to a ready CSV file is accepted instead of a dict/list). Management: `list()`, `get(id)`, `download(id)` (the CSV), `update(id, name=..., enabled=...)`, `delete(id)`.
+
+## Using glossaries in a translation session
+
+An **enabled** glossary applies to every matching session automatically — no settings needed. To control this per session, each kind has a pair of task settings: `allow_*_glossaries` and `allowed_*_glossary_ids`. When the kind is allowed and no explicit ids are set (the default), **ALL** your enabled glossaries of that kind matching the session's language apply — the source language for `hotwords`/`verification`, the source → target language pair for `translation`. Setting `allowed_*_glossary_ids` restricts that to an exact set.
+
+The `translation(...)`/`build_task(...)` shortcuts cover all three kinds — `True` = all matching glossaries of the kind, `False` = none, a list of ids/`Glossary` objects = only those:
+
+```python
+session = palabra.translation(
+    source="en", targets=["es"],
+    hotwords_glossaries=["<glossary_id>"],       # pipeline.transcription.*
+    verification_glossaries=True,                # ALL your verification glossaries for "en"
+    translation_glossaries=[glossary],           # pipeline.translations[N].*  (every target)
+)
+```
+
+In a raw task dict the same settings live at:
+
+- hotwords — `pipeline.transcription.allow_hotwords_glossaries` / `allowed_hotwords_glossary_ids`
+- verification — `pipeline.transcription.verification.allow_verification_glossaries` / `allowed_verification_glossary_ids`
+- translation — `pipeline.translations[N].allow_translation_glossaries` / `allowed_translation_glossary_ids` (per target)
+
+See [`examples/glossary_translation.py`](examples/glossary_translation.py).
+
+---
+
 # Common reference
 
 ## Errors
@@ -296,6 +410,7 @@ Shared by all APIs:
 - `AuthError` — missing/invalid API Key.
 - `SessionError` — WebSocket connection problems (including a crashed receive loop — the original exception is attached as `__cause__`).
 - `NotReadyError` — the pipeline didn't confirm `set_task` in time (translation only).
+- `ApiError` — a management REST request (voices/glossaries) failed; `status` carries the HTTP code when there is one.
 - `TaskError` — the server rejected `set_task` (raised immediately on `async with`, with the server's `code`/`desc`), or raised by `session.raise_on_error(event)` for server `error` messages; by default in-stream errors are delivered as `ServerError` events so a long-running stream survives recoverable errors.
 - `ValueError` — the requested product is not available in the configured [region](#regions), or an unknown region was set.
 
@@ -325,6 +440,8 @@ while True:
 | [`examples/sts_mic_to_speakers.py`](examples/sts_mic_to_speakers.py)   | Realtime Speech-to-Speech API  live microphone translation (`uv add "palabra-ai[devices]"`)  |
 | [`examples/sts_multi_language.py`](examples/sts_multi_language.py)     | Realtime Speech-to-Speech API  several targets, per-target voices                            |
 | [`examples/sts_file_to_file.py`](examples/sts_file_to_file.py)         | Realtime Speech-to-Speech API  offline file translation (see the caveat above)               |
+| [`examples/voice_cloning_tts.py`](examples/voice_cloning_tts.py)       | Voices API: clone a voice from voice.wav and speak with it via the Realtime TTS API          |
+| [`examples/glossary_translation.py`](examples/glossary_translation.py) | Glossaries API: create a translation glossary and use it in a Speech-to-Speech session       |
 
 ## Development
 

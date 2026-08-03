@@ -19,6 +19,7 @@ from .exc import AuthError, NotReadyError, SessionError, TaskError
 from .task import build_task
 
 if TYPE_CHECKING:
+    from .management import GlossariesAPI, VoicesAPI
     from .stt import SttSession
     from .tts import TtsSession
 
@@ -90,6 +91,29 @@ class Palabra:
                 f" available regions: {available}"
             )
         return url
+
+    @property
+    def voices(self) -> VoicesAPI:
+        """Custom voices (management REST API): clone, list, delete.
+
+        A ready Voice.id works as a voice_id in both the S2S Translation
+        API (speech_generation.voice_id) and the TTS APIs.
+        """
+        from .management import VoicesAPI
+
+        return VoicesAPI(self._token())
+
+    @property
+    def glossaries(self) -> GlossariesAPI:
+        """Glossaries for the S2S Translation API (management REST API).
+
+        Kinds: hotwords (help ASR recognize tricky terms), verification
+        (post-ASR text replacement), translation (fix the translation of
+        a term for a source->target language pair).
+        """
+        from .management import GlossariesAPI
+
+        return GlossariesAPI(self._token())
 
     def translation(
         self,

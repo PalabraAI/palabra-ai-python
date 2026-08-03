@@ -26,3 +26,16 @@ class TaskError(PalabraError):
 
 class NotReadyError(PalabraError):
     """The pipeline did not confirm the task in time."""
+
+
+class ApiError(PalabraError):
+    """A management REST API request (voices/glossaries) failed.
+
+    Attributes:
+        status: HTTP status code, or None for non-HTTP failures
+            (network errors, voice processing failure, poll timeout).
+    """
+
+    def __init__(self, message: str, *, status: int | None = None):
+        super().__init__(message)
+        self.status = status

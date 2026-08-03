@@ -221,9 +221,7 @@ async def test_rejected_set_task_fails_fast_with_task_error(palabra, monkeypatch
 
     server = await websockets.serve(handler, "127.0.0.1", 0)
     port = server.sockets[0].getsockname()[1]
-    monkeypatch.setattr(
-        "palabra_ai.client.REGIONS", {"eu": Region(translation=f"ws://127.0.0.1:{port}")}
-    )
+    monkeypatch.setattr("palabra_ai.client.REGIONS", {"eu": Region(translation=f"ws://127.0.0.1:{port}")})
     try:
         loop = asyncio.get_event_loop()
         t0 = loop.time()

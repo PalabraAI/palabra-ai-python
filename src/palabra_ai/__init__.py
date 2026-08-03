@@ -22,7 +22,8 @@ from .events import (
     TaskInfo,
     Transcript,
 )
-from .exc import AuthError, NotReadyError, PalabraError, SessionError, TaskError
+from .exc import ApiError, AuthError, NotReadyError, PalabraError, SessionError, TaskError
+from .management import GlossariesAPI, Glossary, Voice, VoicesAPI
 from .stt import SttSession, SttTranscript
 from .task import build_task
 from .tts import TtsChunk, TtsSession
@@ -33,10 +34,14 @@ __all__ = [
     "CHUNK_MS",
     "OUTPUT_SAMPLE_RATE",
     "REGIONS",
+    "ApiError",
     "Audio",
     "AuthError",
     # events
     "Event",
+    # management (voices & glossaries)
+    "GlossariesAPI",
+    "Glossary",
     "NotReadyError",
     "Palabra",
     # errors
@@ -55,6 +60,8 @@ __all__ = [
     "TranslationSession",
     "TtsChunk",
     "TtsSession",
+    "Voice",
+    "VoicesAPI",
     "build_task",
     # audio helpers
     "load_pcm",
