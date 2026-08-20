@@ -60,7 +60,7 @@ class TaskInfo(Event):
 
 @dataclass(frozen=True)
 class StreamEnd(Event):
-    """Sent after end_task with eos_timeout, right before the server closes."""
+    """Sent after end_task once the tail is processed, right before the server closes."""
 
 
 @dataclass(frozen=True)
@@ -114,7 +114,7 @@ def parse_event(message: dict[str, Any], *, zlib_output: bool = False) -> Event:
     if mtype == "current_task":
         return TaskInfo(type=mtype, status=data.get("task_status", "unknown"), task=data)
 
-    if mtype == "eos":
+    if mtype == "end_of_stream":
         return StreamEnd(type=mtype)
 
     if mtype == "error":

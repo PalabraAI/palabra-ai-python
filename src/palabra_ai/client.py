@@ -232,7 +232,7 @@ class Palabra:
         results: dict[str, bytearray] = {}
 
         async with self.translation(source, targets, **task_options) as s:
-            feeder = asyncio.create_task(s.send_pcm(pcm, eos_timeout=4))
+            feeder = asyncio.create_task(s.send_pcm(pcm, end=True))
             try:
                 async for ev in s:
                     if isinstance(ev, Audio):
@@ -403,11 +403,11 @@ class TranslationSession:
         """
         await self._send("input_audio_data", {"data": base64.b64encode(chunk).decode()})
 
-    async def send_pcm(self, pcm: bytes, *, realtime: bool = True, eos_timeout: int | None = None) -> None:
+    async def send_pcm(self, pcm: bytes, *, realtime: bool = True, end: bool = False) -> None:
         """Send a whole PCM buffer in 320 ms chunks, paced to real time.
 
-        With eos_timeout, end() is called afterwards so the stream finishes
-        once the tail is processed.
+        With end=True, end() is called afterwards: the server processes the
+        tail, emits StreamEnd and closes the connection.
         """
         if realtime:
             async for chunk in paced_chunks(pcm, sample_rate=self._in_rate, channels=self._in_channels):
@@ -415,12 +415,12 @@ class TranslationSession:
         else:
             for chunk in chunks(pcm, sample_rate=self._in_rate, channels=self._in_channels):
                 await self.send_audio(chunk)
-        if eos_timeout is not None:
-            await self.end(eos_timeout=eos_timeout)
+        if end:
+            await self.end()
 
-    async def send_file(self, path: str | Path, *, eos_timeout: int | None = 4) -> None:
+    async def send_file(self, path: str | Path, *, end: bool = True) -> None:
         pcm = load_pcm(path, sample_rate=self._in_rate, channels=self._in_channels)
-        await self.send_pcm(pcm, eos_timeout=eos_timeout)
+        await self.send_pcm(pcm, end=end)
 
     async def set_task(self, task: dict[str, Any]) -> None:
         """Update settings on the fly (also resumes after pause())."""
@@ -438,10 +438,11 @@ class TranslationSession:
     async def resume(self) -> None:
         await self._send("set_task", self._task)
 
-    async def flush(self, languages: Sequence[str] | None = None, *, pause: bool = False) -> None:
-        """Drop the phrase being processed (e.g. the speaker got interrupted)."""
+    async def interrupt(self, languages: Sequence[str] | None = None, *, pause: bool = False) -> None:
+        """Instantly stop the speech of the phrase being processed (e.g. the
+        speaker got interrupted). Nothing is finalized — the phrase is dropped."""
         await self._send(
-            "flush_task",
+            "interrupt_task",
             {"languages": list(languages) if languages else ["global"], "pause_task": pause},
         )
 
@@ -457,18 +458,16 @@ class TranslationSession:
         """
         await self._send("tts_task", {"text": text, "language": language, "translate_text": translate})
 
-    async def end(self, *, eos_timeout: int | None = None) -> None:
-        """Finish the task; the server closes the connection afterwards.
+    async def end(self) -> None:
+        """Finish the task.
 
-        With eos_timeout (1-30 s) the server waits for that much silence
-        after the last speech, emits an StreamEnd event and only then closes --
-        use it to get the tail of the translation delivered.
+        The server accepts no new audio after this, finishes processing
+        everything already sent (the tail of the translation is delivered),
+        emits a StreamEnd event and closes the connection -- send it once you
+        have streamed everything (e.g. the end of a file).
         """
         self._ended = True
-        data: dict[str, Any] = {}
-        if eos_timeout is not None:
-            data["eos_timeout"] = eos_timeout
-        await self._send("end_task", data)
+        await self._send("end_task", {})
 
     def raise_on_error(self, event: Event) -> Event:
         """Turn a ServerError event into a TaskError exception."""

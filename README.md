@@ -77,7 +77,7 @@ async def main():
                 await session.send_audio(chunk)
                 next_send += CHUNK_MS / 1000
                 await asyncio.sleep(max(0, next_send - time.monotonic()))
-            await session.end(eos_timeout=4)
+            await session.end()
 
         sender = asyncio.create_task(send_audio())
 
@@ -113,7 +113,7 @@ Iterating the session yields typed events:
 | `Transcript`    | `text, language, id, is_eos, is_translation` | partial/validated transcription & translation           |
 | `Audio`         | `pcm, language, last_chunk, id`              | TTS chunk (PCM s16le 24 kHz mono)                       |
 | `TaskInfo`      | `status, task`                               | response to `get_task`                                  |
-| `StreamEnd`     | —                                            | end-of-stream confirmation after `end(eos_timeout=...)` |
+| `StreamEnd`     | —                                            | end-of-stream confirmation after `end()`, right before close |
 | `ServerError`   | `code, desc`                                 | server-side error                                       |
 | `ServerWarning` | `code, message`                              | `AUDIO_STREAM_TOO_FAST / TOO_SLOW / STALLED`            |
 | `Raw`           | `type, data`                                 | anything else                                           |
@@ -126,10 +126,10 @@ await session.send_audio(chunk)                      # one raw chunk (pace it yo
 await session.speak("Hola!", "es")                   # speak text into the stream (note: you must have this language as one of the target languages)
 await session.speak("Hi all!", "en", translate=True) # translate to all targets first
 
-await session.flush()                                # drop the current transcription and audio (interruption)
+await session.interrupt()                            # instantly stop the speech of the current phrase (interruption)
 await session.pause();  await session.resume()       # pause and resume your session (stops billing)
 await session.set_task(new_task)                     # change settings on the fly
-await session.end(eos_timeout=4)                     # graceful finish: waits for the tail, emits StreamEnd
+await session.end()                                  # graceful finish: processes the tail, emits StreamEnd
 ```
 
 `session.speak(text, lang)` (the `tts_task` command) speaks **through the translation pipeline** and is unrelated to the standalone [Realtime TTS API](#realtime-tts-api).

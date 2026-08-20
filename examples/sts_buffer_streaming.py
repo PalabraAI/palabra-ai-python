@@ -32,7 +32,7 @@ async def main():
         async def pump():
             while (chunk := await audio_buffer.get()) is not None:
                 await session.send_audio(chunk)
-            await session.end(eos_timeout=4)  # deliver the tail, then close
+            await session.end()  # deliver the tail, then close
 
         source = asyncio.create_task(feed_source())
         pumper = asyncio.create_task(pump())

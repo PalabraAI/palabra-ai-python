@@ -5,7 +5,7 @@ The fake server reproduces the documented behaviour:
 - no acknowledgement of ``set_task``; ``get_task`` returns a NOT_FOUND
   ``error`` until the pipeline has "started", then ``current_task``;
 - ``input_audio_data`` produces transcriptions and flat ``output_audio_data``;
-- ``end_task`` with ``eos_timeout`` emits ``eos`` and closes the connection.
+- ``end_task`` emits ``end_of_stream`` and closes the connection.
 """
 
 import asyncio
@@ -101,8 +101,7 @@ class FakeServer:
                     )
                 )
             elif mtype == "end_task":
-                if data.get("eos_timeout") is not None:
-                    await ws.send(json.dumps({"message_type": "eos", "data": {}}))
+                await ws.send(json.dumps({"message_type": "end_of_stream", "data": {}}))
                 await ws.close()
                 return
 
@@ -137,7 +136,7 @@ async def test_full_stream_flow(palabra, monkeypatch):
         async with palabra.translation("en", "es") as s:
             chunk = b"\x00\x00" * int(24000 * 0.32)
             await s.send_audio(chunk)
-            await s.end(eos_timeout=2)
+            await s.end()
             async for ev in s:
                 events.append(ev)
 
@@ -196,7 +195,7 @@ async def test_send_pcm_paces_realtime(palabra, monkeypatch):
             await s.send_pcm(pcm)
             elapsed = loop.time() - t0
             assert elapsed >= 0.6  # paced (first chunk immediate, then 2 x 320 ms)
-            await s.end(eos_timeout=1)
+            await s.end()
             async for _ in s:
                 pass
         assert srv.received_audio_chunks == 3
