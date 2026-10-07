@@ -54,8 +54,18 @@ class Audio(Event):
 
 @dataclass(frozen=True)
 class TaskInfo(Event):
-    status: str  # running | paused | unknown
+    status: str  # running | paused | ending | unknown
     task: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class TaskStatus(Event):
+    """Command acknowledgement. queued/ending are acceptance, not completion."""
+
+    command: str
+    event: str
+    status: str  # running | paused | ending | unknown
+    transcription_id: str | None = None  # tts_task; matches Audio.id / Transcript.id
 
 
 @dataclass(frozen=True)
@@ -113,6 +123,15 @@ def parse_event(message: dict[str, Any], *, zlib_output: bool = False) -> Event:
 
     if mtype == "current_task":
         return TaskInfo(type=mtype, status=data.get("task_status", "unknown"), task=data)
+
+    if mtype == "task_status":
+        return TaskStatus(
+            type=mtype,
+            command=data.get("command", ""),
+            event=data.get("event", ""),
+            status=data.get("task_status", "unknown"),
+            transcription_id=data.get("transcription_id"),
+        )
 
     if mtype == "end_of_stream":
         return StreamEnd(type=mtype)

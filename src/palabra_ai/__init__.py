@@ -20,6 +20,7 @@ from .events import (
     ServerWarning,
     StreamEnd,
     TaskInfo,
+    TaskStatus,
     Transcript,
 )
 from .exc import ApiError, AuthError, NotReadyError, PalabraError, SessionError, TaskError
@@ -56,6 +57,7 @@ __all__ = [
     "SttTranscript",
     "TaskError",
     "TaskInfo",
+    "TaskStatus",
     "Transcript",
     "TranslationSession",
     "TtsChunk",

@@ -113,12 +113,37 @@ Iterating the session yields typed events:
 | `Transcript`    | `text, language, id, is_eos, is_translation` | partial/validated transcription & translation           |
 | `Audio`         | `pcm, language, last_chunk, id`              | TTS chunk (PCM s16le 24 kHz mono)                       |
 | `TaskInfo`      | `status, task`                               | response to `get_task`                                  |
+| `TaskStatus`    | `command, event, status, transcription_id`    | command acknowledgement and resulting pipeline state   |
 | `StreamEnd`     | —                                            | end-of-stream confirmation after `end()`, right before close |
 | `ServerError`   | `code, desc`                                 | server-side error                                       |
 | `ServerWarning` | `code, message`                              | `AUDIO_STREAM_TOO_FAST / TOO_SLOW / STALLED`            |
 | `Raw`           | `type, data`                                 | anything else                                           |
 
 ## Session control
+
+Session entry waits for `TaskStatus(command="set_task", event="started", status="running")`
+(or `updated` / `resumed` when attaching to an existing task). Older servers without
+acknowledgements remain supported through a delayed `get_task` fallback.
+
+Control methods send commands; their confirmations arrive through the event iterator or
+`receive()`. `set_task` reports `started`, `updated`, or `resumed`; `pause_task` reports
+`paused`; `interrupt_task` reports `interrupted`; `tts_task` reports `queued`; and
+`end_task` reports `ending`. Failed commands produce `ServerError` instead of a success
+acknowledgement. These control replies do not depend on `message_types`.
+
+```python
+from palabra_ai import TaskStatus
+
+async for event in session:
+    if isinstance(event, TaskStatus):
+        print(event.command, event.event, event.status)
+    # Handle Transcript, Audio, ServerError, etc. here too.
+```
+
+`queued` means the text was accepted; its `transcription_id` matches subsequent
+`Audio.id` / `Transcript.id` values. `ending` means shutdown has begun: continue reading
+audio and transcripts until `StreamEnd`. Neither event confirms completed output.
+Older servers emit no `TaskStatus` events.
 
 ```python
 await session.send_audio(chunk)                      # one raw chunk (pace it yourself)

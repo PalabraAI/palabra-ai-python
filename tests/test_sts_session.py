@@ -2,8 +2,8 @@
 
 The fake server reproduces the documented behaviour:
 
-- no acknowledgement of ``set_task``; ``get_task`` returns a NOT_FOUND
-  ``error`` until the pipeline has "started", then ``current_task``;
+- ``task_status`` acknowledges control commands; legacy mode has no
+  acknowledgements and readiness is discovered through ``get_task``;
 - ``input_audio_data`` produces transcriptions and flat ``output_audio_data``;
 - ``end_task`` emits ``end_of_stream`` and closes the connection.
 """
@@ -21,7 +21,10 @@ pytestmark = pytest.mark.asyncio
 
 
 class FakeServer:
-    def __init__(self):
+    def __init__(self, *, acknowledge=True):
+        self.acknowledge = acknowledge
+        self.commands = []
+        self.paused = False
         self.received_audio_chunks = 0
         self.task = None
         self.started = False
@@ -43,9 +46,41 @@ class FakeServer:
         async for raw in ws:
             msg = json.loads(raw)
             mtype, data = msg["message_type"], msg.get("data", {})
+            self.commands.append(mtype)
+
+            async def status(event, state="running", *, command=mtype, **extra):
+                if self.acknowledge:
+                    await ws.send(
+                        json.dumps(
+                            {
+                                "message_type": "task_status",
+                                "data": {
+                                    "command": command,
+                                    "event": event,
+                                    "task_status": state,
+                                    **extra,
+                                },
+                            }
+                        )
+                    )
+
             if mtype == "set_task":
+                event = "resumed" if self.paused else "updated" if self.started else "started"
                 self.task = data
-                asyncio.get_event_loop().call_later(0.3, self._start)
+                self.paused = False
+                if self.acknowledge:
+                    self.started = True
+                    await status(event)
+                else:
+                    asyncio.get_event_loop().call_later(0.3, self._start)
+            elif mtype == "pause_task":
+                self.paused = True
+                await status("paused", "paused")
+            elif mtype == "interrupt_task":
+                self.paused = self.paused or data.get("pause_task", False)
+                await status("interrupted", "paused" if self.paused else "running")
+            elif mtype == "tts_task":
+                await status("queued", "paused" if self.paused else "running", transcription_id="tts1")
             elif mtype == "get_task":
                 if not self.started:
                     await ws.send(
@@ -101,6 +136,7 @@ class FakeServer:
                     )
                 )
             elif mtype == "end_task":
+                await status("ending", "ending")
                 await ws.send(json.dumps({"message_type": "end_of_stream", "data": {}}))
                 await ws.close()
                 return
