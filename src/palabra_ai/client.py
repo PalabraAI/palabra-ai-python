@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any
 import websockets
 
 from .audio import OUTPUT_SAMPLE_RATE, chunks, load_pcm, paced_chunks, write_wav
-from .events import Audio, Event, ServerError, TaskInfo, TaskStatus, Transcript, parse_event
+from .events import Audio, Event, ServerError, TaskStatus, Transcript, parse_event
 from .exc import AuthError, NotReadyError, SessionError, TaskError
 from .task import build_task
 
@@ -24,7 +24,6 @@ if TYPE_CHECKING:
     from .tts import TtsSession
 
 READY_TIMEOUT = 30.0
-GET_TASK_INTERVAL = 2.1  # conservative fallback for servers without task_status
 
 DEFAULT_REGION = "eu"
 
@@ -278,8 +277,6 @@ class TranslationSession:
         self._recv_error: BaseException | None = None
         self._setup_error: ServerError | None = None
         self._ready = asyncio.Event()
-        self._readiness_polling = False
-        self._readiness_poll_pending = False
         self._ended = False
         self._zlib = task.get("output_stream", {}).get("target", {}).get("format") == "zlib_pcm_s16le"
         src = task.get("input_stream", {}).get("source", {})
@@ -326,27 +323,14 @@ class TranslationSession:
             self._ws = None
 
     async def _wait_ready(self) -> None:
-        # Prefer set_task's acknowledgement. Older deployments do not send it;
-        # start polling get_task only after allowing time for a direct reply.
-        loop = asyncio.get_running_loop()
-        deadline = loop.time() + READY_TIMEOUT
-        while True:
-            if self._setup_error is not None:
-                raise TaskError(self._setup_error.code, self._setup_error.desc)
-            if self._recv_task is not None and self._recv_task.done():
-                raise SessionError("Connection closed before the task was confirmed") from self._recv_error
-            if self._ready.is_set():
-                return
-            remaining = deadline - loop.time()
-            if remaining <= 0:
-                raise NotReadyError(f"Pipeline did not confirm the task within {READY_TIMEOUT:.0f}s")
-            try:
-                await asyncio.wait_for(self._ready.wait(), timeout=min(GET_TASK_INTERVAL, remaining))
-            except asyncio.TimeoutError:
-                if loop.time() < deadline and not self._readiness_poll_pending:
-                    self._readiness_polling = True
-                    self._readiness_poll_pending = True
-                    await self._send("get_task", {})
+        try:
+            await asyncio.wait_for(self._ready.wait(), timeout=READY_TIMEOUT)
+        except asyncio.TimeoutError as exc:
+            raise NotReadyError(f"Pipeline did not confirm the task within {READY_TIMEOUT:.0f}s") from exc
+        if self._setup_error is not None:
+            raise TaskError(self._setup_error.code, self._setup_error.desc)
+        if self._recv_task is not None and self._recv_task.done():
+            raise SessionError("Connection closed before the task was confirmed") from self._recv_error
 
     async def _receive_loop(self) -> None:
         assert self._ws is not None
@@ -362,18 +346,11 @@ class TranslationSession:
                 if (
                     isinstance(event, TaskStatus)
                     and event.command == "set_task"
-                    and event.event in ("started", "updated", "resumed")
+                    and event.event in ("started", "updated", "unchanged", "resumed")
                     and event.status == "running"
                 ):
                     self._ready.set()
-                if isinstance(event, TaskInfo) and self._readiness_poll_pending:
-                    self._readiness_poll_pending = False
-                    if event.status == "running":
-                        self._ready.set()
                 if isinstance(event, ServerError) and not self._ready.is_set():
-                    if event.code == "NOT_FOUND" and self._readiness_polling:
-                        self._readiness_poll_pending = False
-                        continue  # expected while polling readiness
                     # set_task was rejected: hand the error to _wait_ready
                     self._setup_error = event
                     self._ready.set()
@@ -437,7 +414,7 @@ class TranslationSession:
         await self.send_pcm(pcm, end=end)
 
     async def set_task(self, task: dict[str, Any]) -> None:
-        """Send new settings (also resumes); confirmation arrives as TaskStatus."""
+        """Send settings (also resumes); TaskStatus may report updated or unchanged."""
         self._task = task
         await self._send("set_task", task)
 
@@ -450,7 +427,7 @@ class TranslationSession:
         await self._send("pause_task", {})
 
     async def resume(self) -> None:
-        """Resend settings; confirmation arrives as TaskStatus(event="resumed")."""
+        """Resend settings to resume; TaskStatus reports resumed or unchanged."""
         await self._send("set_task", self._task)
 
     async def interrupt(self, languages: Sequence[str] | None = None, *, pause: bool = False) -> None:
@@ -482,8 +459,8 @@ class TranslationSession:
         everything already sent (the tail of the translation is delivered),
         emits a StreamEnd event and closes the connection -- send it once you
         have streamed everything (e.g. the end of a file).
-        TaskStatus(event="ending") confirms acceptance; keep consuming through
-        StreamEnd to receive the remaining output.
+        This command has no TaskStatus reply; keep consuming through StreamEnd
+        to receive the remaining output.
         """
         self._ended = True
         await self._send("end_task", {})

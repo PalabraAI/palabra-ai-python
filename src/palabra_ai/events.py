@@ -54,17 +54,17 @@ class Audio(Event):
 
 @dataclass(frozen=True)
 class TaskInfo(Event):
-    status: str  # running | paused | ending | unknown
+    status: str  # running | paused | unknown
     task: dict[str, Any]
 
 
 @dataclass(frozen=True)
 class TaskStatus(Event):
-    """Command acknowledgement. queued/ending are acceptance, not completion."""
+    """Command acknowledgement. queued confirms acceptance, not completed synthesis."""
 
     command: str
     event: str
-    status: str  # running | paused | ending | unknown
+    status: str  # running | paused | unknown
     transcription_id: str | None = None  # tts_task; matches Audio.id / Transcript.id
 
 

@@ -122,14 +122,20 @@ Iterating the session yields typed events:
 ## Session control
 
 Session entry waits for `TaskStatus(command="set_task", event="started", status="running")`
-(or `updated` / `resumed` when attaching to an existing task). Older servers without
-acknowledgements remain supported through a delayed `get_task` fallback.
+(or `updated` / `unchanged` / `resumed` when attaching to an existing task).
+Readiness is confirmed only by this status; the client does not poll `get_task`.
+If no confirmation arrives within 30 seconds, session entry raises `NotReadyError`.
 
 Control methods send commands; their confirmations arrive through the event iterator or
-`receive()`. `set_task` reports `started`, `updated`, or `resumed`; `pause_task` reports
-`paused`; `interrupt_task` reports `interrupted`; `tts_task` reports `queued`; and
-`end_task` reports `ending`. Failed commands produce `ServerError` instead of a success
+`receive()`. `set_task` reports `started`, `updated`, `unchanged`, or `resumed`; `pause_task`
+reports `paused`; `interrupt_task` reports `interrupted`; `tts_task` reports `queued`.
+`end_task` has no `TaskStatus` reply. Failed commands produce `ServerError` instead of a success
 acknowledgement. These control replies do not depend on `message_types`.
+
+`unchanged` means the full validated configuration, including defaults and advanced
+settings, matches the running task. The pipeline and its buffers continue without
+reconfiguration. JSON object key order does not matter; array order does. Sending the
+same configuration to a paused task returns `resumed`.
 
 ```python
 from palabra_ai import TaskStatus
@@ -141,9 +147,8 @@ async for event in session:
 ```
 
 `queued` means the text was accepted; its `transcription_id` matches subsequent
-`Audio.id` / `Transcript.id` values. `ending` means shutdown has begun: continue reading
-audio and transcripts until `StreamEnd`. Neither event confirms completed output.
-Older servers emit no `TaskStatus` events.
+`Audio.id` / `Transcript.id` values. It does not mean synthesis is complete.
+After `end()`, continue reading audio and transcripts until `StreamEnd`.
 
 ```python
 await session.send_audio(chunk)                      # one raw chunk (pace it yourself)

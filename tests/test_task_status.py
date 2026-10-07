@@ -1,4 +1,5 @@
 import asyncio
+import copy
 import json
 
 import pytest
@@ -14,11 +15,11 @@ from test_sts_session import FakeServer, _fake_region
     [
         ("set_task", "started", "running"),
         ("set_task", "updated", "running"),
+        ("set_task", "unchanged", "running"),
         ("set_task", "resumed", "running"),
         ("pause_task", "paused", "paused"),
         ("interrupt_task", "interrupted", "running"),
         ("tts_task", "queued", "paused"),
-        ("end_task", "ending", "ending"),
     ],
 )
 def test_parse_status(command, event, state):
@@ -47,6 +48,9 @@ async def test_commands_are_observable_and_startup_needs_no_polling(monkeypatch)
                 "task_status", "set_task", "started", "running"
             )
             await session.set_task(session.task)
+            updated_task = copy.deepcopy(session.task)
+            updated_task["pipeline"]["allowed_message_types"] = ["output_audio_data"]
+            await session.set_task(updated_task)
             await session.pause()
             await session.resume()
             await session.interrupt(pause=True)
@@ -54,30 +58,53 @@ async def test_commands_are_observable_and_startup_needs_no_polling(monkeypatch)
             await session.end()
             events = [event async for event in session]
         assert [(e.command, e.event, e.status) for e in events if isinstance(e, TaskStatus)] == [
+            ("set_task", "unchanged", "running"),
             ("set_task", "updated", "running"),
             ("pause_task", "paused", "paused"),
             ("set_task", "resumed", "running"),
             ("interrupt_task", "interrupted", "paused"),
             ("tts_task", "queued", "paused"),
-            ("end_task", "ending", "ending"),
         ]
-        assert events[-3].transcription_id == "tts1"
+        assert events[-2].transcription_id == "tts1"
         assert isinstance(events[-1], StreamEnd)
 
 
-async def test_legacy_server_uses_get_task_fallback(monkeypatch):
-    monkeypatch.setattr("palabra_ai.client.GET_TASK_INTERVAL", 0.1)
-    async with FakeServer(acknowledge=False) as server:
+async def test_get_task_is_available_when_explicitly_requested(monkeypatch):
+    async with FakeServer() as server:
         _fake_region(monkeypatch, server)
         async with Palabra(api_key="test").translation("en", "es") as session:
-            assert "get_task" in server.commands
-            assert isinstance(await session.receive(timeout=1), TaskInfo)
+            assert isinstance(await session.receive(timeout=1), TaskStatus)
+            await session.get_task()
+            task_info = await session.receive(timeout=1)
+            assert isinstance(task_info, TaskInfo)
+            assert task_info.status == "running"
+            assert server.commands == ["set_task", "get_task"]
             await session.end()
             assert isinstance(await session.receive(timeout=1), StreamEnd)
 
 
-async def test_slow_start_does_not_queue_repeated_readiness_polls(monkeypatch):
-    monkeypatch.setattr("palabra_ai.client.GET_TASK_INTERVAL", 0.01)
+async def test_missing_status_times_out_without_polling(monkeypatch):
+    monkeypatch.setattr("palabra_ai.client.READY_TIMEOUT", 0.1)
+    commands = []
+    closed = asyncio.Event()
+
+    async def handler(ws):
+        async for raw in ws:
+            commands.append(json.loads(raw)["message_type"])
+        closed.set()
+
+    async with websockets.serve(handler, "127.0.0.1", 0) as server:
+        port = server.sockets[0].getsockname()[1]
+        monkeypatch.setattr("palabra_ai.client.REGIONS", {"eu": Region(translation=f"ws://127.0.0.1:{port}")})
+        with pytest.raises(NotReadyError, match="did not confirm"):
+            async with Palabra(api_key="test").translation("en", "es"):
+                pytest.fail("Missing task_status must not confirm set_task")
+        await asyncio.wait_for(closed.wait(), 1)
+        assert commands == ["set_task"]
+
+
+async def test_slow_start_waits_for_status_without_polling(monkeypatch):
+    monkeypatch.setattr("palabra_ai.client.READY_TIMEOUT", 5)
     commands = []
 
     async def handler(ws):
@@ -85,7 +112,7 @@ async def test_slow_start_does_not_queue_repeated_readiness_polls(monkeypatch):
             command = json.loads(raw)["message_type"]
             commands.append(command)
             if command == "set_task":
-                await asyncio.sleep(0.1)  # command processing blocks while the pipeline starts
+                await asyncio.sleep(2.2)  # longer than the old get_task fallback delay
                 await ws.send(
                     json.dumps(
                         {
@@ -108,26 +135,27 @@ async def test_slow_start_does_not_queue_repeated_readiness_polls(monkeypatch):
             await session.end()
             async for _ in session:
                 pass
-        assert commands == ["set_task", "get_task", "end_task"]
+        assert commands == ["set_task", "end_task"]
 
 
-@pytest.mark.parametrize("behavior", ["close", "wrong_status", "stale_current_task"])
+@pytest.mark.parametrize(
+    "behavior", ["close", "wrong_command", "wrong_event", "paused", "stale_current_task"]
+)
 async def test_setup_does_not_accept_unrelated_events(monkeypatch, behavior):
     monkeypatch.setattr("palabra_ai.client.READY_TIMEOUT", 0.15)
-    monkeypatch.setattr("palabra_ai.client.GET_TASK_INTERVAL", 0.2)
 
     async def handler(ws):
         await ws.recv()
         if behavior == "close":
             await ws.close()
             return
-        if behavior == "wrong_status":
+        if behavior != "stale_current_task":
             msg = {
                 "message_type": "task_status",
                 "data": {
-                    "command": "interrupt_task",
-                    "event": "interrupted",
-                    "task_status": "running",
+                    "command": "interrupt_task" if behavior == "wrong_command" else "set_task",
+                    "event": "queued" if behavior == "wrong_event" else "started",
+                    "task_status": "paused" if behavior == "paused" else "running",
                 },
             }
         else:
@@ -143,7 +171,8 @@ async def test_setup_does_not_accept_unrelated_events(monkeypatch, behavior):
                 pytest.fail("Unrelated messages must not confirm our set_task")
 
 
-async def test_start_ack_waits_without_consuming_stream_events(monkeypatch):
+@pytest.mark.parametrize("event", ["started", "updated", "unchanged", "resumed"])
+async def test_start_ack_waits_without_consuming_stream_events(monkeypatch, event):
     applied = asyncio.Event()
 
     async def handler(ws):
@@ -156,7 +185,7 @@ async def test_start_ack_waits_without_consuming_stream_events(monkeypatch):
                     "message_type": "task_status",
                     "data": {
                         "command": "set_task",
-                        "event": "started",
+                        "event": event,
                         "task_status": "running",
                     },
                 }
@@ -175,7 +204,7 @@ async def test_start_ack_waits_without_consuming_stream_events(monkeypatch):
             applied.set()
             await asyncio.wait_for(enter, 1)
             assert (await session.receive(timeout=1)).type == "warning"
-            assert isinstance(await session.receive(timeout=1), TaskStatus)
+            assert await session.receive(timeout=1) == TaskStatus("task_status", "set_task", event, "running")
         finally:
             enter.cancel()
             await asyncio.gather(enter, return_exceptions=True)

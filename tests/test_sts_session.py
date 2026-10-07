@@ -2,8 +2,7 @@
 
 The fake server reproduces the documented behaviour:
 
-- ``task_status`` acknowledges control commands; legacy mode has no
-  acknowledgements and readiness is discovered through ``get_task``;
+- ``task_status`` acknowledges control commands and confirms readiness;
 - ``input_audio_data`` produces transcriptions and flat ``output_audio_data``;
 - ``end_task`` emits ``end_of_stream`` and closes the connection.
 """
@@ -21,8 +20,7 @@ pytestmark = pytest.mark.asyncio
 
 
 class FakeServer:
-    def __init__(self, *, acknowledge=True):
-        self.acknowledge = acknowledge
+    def __init__(self):
         self.commands = []
         self.paused = False
         self.received_audio_chunks = 0
@@ -49,30 +47,31 @@ class FakeServer:
             self.commands.append(mtype)
 
             async def status(event, state="running", *, command=mtype, **extra):
-                if self.acknowledge:
-                    await ws.send(
-                        json.dumps(
-                            {
-                                "message_type": "task_status",
-                                "data": {
-                                    "command": command,
-                                    "event": event,
-                                    "task_status": state,
-                                    **extra,
-                                },
-                            }
-                        )
+                await ws.send(
+                    json.dumps(
+                        {
+                            "message_type": "task_status",
+                            "data": {
+                                "command": command,
+                                "event": event,
+                                "task_status": state,
+                                **extra,
+                            },
+                        }
                     )
+                )
 
             if mtype == "set_task":
-                event = "resumed" if self.paused else "updated" if self.started else "started"
+                if not self.started:
+                    event = "started"
+                elif self.paused:
+                    event = "resumed"
+                else:
+                    event = "unchanged" if data == self.task else "updated"
                 self.task = data
                 self.paused = False
-                if self.acknowledge:
-                    self.started = True
-                    await status(event)
-                else:
-                    asyncio.get_event_loop().call_later(0.3, self._start)
+                self.started = True
+                await status(event)
             elif mtype == "pause_task":
                 self.paused = True
                 await status("paused", "paused")
@@ -136,13 +135,9 @@ class FakeServer:
                     )
                 )
             elif mtype == "end_task":
-                await status("ending", "ending")
                 await ws.send(json.dumps({"message_type": "end_of_stream", "data": {}}))
                 await ws.close()
                 return
-
-    def _start(self):
-        self.started = True
 
 
 @pytest.fixture
@@ -237,8 +232,9 @@ async def test_send_pcm_paces_realtime(palabra, monkeypatch):
         assert srv.received_audio_chunks == 3
 
 
-async def test_rejected_set_task_fails_fast_with_task_error(palabra, monkeypatch):
-    """An ``error`` other than NOT_FOUND before readiness must raise TaskError
+@pytest.mark.parametrize("code", ["VALIDATION_ERROR", "NOT_FOUND"])
+async def test_rejected_set_task_fails_fast_with_task_error(palabra, monkeypatch, code):
+    """Any ``error`` before readiness must raise TaskError
     immediately (with the server's reason), not NotReadyError after 30 s."""
     from palabra_ai import TaskError
 
@@ -249,7 +245,7 @@ async def test_rejected_set_task_fails_fast_with_task_error(palabra, monkeypatch
                     json.dumps(
                         {
                             "message_type": "error",
-                            "data": {"code": "VALIDATION_ERROR", "desc": "bad sample_rate"},
+                            "data": {"code": code, "desc": "task rejected"},
                         }
                     )
                 )
@@ -263,7 +259,7 @@ async def test_rejected_set_task_fails_fast_with_task_error(palabra, monkeypatch
         with pytest.raises(TaskError) as ei:
             async with palabra.translation("en", "es"):
                 pass
-        assert ei.value.code == "VALIDATION_ERROR"
+        assert ei.value.code == code
         assert loop.time() - t0 < 5  # no 30 s readiness timeout
     finally:
         server.close()
