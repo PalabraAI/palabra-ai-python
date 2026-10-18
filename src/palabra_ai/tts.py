@@ -127,14 +127,19 @@ class TtsSession:
         *,
         eos: bool = False,
         generation_id: str | None = None,
+        reset_context: bool = False,
         **voice_overrides: Any,
     ) -> None:
-        """One raw text message (max 256 chars, the server limit).
+        """One raw text message (max 1024 chars, the server limit).
 
         voice_overrides (voice_id/speed/deaccent_strength) apply to this and
         subsequent messages. Rate limit: 50 text messages per second.
 
-        Raises ValueError if text is empty or longer than 256 characters --
+        reset_context=True makes the model drop the context carried over from
+        previous texts of the session before speaking this one -- use it on the
+        first message of an unrelated passage (new dialogue turn, new topic).
+
+        Raises ValueError if text is empty or longer than 1024 characters --
         splitting is the caller's responsibility (mark the last piece of a
         sentence with eos=True).
         """
@@ -145,19 +150,30 @@ class TtsSession:
         payload: dict[str, Any] = {"type": "text", "text": text, "is_eos": eos}
         if generation_id is not None:
             payload["generation_id"] = generation_id
+        if reset_context:
+            payload["reset_context"] = True
         if voice_overrides:
             payload["voice_options"] = voice_overrides
         await self._send(payload)
 
-    async def synthesize(self, text: str, *, timeout: float = 60.0, **voice_overrides: Any) -> bytes:
-        """One sentence (max 256 chars) -> audio bytes.
+    async def synthesize(
+        self,
+        text: str,
+        *,
+        timeout: float = 60.0,
+        reset_context: bool = False,
+        **voice_overrides: Any,
+    ) -> bytes:
+        """One sentence (max 1024 chars) -> audio bytes.
 
         Sends the text with eos=True and collects chunks until last_chunk.
         Chunks of other generations queued in between are dropped; raises
         TaskError on a server error event.
         """
         gen = uuid.uuid4().hex[:8]
-        await self.send_text(text, eos=True, generation_id=gen, **voice_overrides)
+        await self.send_text(
+            text, eos=True, generation_id=gen, reset_context=reset_context, **voice_overrides
+        )
         out = bytearray()
         loop = asyncio.get_running_loop()
         deadline = loop.time() + timeout

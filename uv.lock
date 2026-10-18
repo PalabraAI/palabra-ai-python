@@ -391,7 +391,7 @@ wheels = [
 
 [[package]]
 name = "palabra-ai"
-version = "2.0.2"
+version = "2.2.1"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },

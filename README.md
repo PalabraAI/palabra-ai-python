@@ -302,7 +302,13 @@ async with palabra.tts(language="en", voice_id="default_low") as tts:
     await tts.cancel() # stop current synthesis, session stays open
 ```
 
-Each `send_text()` message is limited to 256 characters (the server limit); longer text raises `ValueError` -- splitting is up to you.
+Each `send_text()` message is limited to 1024 characters (the server limit); longer text raises `ValueError` -- splitting is up to you.
+
+Within a session the model carries context from the text it has already spoken, so consecutive sentences sound continuous. Pass `reset_context=True` (to `send_text()` or `synthesize()`) on the first message of an unrelated passage -- a new dialogue turn, a new topic, a reply after `cancel()` -- to start it with a clean context:
+
+```python
+await tts.send_text("Let's move on to the next question.", eos=True, reset_context=True)
+```
 
 `synthesize()` -- one sentence in, audio bytes out:
 
